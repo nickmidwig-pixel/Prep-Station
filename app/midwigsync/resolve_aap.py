@@ -35,6 +35,7 @@ def plan_timeline(refs, sources, fps, min_piece_s=2.0):
     for s in sources:
         if s['roll'] not in rolls:
             rolls.append(s['roll'])
+    # every mono track that is a reference somewhere still needs its own track for the other stretches
     tracks = [dict(index=1, name='REF', kind='ref', channels=1)]
     for i, r in enumerate(rolls):
         ch = max(s['channels'] for s in sources if s['roll'] == r)
@@ -51,10 +52,12 @@ def plan_timeline(refs, sources, fps, min_piece_s=2.0):
 
     for r in sorted(refs, key=lambda r: r['start']):
         r_in, r_out = fr(r['start'], 'ceil'), fr(r['start'] + r['length'], 'floor')
-        items.append(dict(track=1, path=r['path'], name=r['name'], src_in=r_in - Fraction(r['start']) / spf,
-                          src_out=r_out - Fraction(r['start']) / spf, record=r_in, kind='ref',
-                          abs_in=r_in, abs_out=r_out))
+        f0 = Fraction(r.get('file_start', r['start'])) / spf      # a reference piece can start inside its file
+        items.append(dict(track=1, path=r['path'], name=r['name'], src_in=r_in - f0,
+                          src_out=r_out - f0, record=r_in, kind='ref', abs_in=r_in, abs_out=r_out))
         for s in sources:
+            if s['path'] == r['path']:
+                continue                         # the reference mic itself isn't aligned to itself
             a = max(r['start'], s['start'])
             b = min(r['start'] + r['length'], s['start'] + s['length'])
             if b - a < min_piece_s * TC.SR:

@@ -41,8 +41,10 @@ def ncc_lag(o_ext, a):
 
 
 class Assembler:
-    def __init__(self, sources, render_files, out_dir, log=print, progress=None, note='', cancel=None):
-        """sources: [dict(path, name, start, roll)]  (start = absolute 48k samples of the file's first sample)"""
+    def __init__(self, sources, render_files, out_dir, log=print, progress=None, note='', cancel=None, ref_windows=None):
+        """sources: [dict(path, name, start, roll, out_path?)]  (start = absolute 48k samples of the file's first sample)
+        ref_windows: {source path: [(a, b)]} where that source IS the reference (copied through unchanged)."""
+        self.ref_windows = ref_windows or {}
         self.log = log
         self.progress = progress or (lambda *a: None)
         self.cancel = cancel or (lambda: False)
@@ -117,11 +119,22 @@ class Assembler:
                 r = next(x for x in self.rends if x['path'] == pc['render'])
                 pc['start_edge'] = self._edge(o, r, pc['a'], pc['b'], 'start')
                 pc['end_edge'] = self._edge(o, r, pc['a'], pc['b'], 'end')
+            for a, b in self.ref_windows.get(o['path'], []):
+                a, b = max(a, S), min(b, E)
+                if b - a >= SR // 10:      # this track is the reference here: offset 0 by definition
+                    pieces.append(dict(a=a, b=b, render=None, start_edge=dict(L=0, cc=1.0, t=a),
+                                       end_edge=dict(L=0, cc=1.0, t=b)))
+            pieces.sort(key=lambda p: p['a'])
+            for p0, p1 in zip(pieces, pieces[1:]):
+                if p1['a'] < p0['b']:
+                    p0['b'] = p1['a'] = (p0['b'] + p1['a']) // 2
             self.plans[stem] = dict(pieces=pieces)
         # every confident edge, for borrowing
         edges = []
         for stem, pl in self.plans.items():
             for pc in pl['pieces']:
+                if pc.get('render') is None:
+                    continue                      # a reference stretch says nothing about the other tracks
                 for e in (pc['start_edge'], pc['end_edge']):
                     if abs(e['cc']) > CONF:
                         edges.append((e['t'], e['L'], stem))
@@ -174,7 +187,7 @@ class Assembler:
                         segs.append([cur, pc['a'], 'gap', eb['L'], 1 if eb['cc'] > 0 else -1])
                     else:
                         segs += ramp(cur, pc['a'], eb, ea)
-                segs.append([pc['a'], pc['b'], 'aap', 0, pc['render']])
+                segs.append([pc['a'], pc['b'], 'aap', 0, pc['render']] if pc['render'] else [pc['a'], pc['b'], 'ref', 0, 1])
                 cur = pc['b']
             if cur < E:
                 e = edge_ok(pcs[-1]['end_edge']) if pcs else None
@@ -185,7 +198,7 @@ class Assembler:
                     segs.append([cur, E, 'gap', L, pol])
             pl['segs'] = segs
             pl['flags'] = flags
-            pl['aligned_s'] = round(sum(s[1] - s[0] for s in segs if s[2] == 'aap') / SR, 1)
+            pl['aligned_s'] = round(sum(s[1] - s[0] for s in segs if s[2] in ('aap', 'ref')) / SR, 1)
             pl['total_s'] = round(o['n'] / SR, 1)
         return self.plans
 
@@ -195,6 +208,8 @@ class Assembler:
         if kind == 'aap':
             r = rmap[x]
             return self._rend(r, t0, n)
+        if kind == 'ref':
+            return self._orig(o, t0, n)
         return self._orig(o, t0 + L, n) * x
 
     def _block(self, o, segs, t0, t1, rmap):
@@ -230,8 +245,9 @@ class Assembler:
             pl = self.plans[stem]
             w = o['info']
             od = os.path.join(self.out_dir, o['roll'])
-            fn = os.path.join(od, (out_names or {}).get(stem, stem + '_ALN') + '.WAV')
-            n_al = sum(1 for s in pl['segs'] if s[2] == 'aap')
+            fn = o.get('out_path') or os.path.join(od, (out_names or {}).get(stem, stem + '_ALN') + '.WAV')
+            os.makedirs(os.path.dirname(fn), exist_ok=True)
+            n_al = sum(1 for s in pl['segs'] if s[2] in ('aap', 'ref'))
             hist = (f'A=PCM,F={w.sr},W={w.bits},M={"mono" if w.channels == 1 else w.channels},'
                     f'T=Auto-Align Post 2 ({n_al} sections) ref {self.note}; {APP_NAME}\r\n')
             if w.bext_raw:

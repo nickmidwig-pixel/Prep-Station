@@ -15,6 +15,8 @@ FLAG_TEXT = {
     'fps_mismatch': 'different frame rate', 'no_audio': 'no audio', 'ubits': 'user bits differ',
     'short_silent': 'short accidental clip, skipped', 'sync_corrected': 'timecode corrected by waveform',
     'sync_found': 'placed by waveform', 'sync_failed': 'could not be placed (left out)',
+    'sync_manual': 'timecode set by hand', 'ltc': 'timecode read from LTC audio', 'converted': 'converted to 48 kHz WAV',
+    'raw': 'RAW camera file (audio + timecode only)', 'duplicate': 'duplicate of another file (left out)',
 }
 
 
@@ -58,6 +60,12 @@ def write_report(path, job, project, sync_report, stamped, aap_info, aligned, ve
     w = L.append
     w(f"{APP_NAME.upper()} REPORT — {job}")
     w(f"Generated {dt.datetime.now().strftime('%Y-%m-%d %H:%M')}   Frame rate {TC.rate_label(fps)}{' DF' if project.df else ''}")
+    mode = settings.get('_mode')
+    if mode == 'audio':
+        w('Mode: audio only (reference mic chosen per stretch)')
+    elif mode == 'camera':
+        ref = settings.get('_ref') or {}
+        w(f"Mode: camera reference {ref.get('roll', '?')} ch {ref.get('channel', 0) + 1}")
     w('=' * 78)
     w('')
     w('INVENTORY')
@@ -109,15 +117,27 @@ def write_report(path, job, project, sync_report, stamped, aap_info, aligned, ve
     if aap_info:
         for k, v in aap_info.items():
             w(f'  {k}: {v}')
+    rs = settings.get('_ref_summary') or []
+    if rs:
+        w('')
+        w('  Reference mic, stretch by stretch:')
+        for s in rs[:300]:
+            w(f"   {TC.samples_to_tc(s['start'], fps)} – {TC.samples_to_tc(s['end'], fps)}  {s['track']} ({s['role']})")
     if aligned:
         w('')
-        w('  Aligned ISOs (same start TC + length as the source, metadata carried over):')
+        w('  Aligned files (same start TC + length as the source, metadata carried over):')
         for a in aligned:
             v = verify.get(a['aligned'], []) if verify else []
             lags = [abs(l) for (_, l, cc) in v if abs(cc) > 0.2]
             vtxt = f"  check vs reference: {max(lags)} samples max" if lags else ''
-            w(f"   {os.path.basename(a['aligned'])}: {a['sections']} AAP sections, {a['aligned_s'] / 60:.1f} of "
-              f"{a['total_s'] / 60:.1f} min under camera{vtxt}")
+            if a.get('passthrough'):
+                w(f"   {os.path.basename(a['aligned'])}: kept as recorded ({'; '.join(a['flags'])})")
+                continue
+            if a.get('tracks'):
+                w(f"   {os.path.basename(a['aligned'])}: {a['tracks']}{vtxt}")
+                continue
+            w(f"   {os.path.basename(a['aligned'])}: {a['sections']} aligned sections, {a['aligned_s'] / 60:.1f} of "
+              f"{a['total_s'] / 60:.1f} min covered by the reference{vtxt}")
             for f in a['flags']:
                 w(f"      note: {f}")
     w('')

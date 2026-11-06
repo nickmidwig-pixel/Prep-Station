@@ -104,7 +104,8 @@ def main():
             # correlation and residual
             cc = float(np.dot(x, y) / np.sqrt(np.dot(x, x) * np.dot(y, y) + 1e-20))
             errs.append(cc)
-        print(f"  {os.path.basename(a['aligned']):40} sections={a['sections']} aligned={a['aligned_s']:.0f}/{a['total_s']:.0f}s "
+        stats = a.get('tracks') or f"sections={a['sections']} aligned={a['aligned_s']:.0f}/{a['total_s']:.0f}s"
+        print(f"  {os.path.basename(a['aligned']):40} {stats} "
               f"min_cc_vs_ideal={min(errs):.3f} flags={a['flags']}")
     print('\nVERIFY vs REF (lag samples):')
     for k, v in j.verify.items():

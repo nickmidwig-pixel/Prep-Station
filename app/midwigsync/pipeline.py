@@ -21,6 +21,7 @@ from .assemble import Assembler
 from .polywav import build_polywavs
 from .xmlexport import write_day_xml
 from .report import verify_against_ref, write_report
+from . import refplan as RP
 
 SR = TC.SR
 from .brand import ENV_CACHE, APP_NAME, OUT_SUFFIX, WORK_DIR
@@ -32,6 +33,9 @@ DEFAULTS = dict(
     aap_auto_press=True, render_dir='',
     poly_aligned=True, poly_unaligned=False, chunk_mode='max',
     xml_iso=True, xml_poly=True, short_clip_s=20,
+    mode='auto',                   # 'auto' | 'camera' | 'audio'  (auto: audio-only when no camera has sound)
+    aligned_names='auto',          # 'auto' | 'same' | 'suffix'   (auto: same names for per-take deliveries)
+    poly_per_take=False,           # also make day-long polywavs from a sound mixer's per-take files
 )
 
 
@@ -115,6 +119,8 @@ class Job:
         self.verify = {}
         self.polys = []
         self.xmls = []
+        self.ref_summary = []
+        self._packs, self._passthru, self._ref_windows, self._out_names, self._names = [], [], {}, {}, 'suffix'
 
     # ------------------------------------------------------------ plumbing
     def log(self, msg):
@@ -143,8 +149,22 @@ class Job:
         self.log(f'— {name}')
 
     # ------------------------------------------------------------ helpers
+    def mode(self):
+        m = self.s.get('mode') or 'auto'
+        if m in ('camera', 'audio'):
+            return m if (m == 'audio' or self.p.default_reference()) else 'audio'
+        return 'camera' if self.p.default_reference() else 'audio'
+
     def ref(self):
+        if self.mode() == 'audio':
+            return None
         return self.s.get('reference') or self.p.default_reference()
+
+    def names_mode(self, sources):
+        m = self.s.get('aligned_names') or 'auto'
+        if m in ('same', 'suffix'):
+            return m
+        return 'same' if (self.mode() == 'audio' and RP.delivery_style(sources) == 'per_take') else 'suffix'
 
     def audio_sources(self, use_stamped=True):
         """Included audio clips with a position, in track order (numbered rolls first)."""
@@ -178,6 +198,11 @@ class Job:
         try:
             os.makedirs(self.mid, exist_ok=True)
             self.log(f"Job {self.s['job_name']} → {self.out}")
+            if self.mode() == 'audio':
+                self.log('Audio only: the reference mic is chosen for each stretch (boom when there is one).')
+            else:
+                r = self.ref()
+                self.log(f"Camera reference: {r['roll']} ch {r['channel'] + 1}")
             self.step('Checking timecode')
             self.do_sync()
             self.step('Writing timecode to copies')
@@ -210,7 +235,8 @@ class Job:
     def save_state(self):
         try:
             with open(os.path.join(self.mid, 'job.json'), 'w') as f:
-                json.dump(dict(settings={k: v for k, v in self.s.items()}, sync=self.sync_report,
+                json.dump(dict(settings={k: v for k, v in self.s.items() if not k.startswith('_')}, sync=self.sync_report,
+                               mode=self.mode(), reference_plan=self.ref_summary,
                                clips=[{k: v for k, v in c.items() if k in ('path', 'roll', 'start', 'orig_start', 'flags',
                                                                            'include', 'sync', 'stamped_path')}
                                       for c in self.p.clips],
@@ -352,17 +378,40 @@ class Job:
         return out_names
 
     def do_aap(self):
-        sources = self.audio_sources()
+        files = self.audio_sources()
+        fps, df = self.p.fps, self.p.df
+        self.log('Recorder tracks:')
+        sources, self._packs, self._passthru = RP.split_sources(files, os.path.join(self.mid, 'split'), fps, df, log=self.log)
+        self._names = self.names_mode(files)
+        self._ref_windows = {}
+        if self.mode() == 'audio':
+            refs, summary = RP.plan_refs(sources, cache_dir=ENV_CACHE, log=self.log)
+            self.ref_summary = summary
+            self._ref_windows = RP.ref_windows(refs)
+            for s in summary[:40]:
+                self.log(f"  reference {TC.samples_to_tc(s['start'], fps, df)}–{TC.samples_to_tc(s['end'], fps, df)}: "
+                         f"{s['track']} ({s['role']})")
+            if len(summary) > 40:
+                self.log(f'  … {len(summary) - 40} more stretches (all in job.json)')
+            seen, self.refs = set(), []
+            for s in sources:           # for the alignment check: every mono that served as a reference
+                if s['path'] in self._ref_windows and s['path'] not in seen:
+                    seen.add(s['path'])
+                    self.refs.append(dict(path=s['path'], name=s['name'], start=s['start'], length=s['length']))
+        else:
+            refs = self.refs
         self._out_names = self._unique_sources(sources)
-        if not self.refs:
-            self.log('No reference camera audio, so Auto-Align has nothing to align to. Skipping.')
-            self.aap_info['status'] = 'skipped: no reference camera'
+        if self._names == 'same':
+            self._out_names = {k: v[:-4] if v.endswith('_ALN') else v for k, v in self._out_names.items()}
+        if not refs:
+            self.log('No reference to align to (no camera audio and no usable boom or lav). Skipping Auto-Align.')
+            self.aap_info['status'] = 'skipped: nothing to use as a reference'
             return
-        plan = RA.plan_timeline(self.refs, sources, self.p.fps)
+        plan = RA.plan_timeline(refs, sources, self.p.fps)
         with open(os.path.join(self.mid, 'aap_plan.json'), 'w') as f:
             json.dump(plan, f, indent=1, default=str)
         n_items = sum(1 for i in plan['items'] if i['kind'] == 'source')
-        self.log(f"Resolve timeline: {len(self.refs)} reference clip(s) on A1, {n_items} ISO piece(s) on "
+        self.log(f"Resolve timeline: {len(refs)} reference piece(s) on A1, {n_items} piece(s) to align on "
                  f"A2–A{len(plan['tracks'])}")
         render_dir = self.s.get('render_dir') or os.path.join(self.out, 'AAP_RENDERS')
         os.makedirs(render_dir, exist_ok=True)
@@ -442,21 +491,51 @@ class Job:
 
     def _assemble(self, sources, st):
         self.step('Building aligned ISOs')
-        asm = Assembler([dict(path=s['path'], name=s['name'], start=s['start'], roll=s['roll']) for s in sources],
-                        st['files'], os.path.join(self.out, 'ISO_ALIGNED'), log=self.log, progress=self.progress,
-                        note=f"{self.ref()['roll']} CH{self.ref()['channel'] + 1}", cancel=self.cancelled)
+        split_dir = os.path.join(self.mid, 'aligned_split')
+        srcs = []
+        for s in sources:
+            d = dict(path=s['path'], name=s['name'], start=s['start'], roll=s['roll'])
+            if s.get('split'):
+                d['out_path'] = os.path.join(split_dir, s['name'])
+            srcs.append(d)
+        ref = self.ref()
+        note = f"{ref['roll']} CH{ref['channel'] + 1}" if ref else 'chosen per stretch (audio only)'
+        asm = Assembler(srcs, st['files'], os.path.join(self.out, 'ISO_ALIGNED'), log=self.log, progress=self.progress,
+                        note=note, cancel=self.cancelled, ref_windows=self._ref_windows)
         try:
             asm.plan_all()
             asm.save_plan(os.path.join(self.mid, 'assembly_plan.json'))
-            self.aligned = asm.write_all(getattr(self, '_out_names', None))
+            done = asm.write_all(self._out_names)
+            split_paths = {s['path'] for s in sources if s.get('split')}
+            by_mono = {}
+            for a in done:
+                if a['source'] in split_paths:
+                    by_mono[a['source']] = a['aligned']
+            self.aligned = [a for a in done if a['source'] not in split_paths]
+            if self._packs:
+                self.log('Packing aligned tracks back into their multichannel files:')
+
+                def name_for(stem):
+                    return stem if self._names == 'same' else stem + '_ALN'
+                self.aligned += RP.repack(self._packs, by_mono, os.path.join(self.out, 'ISO_ALIGNED'), name_for, note,
+                                          log=self.log, cancel=self.cancelled)
+            for s in self._passthru:      # mix / timecode / silent files: kept as recorded
+                self.aligned.append(dict(source=s['path'], aligned=s['path'], roll=s['roll'], start=s['start'],
+                                         n=WavInfo(s['path']).nframes, sections=0, aligned_s=0.0,
+                                         total_s=round(s['length'] / SR, 1), flags=[f"{s.get('role', 'mix')} track, not aligned"],
+                                         passthrough=True))
         except KeyboardInterrupt:
             raise Cancelled()
-        self.log(f'{len(self.aligned)} aligned ISO(s) written.')
+        self.log(f'{len(self.aligned)} aligned file(s) written.')
         self.step('Checking alignment')
-        self.verify = verify_against_ref(self.aligned, self.refs)
+        self.verify = verify_against_ref([a for a in self.aligned if not a.get('passthrough')], self.refs)
 
     def do_poly(self):
         p = self.p
+        if self.mode() == 'audio' and RP.delivery_style(self.audio_sources()) == 'per_take' and not self.s.get('poly_per_take'):
+            self.log('Per-take recorder files: the aligned takes are the polywavs (same names and track layout), '
+                     'so no day-long polywav. Turn on "Day-long polywavs" to make them anyway.')
+            return
         ub = Counter(c.get('ubits') for c in p.clips if c.get('ubits'))
         ubits = ub.most_common(1)[0][0] if ub else ''
         sets = []
@@ -549,6 +628,7 @@ class Job:
 
     def do_report(self):
         self.report_path = os.path.join(self.out, f"{self.s['job_name']}_REPORT.txt")
+        st = dict(self.s, _mode=self.mode(), _ref=self.ref(), _ref_summary=self.ref_summary)
         write_report(self.report_path, self.s['job_name'], self.p, self.sync_report, self.stamped, self.aap_info,
-                     self.aligned, self.verify, self.polys, self.xmls, self.s, self.log_lines)
+                     self.aligned, self.verify, self.polys, self.xmls, st, self.log_lines)
         self.log(f'Report: {os.path.basename(self.report_path)}')
