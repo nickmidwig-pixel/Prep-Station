@@ -14,6 +14,7 @@ import numpy as np
 from . import tc as TC
 from .bwf import WavInfo, WavWriter, build_bext
 from .resolve_aap import RENDER_RE
+from .brand import APP_NAME
 
 SR = TC.SR
 XF = 480                 # 10 ms crossfades
@@ -232,11 +233,11 @@ class Assembler:
             fn = os.path.join(od, (out_names or {}).get(stem, stem + '_ALN') + '.WAV')
             n_al = sum(1 for s in pl['segs'] if s[2] == 'aap')
             hist = (f'A=PCM,F={w.sr},W={w.bits},M={"mono" if w.channels == 1 else w.channels},'
-                    f'T=Auto-Align Post 2 ({n_al} sections) ref {self.note}; Midwig Sync\r\n')
+                    f'T=Auto-Align Post 2 ({n_al} sections) ref {self.note}; {APP_NAME}\r\n')
             if w.bext_raw:
                 be = build_bext(base=w.bext_raw, coding_history=hist)
             else:
-                be = build_bext('', 'Midwig Sync', o['roll'], '', '', o['start'], hist)
+                be = build_bext('', APP_NAME, o['roll'], '', '', o['start'], hist)
             ixml = w.ixml_raw.split(b'\0')[0] if w.ixml_raw else None
             fmt = w.format_tag if w.format_tag in (1, 3) else 1
             ww = WavWriter(fn, o['n'], w.channels, w.sr, w.bits, fmt, be, ixml)

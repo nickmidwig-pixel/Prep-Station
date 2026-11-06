@@ -1,4 +1,4 @@
-"""Midwig Sync window (pywebview). Python owns the project and the job; the page just shows them."""
+"""App window (pywebview). Python owns the project and the job; the page just shows them."""
 import json
 import os
 import subprocess
@@ -13,7 +13,7 @@ from . import resolve_aap as RA
 from .manual import ClipTools, parse_tc_input
 
 UI = os.path.join(os.path.dirname(__file__), 'ui', 'index.html')
-SETTINGS_FILE = os.path.expanduser('~/Library/Application Support/Midwig Sync/settings.json')
+from .brand import APP_NAME, APP_VERSION, SETTINGS_FILE, OUT_SUFFIX
 
 
 def load_prefs():
@@ -62,7 +62,7 @@ class Api:
         pj = self.p.to_json()
         s = {k: v for k, v in self.settings.items() if not k.startswith('_')}
         return dict(project=pj, settings=s, running=bool(self.job and self.job_thread and self.job_thread.is_alive()),
-                    scanning=self.scanning, platform=sys.platform)
+                    scanning=self.scanning, platform=sys.platform, app=dict(name=APP_NAME, version=APP_VERSION))
 
     job_thread = None
 
@@ -127,7 +127,7 @@ class Api:
         res = self.window.create_file_dialog(self._dlg('FOLDER'), allow_multiple=False)
         if res:
             base = res[0] if isinstance(res, (list, tuple)) else res
-            self.settings['out_dir'] = os.path.join(base, f"{self.settings.get('job_name') or 'MIDWIG'}_MIDWIG")
+            self.settings['out_dir'] = os.path.join(base, f"{self.settings.get('job_name') or 'JOB'}{OUT_SUFFIX}")
             self.user_out = True
         return self._state()
 
@@ -203,7 +203,7 @@ class Api:
         def work():
             try:
                 if not RA.ax_trusted(prompt=True):
-                    self.emit('log', 'Give Midwig Sync Accessibility access in System Settings › Privacy & Security, then try again.')
+                    self.emit('log', f'Give {APP_NAME} Accessibility access in System Settings › Privacy & Security, then try again.')
                     return
                 RA.open_aap_panel(lambda m: self.emit('log', m))
                 ok = RA.press_render(lambda m: self.emit('log', m), wait_s=20)
@@ -320,16 +320,16 @@ class Api:
 
 
 def _mac_identity():
-    """Show 'Midwig Sync' + its icon in the Dock and menu bar (we run inside a plain Python process)."""
+    """Show the app's name + icon in the Dock and menu bar (we run inside a plain Python process)."""
     if sys.platform != 'darwin':
         return
     try:
         from Foundation import NSBundle
         info = NSBundle.mainBundle().infoDictionary()
         if info is not None:
-            info['CFBundleName'] = 'Midwig Sync'
+            info['CFBundleName'] = APP_NAME
         from AppKit import NSApplication, NSImage
-        icon = os.environ.get('MIDWIG_ICON')
+        icon = os.environ.get('APP_ICON')
         if icon and os.path.exists(icon):
             NSApplication.sharedApplication().setApplicationIconImage_(NSImage.alloc().initWithContentsOfFile_(icon))
     except Exception:  # noqa: BLE001
@@ -342,7 +342,7 @@ def main():
     _mac_identity()
 
     api = Api()
-    window = webview.create_window('Midwig Sync', UI, js_api=api, width=1440, height=900, min_size=(1100, 700),
+    window = webview.create_window(APP_NAME, UI, js_api=api, width=1440, height=900, min_size=(1100, 700),
                                    background_color='#1E2328')
     api.window = window
 

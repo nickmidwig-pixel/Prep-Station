@@ -22,7 +22,7 @@ from .xmlexport import write_day_xml
 from .report import verify_against_ref, write_report
 
 SR = TC.SR
-ENV_CACHE = os.path.expanduser('~/Library/Caches/Midwig Sync/envelopes')
+from .brand import ENV_CACHE, APP_NAME, OUT_SUFFIX, WORK_DIR
 
 DEFAULTS = dict(
     job_name='', out_dir='', reference=None,
@@ -50,7 +50,7 @@ class RefSink:
             tcs = TC.samples_to_tc(self.clip['start'], self.fps, self.df)
             name = f"REF_{self.clip['roll']}"
             desc = f'sTRK1={name}\r\ndTC={tcs}\r\ndFRAMERATE={TC.rate_label(self.fps)}ND\r\n'
-            be = build_bext(desc, 'Midwig Sync', self.clip['roll'], '', '', self.clip['start'],
+            be = build_bext(desc, APP_NAME, self.clip['roll'], '', '', self.clip['start'],
                             f'A=PCM,F={sr},W=24,M=mono,T=ch1 of {self.clip["name"]}\r\n')
             fr = self.fps
             ix = build_ixml(self.clip['roll'], TC.rate_label(fr), f'{fr.numerator}/{fr.denominator}', self.df,
@@ -91,7 +91,7 @@ def default_out_dir(project, job):
     if not aud:
         aud = [os.path.dirname(c.get('source_path') or c['path']) for c in project.clips]
     base = os.path.commonpath(aud) if aud else os.path.expanduser('~/Desktop')
-    return os.path.join(base, f'{job}_MIDWIG')
+    return os.path.join(base, f'{job}{OUT_SUFFIX}')
 
 
 class Job:
@@ -105,7 +105,7 @@ class Job:
         self.log_lines = []
         self.state = dict(step='', done=[], error=None)
         self.out = self.s['out_dir']
-        self.mid = os.path.join(self.out, '_MIDWIG')
+        self.mid = os.path.join(self.out, WORK_DIR)
         self.sync_report = None
         self.stamped = []
         self.refs = []
@@ -288,7 +288,7 @@ class Job:
             if not moved and c['kind'] == 'audio' and c.get('converted'):
                 # converted (resampled / non-WAV) audio: put the 48 kHz copy with the job, not in a cache
                 out = os.path.join(self.out, 'CONVERTED_48K', c['roll'], c.get('out_name', c['name']))
-                path, st = ST.stamp_wav(c, out, c['start'], fps, df, note=f"Midwig Sync: {c['converted']}") \
+                path, st = ST.stamp_wav(c, out, c['start'], fps, df, note=f"{APP_NAME}: {c['converted']}") \
                     if c['start'] is not None else (None, None)
                 if path:
                     c['stamped_path'], c['stamped_start'] = path, st
@@ -370,7 +370,7 @@ class Job:
                         RA.dump_aap_tree(os.path.join(self.mid, 'aap_panel_tree.txt'))
                         pressed = RA.press_render(self.log)
                     else:
-                        self.log('macOS has not given Midwig Sync Accessibility access yet, so Render needs your click.')
+                        self.log(f'macOS has not given {APP_NAME} Accessibility access yet, so Render needs your click.')
                 except Exception as e:  # noqa: BLE001
                     self.log(f'Could not press Render automatically: {e}')
             ask = dict(render_dir=render_dir, ref_track=f"Audio {info.get('ref_track', 1)}",

@@ -213,7 +213,7 @@ def _pad(b, n):
     return b[:n].ljust(n, b'\0')
 
 
-def build_bext(description=None, originator='Midwig Sync', originator_ref='', date='', time='',
+def build_bext(description=None, originator=None, originator_ref='', date='', time='',
                time_reference=None, coding_history=b'', base=None):
     """Build a bext chunk payload. With base (an existing raw bext), every field is kept except
     description / time_reference when those are given, and coding_history is appended."""
@@ -229,6 +229,9 @@ def build_bext(description=None, originator='Midwig Sync', originator_ref='', da
         if coding_history:
             hist += coding_history
         return bytes(be) + hist
+    if originator is None:
+        from .brand import APP_NAME
+        originator = APP_NAME
     return (_pad(description or '', 256) + _pad(originator, 32) + _pad(originator_ref, 32) + _pad(date, 10) + _pad(time, 8)
             + struct.pack('<QH', int(time_reference or 0), 1) + b'\0' * 64 + b'\0' * 10 + b'\0' * 180 + coding_history)
 

@@ -6,6 +6,7 @@ import os
 import numpy as np
 
 from . import tc as TC
+from .brand import APP_NAME
 from .bwf import WavInfo, WavWriter, build_bext, build_ixml, wav_header, RIFF_LIMIT
 
 SR = TC.SR
@@ -59,10 +60,10 @@ def build_polywavs(sources, channel_names, out_dir, prefix, fps, df=False, ubits
         if ubits:
             desc += f'dUBITS=${ubits}\r\n'
         desc += f'dFRAMERATE={TC.rate_label(fr)}{"DF" if df else "ND"}\r\nsSPEED={TC.rate_label(fr).zfill(7)}-{"DF" if df else "ND"}\r\n'
-        hist = f'A=PCM,F={SR},W={bits},M={nch},T={note or "Midwig Sync polywav"}\r\n'
+        hist = f'A=PCM,F={SR},W={bits},M={nch},T={note or APP_NAME + " polywav"}\r\n'
         if len(desc) > 256:   # many channels: keep TC fields, names stay in iXML
             desc = f'dTC={tcs}\r\ndUBITS=${ubits}\r\ndFRAMERATE={TC.rate_label(fr)}\r\n'
-        be = build_bext(desc, 'Midwig Sync', project[:32], date, tcs[:8], a, hist)
+        be = build_bext(desc, APP_NAME, project[:32], date, tcs[:8], a, hist)
         ix = build_ixml(project, TC.rate_label(fr), f'{fr.numerator}/{fr.denominator}', df, a, SR, bits,
                         list(channel_names), note=note)
         return be, ix

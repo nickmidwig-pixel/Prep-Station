@@ -2,6 +2,7 @@
 import os
 import subprocess
 from . import tc as TC
+from .brand import APP_NAME
 from .bwf import WavInfo, build_bext, build_ixml, set_desc_field, wav_header, _chunk  # noqa: F401
 import struct
 
@@ -14,9 +15,10 @@ def ffmpeg_exe():
         return 'ffmpeg'
 
 
-def stamp_wav(clip, out_path, start_48k, fps, df=False, note='Midwig Sync waveform-sync', pad_to_frame=True):
+def stamp_wav(clip, out_path, start_48k, fps, df=False, note=None, pad_to_frame=True):
     """Copy with new TC. With pad_to_frame, silence is added at the head so the file starts exactly on a
     frame (NLEs place audio by whole frames). Returns (path, new_start_48k)."""
+    note = note or f'{APP_NAME} waveform-sync'
     w = WavInfo(clip['path'])
     pad = 0
     if pad_to_frame:
@@ -37,7 +39,7 @@ def stamp_wav(clip, out_path, start_48k, fps, df=False, note='Midwig Sync wavefo
         desc = (f"sTRK1={clip['roll']}\r\n" if w.channels == 1 else
                 ''.join(f"sTRK{i + 1}={clip['roll']}_{i + 1}\r\n" for i in range(w.channels)))
         desc += f'dTC={tcs}\r\ndFRAMERATE={TC.rate_label(fps)}{"DF" if df else "ND"}\r\n'
-        be = build_bext(desc, 'Midwig Sync', clip['roll'], '', '', tr, hist)
+        be = build_bext(desc, APP_NAME, clip['roll'], '', '', tr, hist)
     base = w.ixml()
     names = [w.track_names().get(i + 1, clip['roll'] if w.channels == 1 else f"{clip['roll']}_{i + 1}")
              for i in range(w.channels)]

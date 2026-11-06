@@ -12,7 +12,7 @@ from .bwf import WavInfo
 
 ZAX_TOKEN = re.compile(r'_(\d{1,2}[A-Za-z][A-Za-z0-9]*)_\d{2,4}$')
 GOPRO = re.compile(r'^(?:(G[HXL])(\d{2})(\d{4})|GOPR(\d{4})|GP(\d{2})(\d{4}))\.(mp4|MP4)$')
-CONVERT_DIR = os.path.expanduser('~/Library/Caches/Midwig Sync/converted')
+from .brand import CONVERT_DIR  # noqa: E402
 
 
 def gopro_chapter(name):

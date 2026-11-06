@@ -11,8 +11,9 @@ import subprocess
 from . import tc as TC
 from .bwf import WavInfo, build_bext, build_ixml, wav_header, FMT_FLOAT, FMT_PCM
 from .stamp import ffmpeg_exe
+from .brand import APP_NAME, CONVERT_DIR
 
-CACHE = os.path.expanduser('~/Library/Caches/Midwig Sync/converted')
+CACHE = CONVERT_DIR
 
 
 def _dest(src, convert_dir, ext='.WAV'):
@@ -57,9 +58,9 @@ def resample_bwf(src, convert_dir=None):
     nframes = os.path.getsize(raw) // (w.channels * bits // 8)
     tr = w.time_reference
     tr48 = int(round(tr * TC.SR / w.sr)) if tr is not None else 0
-    hist = f'A={"FLOAT" if is_float else "PCM"},F=48000,W={bits},M={w.channels},T=Midwig Sync: resampled from {w.sr} Hz\r\n'
+    hist = f'A={"FLOAT" if is_float else "PCM"},F=48000,W={bits},M={w.channels},T={APP_NAME}: resampled from {w.sr} Hz\r\n'
     be = build_bext(w.description, base=w.bext_raw, time_reference=tr48, coding_history=hist) if w.bext_raw else \
-        build_bext('', 'Midwig Sync', '', '', '', tr48, hist)
+        build_bext('', APP_NAME, '', '', '', tr48, hist)
     ix = None
     base = w.ixml()
     rate, df = w.tc_rate()

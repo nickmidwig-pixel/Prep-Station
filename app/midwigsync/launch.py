@@ -11,8 +11,8 @@ def _alert(title, message):
               'buttons {"Show Log", "OK"} default button "OK"\n return button returned of r\nend run')
     try:
         r = subprocess.run(['osascript', '-', title, message], input=script, capture_output=True, text=True, timeout=600)
-        if 'Show Log' in (r.stdout or '') and os.environ.get('MIDWIG_LOG'):
-            subprocess.run(['open', '-R', os.environ['MIDWIG_LOG']], check=False)
+        if 'Show Log' in (r.stdout or '') and os.environ.get('APP_LOG'):
+            subprocess.run(['open', '-R', os.environ['APP_LOG']], check=False)
     except Exception:  # noqa: BLE001
         pass
 
@@ -28,7 +28,8 @@ def main():
         sys.stderr.write(tb)
         sys.stderr.flush()
         last = tb.strip().splitlines()[-1] if tb.strip() else str(e)
-        _alert('Midwig Sync couldn’t open its window',
+        from .brand import APP_NAME
+        _alert(f'{APP_NAME} couldn’t open its window',
                f'{last[:300]}\n\nThe details are in the log (Show Log). Send it to Claude and it can fix this.')
         sys.exit(1)
 

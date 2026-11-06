@@ -1,10 +1,14 @@
 #!/bin/bash
-# Midwig Sync launcher. First launch sets up a private Python (nothing is installed system-wide);
-# later launches start straight away. Everything is logged to ~/Library/Logs/Midwig Sync/launch.log.
+# @APP_NAME@ launcher. First launch sets up a private Python (nothing is installed system-wide);
+# later launches start straight away. Everything is logged to ~/Library/Logs/@APP_NAME@/launch.log.
 RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
-SUPPORT="$HOME/Library/Application Support/Midwig Sync"
-LOGDIR="$HOME/Library/Logs/Midwig Sync"
+APP="@APP_NAME@"
+SUPPORT="$HOME/Library/Application Support/$APP"
+LOGDIR="$HOME/Library/Logs/$APP"
 VENV="$SUPPORT/venv"
+# earlier builds had another name: reuse their setup instead of downloading everything again
+OLD="$HOME/Library/Application Support/Midwig Sync"
+if [ ! -d "$SUPPORT" ] && [ -d "$OLD/venv" ]; then mv "$OLD" "$SUPPORT" 2>/dev/null; fi
 mkdir -p "$SUPPORT" "$LOGDIR"
 LOG="$LOGDIR/launch.log"
 # keep the log from growing forever
@@ -35,7 +39,7 @@ if [ ! -x "$VENV/bin/python" ] || [ "$(cat "$SUPPORT/.req" 2>/dev/null)" != "$RE
     age=$(( $(date +%s) - $(stat -f %m "$LOCK" 2>/dev/null || echo 0) ))
     if [ "$age" -lt 900 ]; then
       log "setup already running (${age}s), not starting a second one"
-      osascript -e 'display dialog "Midwig Sync is still setting up from when you first opened it. The window appears by itself when it’s ready." buttons {"OK"} default button 1 with title "Midwig Sync" giving up after 30' >/dev/null 2>&1
+      osascript -e 'display dialog "@APP_NAME@ is still setting up from when you first opened it. The window appears by itself when it’s ready." buttons {"OK"} default button 1 with title "@APP_NAME@" giving up after 30' >/dev/null 2>&1
       exit 0
     fi
     log "stale setup lock (${age}s), taking over"
@@ -43,9 +47,9 @@ if [ ! -x "$VENV/bin/python" ] || [ "$(cat "$SUPPORT/.req" 2>/dev/null)" != "$RE
   fi
   trap 'rmdir "$LOCK" 2>/dev/null; [ -n "$DLG" ] && kill "$DLG" 2>/dev/null' EXIT
   # a visible window while setting up, so it never looks like nothing happened
-  osascript -e 'display dialog "Setting up Midwig Sync. This only happens the first time.
+  osascript -e 'display dialog "Setting up @APP_NAME@. This only happens the first time.
 
-It downloads its own copy of Python and the audio tools (about 1–2 minutes, needs internet). The app opens by itself when it’s ready." buttons {"OK"} default button 1 with title "Midwig Sync" giving up after 900' >/dev/null 2>&1 &
+It downloads its own copy of Python and the audio tools (about 1–2 minutes, needs internet). The app opens by itself when it’s ready." buttons {"OK"} default button 1 with title "@APP_NAME@" giving up after 900' >/dev/null 2>&1 &
   DLG=$!
   log "setting up (requirements $REQ_HASH)"
   UV=""
@@ -71,7 +75,7 @@ It downloads its own copy of Python and the audio tools (about 1–2 minutes, ne
   kill "$DLG" 2>/dev/null; DLG=""
   if [ $ok -ne 1 ]; then
     log "SETUP FAILED"
-    alert "Midwig Sync couldn’t finish setting up" "It needs the internet the first time it opens. Check the connection and open it again.
+    alert "@APP_NAME@ couldn’t finish setting up" "It needs the internet the first time it opens. Check the connection and open it again.
 
 If it keeps happening, send Claude the log (Show Log)."
     exit 1
@@ -79,8 +83,8 @@ If it keeps happening, send Claude the log (Show Log)."
   echo "$REQ_HASH" > "$SUPPORT/.req"
   log "setup done"
 fi
-export MIDWIG_ICON="$RES/AppIcon.icns"
-export MIDWIG_LOG="$LOG"
+export APP_ICON="$RES/AppIcon.icns"
+export APP_LOG="$LOG"
 cd "$RES/app" || exit 1
 log "starting window"
 exec "$VENV/bin/python" -m midwigsync.launch "$@" >&3 2>&3

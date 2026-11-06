@@ -11,7 +11,7 @@ from . import media
 from . import stamp as ST
 from .wavesync import SyncAnalyzer, refine
 
-ENV_CACHE = os.path.expanduser('~/Library/Caches/Midwig Sync/envelopes')
+from .brand import ENV_CACHE, APP_NAME
 
 
 def parse_tc_input(text, fps, df=False):
@@ -158,7 +158,7 @@ class ClipTools:
         fixed = os.path.join(out_dir, 'TC_FIXED', c['roll'])
         if c['kind'] == 'audio':
             path, st = ST.stamp_wav(c, os.path.join(fixed, c.get('out_name', c['name'])), c['start'], fps, df,
-                                    note='Midwig Sync: timecode set by hand')
+                                    note=f'{APP_NAME}: timecode set by hand')
             return path
         if c.get('raw_picture'):
             raise ValueError('RAW camera files can’t be rewritten. The XML places this clip at the new timecode instead.')

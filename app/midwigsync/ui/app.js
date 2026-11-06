@@ -12,6 +12,7 @@
 
   const S = { project: null, settings: {}, running: false, scanning: false, sel: null, view: null, done: null };
   const api = () => (window.pywebview && window.pywebview.api) || null;
+  const APP = () => (S.app && S.app.name) || 'Sync Bay';
   const call = async (name, ...args) => { const a = api(); if (!a || !a[name]) return null; try { return await a[name](...args); } catch (e) { console.error(e); return null; } };
 
   // ------------------------------------------------------------------ timecode
@@ -462,7 +463,7 @@
     const un = (P && P.unsupported) || [];
     $('unsup').hidden = !un.length;
     if (un.length) {
-      $('unsupSum').textContent = `${un.length} file${un.length > 1 ? 's' : ''} Midwig Sync can’t read: why, and what to do`;
+      $('unsupSum').textContent = `${un.length} file${un.length > 1 ? 's' : ''} ${APP()} can’t read: why, and what to do`;
       $('unsupList').innerHTML = un.slice(0, 60).map((u) => `<li><b>${esc((u.path || u).split('/').pop())}</b> ${esc(u.why || '')}</li>`).join('');
     }
     const gb = $('goBtn');
@@ -478,6 +479,7 @@
     if (st.clip_msg !== undefined) showClipMsg(st.clip_msg);
     const hadClips = S.project && S.project.clips.length;
     S.project = st.project; S.settings = st.settings || {}; S.running = !!st.running; S.scanning = !!st.scanning;
+    if (st.app) { S.app = st.app; document.title = st.app.name; $('appName').textContent = st.app.name; }
     if (!hadClips || !S.view) fit();
     renderPanel(); renderTable(); renderInspector(); slateIdle(); draw();
   }
@@ -572,11 +574,11 @@
         $('aapContinue').textContent = 'Continue without alignment';
       } else if (d.pressed) {
         $('aapTitle').textContent = 'Auto-Align Post is rendering';
-        $('aapLead').textContent = `Resolve project ${d.project} is open and Auto-Align is rendering. Midwig Sync picks up each file as it lands.`;
+        $('aapLead').textContent = `Resolve project ${d.project} is open and Auto-Align is rendering. ${APP()} picks up each file as it lands.`;
         $('aapContinue').textContent = 'Continue with what’s rendered';
       } else {
         $('aapTitle').textContent = 'Press Render in Auto-Align Post';
-        $('aapLead').textContent = `Resolve project ${d.project || ''} is ready. In Resolve, open Workspace › Workflow Integrations › Auto-Align Post, check these settings, then press Render. Midwig Sync picks up the files as they appear.`;
+        $('aapLead').textContent = `Resolve project ${d.project || ''} is ready. In Resolve, open Workspace › Workflow Integrations › Auto-Align Post, check these settings, then press Render. ${APP()} picks up the files as they appear.`;
         $('aapContinue').textContent = 'Continue with what’s rendered';
       }
       handlers.aap_status({ done: 0, want: d.want || 0 });

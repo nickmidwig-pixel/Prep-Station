@@ -1,4 +1,5 @@
 """Verification + the plain-text report written next to the outputs."""
+from .brand import APP_NAME
 import datetime as dt
 import os
 import numpy as np
@@ -55,7 +56,7 @@ def write_report(path, job, project, sync_report, stamped, aap_info, aligned, ve
     fps = project.fps
     L = []
     w = L.append
-    w(f"MIDWIG SYNC REPORT — {job}")
+    w(f"{APP_NAME.upper()} REPORT — {job}")
     w(f"Generated {dt.datetime.now().strftime('%Y-%m-%d %H:%M')}   Frame rate {TC.rate_label(fps)}{' DF' if project.df else ''}")
     w('=' * 78)
     w('')

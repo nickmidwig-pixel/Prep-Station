@@ -21,9 +21,9 @@ UNSUPPORTED_EXT = {'.ari', '.arx', '.cine', '.dng', '.zax', '.r3d', '.nev', '.zr
 WHY = {
     '.zax': 'Zaxcom MARF file. Convert it to WAV with ZaxConvert first, then drop the WAVs in.',
     '.r3d': 'RED RAW: the audio can\'t be read here. Drop the clip\'s proxy (MOV/MP4) next to it, or export the '
-            'audio from Resolve, and Midwig Sync uses that.',
-    '.nev': 'Nikon N-RAW: the audio can\'t be read here. Keep the camera\'s MP4 proxy next to it and Midwig Sync '
-            'uses that.',
+            'audio from Resolve, and it gets used instead.',
+    '.nev': 'Nikon N-RAW: the audio can\'t be read here. Keep the camera\'s MP4 proxy next to it and '
+            'it gets used instead.',
     '.zraw': 'Z CAM ZRAW: the audio can\'t be read here. Record a ProRes/H.265 proxy or export the audio.',
     '.ari': 'ARRIRAW frames (no audio in the files).',
     '.arx': 'ARRIRAW frames (no audio in the files).',
@@ -472,7 +472,7 @@ def find_media(paths, skip_dirs=()):
     found, unsupported = [], []
     skip_names = {'sub', 'thmbnl', 'take', 'general', 'proxy', 'proxies', '.spotlight-v100', '.fseventsd',
                   '.trashes', '.ds_store', 'thumbnails', 'thumbnail'}
-    out_markers = ('ISO_ALIGNED', 'POLY_ALIGNED', 'POLY_UNALIGNED', 'AAP_RENDERS', 'REF_', 'TC_FIXED', '_MIDWIG')
+    out_markers = ('ISO_ALIGNED', 'POLY_ALIGNED', 'POLY_UNALIGNED', 'AAP_RENDERS', 'REF_', 'TC_FIXED', '_MIDWIG', '_SYNC_WORK', 'CONVERTED_48K', 'EDITORIAL', 'SPLIT_MONO')
     skip_dirs = [os.path.realpath(s) for s in skip_dirs]
 
     def consider(p):
@@ -503,7 +503,7 @@ def find_media(paths, skip_dirs=()):
                 dirs[:] = []
                 continue
             visited.add(rr)
-            if os.path.isdir(os.path.join(root, '_MIDWIG')):   # one of our own output folders
+            if any(os.path.isdir(os.path.join(root, d)) for d in ('_SYNC_WORK', '_MIDWIG')):   # our own output
                 dirs[:] = []
                 continue
             if any(rr == s or rr.startswith(s + os.sep) for s in skip_dirs):
