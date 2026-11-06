@@ -12,7 +12,7 @@
 
   const S = { project: null, settings: {}, running: false, scanning: false, sel: null, view: null, done: null };
   const api = () => (window.pywebview && window.pywebview.api) || null;
-  const APP = () => (S.app && S.app.name) || 'Sync Bay';
+  const APP = () => (S.app && S.app.name) || 'Prep Station';
   const call = async (name, ...args) => { const a = api(); if (!a || !a[name]) return null; try { return await a[name](...args); } catch (e) { console.error(e); return null; } };
 
   // ------------------------------------------------------------------ timecode

@@ -2,9 +2,9 @@
 output folders don't carry the name, so renaming never changes what you deliver."""
 import os
 
-APP_NAME = 'Sync Bay'
+APP_NAME = 'Prep Station'
 APP_VERSION = '1.2'
-BUNDLE_ID = 'com.midwigproductions.syncbay'
+BUNDLE_ID = 'com.midwigproductions.prepstation'
 
 OUT_SUFFIX = '_SYNCED'          # <job>_SYNCED next to the sound folders
 WORK_DIR = '_SYNC_WORK'         # inside it: caches, plans, logs, job.json

@@ -22,6 +22,7 @@ from .polywav import build_polywavs
 from .xmlexport import write_day_xml
 from .report import verify_against_ref, write_report
 from . import refplan as RP
+from . import exports as EX
 
 SR = TC.SR
 from .brand import ENV_CACHE, APP_NAME, OUT_SUFFIX, WORK_DIR
@@ -36,6 +37,8 @@ DEFAULTS = dict(
     mode='auto',                   # 'auto' | 'camera' | 'audio'  (auto: audio-only when no camera has sound)
     aligned_names='auto',          # 'auto' | 'same' | 'suffix'   (auto: same names for per-take deliveries)
     poly_per_take=False,           # also make day-long polywavs from a sound mixer's per-take files
+    export_otio=True, export_aaf=True, export_ale=True, export_csv=True,
+    synced_clips=False,            # camera clips re-wrapped with the aligned sound (copies the picture)
 )
 
 
@@ -577,13 +580,15 @@ class Job:
                 cfps = c.get('fps') or p.fps
                 clips.append(dict(path=path, start=c['start'], length=c['length'], kind='video',
                                   channels=media.total_audio_channels(c), width=c.get('width', 0),
-                                  height=c.get('height', 0), reel=c['roll'], fps=cfps,
+                                  height=c.get('height', 0), reel=c['roll'], fps=cfps, raw=bool(c.get('raw_picture')),
+                                  channels_streams=len(c.get('audio_streams') or []),
                                   media_start_frames=TC.samples_to_frames(media_start, cfps)))
             if clips:
                 label = f"{r['camera']} {r['name']}".strip() if r['camera'] and r['camera'] not in r['name'] else r['name']
                 cams.append(dict(label=label, clips=clips))
-        xml_dir = os.path.join(self.out, 'XML')
+        xml_dir = os.path.join(self.out, 'EDITORIAL')
         job = self.s['job_name']
+        tracks = []
         if self.s['xml_iso']:
             tracks = []
             if self.aligned:
@@ -612,6 +617,7 @@ class Job:
             path = write_day_xml(os.path.join(xml_dir, f'{job}_SYNC_{suffix}.xml'), f'{job} SYNC {suffix}', p.fps, p.df,
                                  cams, tracks)
             self.xmls.append(os.path.relpath(path, self.out))
+        iso_tracks = tracks
         if self.s['xml_poly'] and self.polys:
             folder = 'POLY_ALIGNED' if any(x['folder'] == 'POLY_ALIGNED' for x in self.polys) else 'POLY_UNALIGNED'
             ps = [x for x in self.polys if x['folder'] == folder]
@@ -625,10 +631,61 @@ class Job:
             self.xmls.append(os.path.relpath(path, self.out))
         for x in self.xmls:
             self.log(f'  wrote {x}')
+        self._cams = cams
+        self.do_exports(xml_dir, cams, iso_tracks if self.s['xml_iso'] else [])
+
+    def do_exports(self, xml_dir, cams, tracks):
+        """OTIO / AAF / ALE / CSV / synced clips. A failure here is logged, never fatal."""
+        p, job = self.p, self.s['job_name']
+        os.makedirs(xml_dir, exist_ok=True)
+        by_src = {a['source']: a['aligned'] for a in self.aligned}
+        if not tracks:
+            by = {}
+            for s in self.audio_sources():
+                by.setdefault(s['roll'], []).append(s)
+            tracks = [dict(label=roll if ss[0]['channels'] == 1 else f'{roll}_{ch + 1}', clips=[
+                dict(path=s['path'], start=s['start'], length=s['length'], kind='audio', channels=s['channels'],
+                     src_track=ch + 1, reel=roll) for s in ss]) for roll, ss in by.items() for ch in range(ss[0]['channels'])]
+        jobs = [('export_otio', f'{job}.otio', 'OpenTimelineIO timeline',
+                 lambda path: EX.write_otio(path, job, p.fps, cams, tracks)),
+                ('export_aaf', f'{job}_AUDIO.aaf', 'AAF for Pro Tools / audio post (sound tracks, linked to the WAVs)',
+                 lambda path: EX.write_aaf(path, job, p.fps, p.df, tracks)),
+                ('export_ale', f'{job}.ale', 'Avid Log Exchange', lambda path: EX.write_ale(path, p, by_src)),
+                ('export_csv', f'{job}_CLIPS.csv', 'clip list', lambda path: EX.write_csv(path, p, by_src))]
+        for key, fn, what, write in jobs:
+            if not self.s.get(key):
+                continue
+            path = os.path.join(xml_dir, fn)
+            try:
+                if write(path):
+                    self.xmls.append(os.path.relpath(path, self.out))
+                    self.log(f'  wrote {os.path.relpath(path, self.out)} ({what})')
+            except Exception as e:  # noqa: BLE001
+                self.log(f'  could not write {fn}: {e}')
+        if self.s.get('synced_clips') and cams:
+            self.step('Synced camera clips')
+            try:
+                made = EX.synced_clips(os.path.join(self.out, 'SYNCED_CLIPS'), cams, tracks, p.fps, p.df, ST.ffmpeg_exe(),
+                                       log=self.log, progress=self.progress, cancel=self.cancelled)
+                self.log(f'  {len(made)} synced camera clip(s) in SYNCED_CLIPS/')
+            except KeyboardInterrupt:
+                raise Cancelled()
+            except Exception as e:  # noqa: BLE001
+                self.log(f'  synced clips failed: {e}')
 
     def do_report(self):
         self.report_path = os.path.join(self.out, f"{self.s['job_name']}_REPORT.txt")
         st = dict(self.s, _mode=self.mode(), _ref=self.ref(), _ref_summary=self.ref_summary)
+        try:
+            files = []
+            for d in sorted(os.listdir(self.out)):
+                full = os.path.join(self.out, d)
+                if os.path.isdir(full) and not d.startswith('.'):
+                    n = sum(len(fs) for _, _, fs in os.walk(full))
+                    files.append((d + '/', f'{n} file(s)'))
+            EX.write_readme(os.path.join(self.out, 'READ ME.txt'), self.s['job_name'], self.mode(), files)
+        except Exception as e:  # noqa: BLE001
+            self.log(f'  could not write READ ME: {e}')
         write_report(self.report_path, self.s['job_name'], self.p, self.sync_report, self.stamped, self.aap_info,
                      self.aligned, self.verify, self.polys, self.xmls, st, self.log_lines)
         self.log(f'Report: {os.path.basename(self.report_path)}')
