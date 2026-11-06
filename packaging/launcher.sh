@@ -31,7 +31,7 @@ OSA
   if [ "$btn" = "Show Log" ]; then open -R "$LOG"; fi
 }
 
-REQ_HASH="$(shasum "$RES/requirements.txt" | cut -d' ' -f1)"
+REQ_HASH="$(cat "$RES/requirements.txt" "$RES/requirements-extra.txt" 2>/dev/null | shasum | cut -d' ' -f1)"
 if [ ! -x "$VENV/bin/python" ] || [ "$(cat "$SUPPORT/.req" 2>/dev/null)" != "$REQ_HASH" ]; then
   # only one setup at a time (a second double-click while setting up just says so)
   LOCK="$SUPPORT/.setup.lock"
@@ -69,6 +69,10 @@ It downloads its own copy of Python and the audio tools (about 1–2 minutes, ne
     "$UV" venv --python 3.11 "$VENV" >&3 2>&3 && \
     VIRTUAL_ENV="$VENV" "$UV" pip install --python "$VENV/bin/python" -r "$RES/requirements.txt" >&3 2>&3 && \
     "$VENV/bin/python" -c "import numpy, av, webview, objc, imageio_ffmpeg; print('self-test ok')" >&3 2>&3 && ok=1
+    if [ $ok -eq 1 ] && [ -f "$RES/requirements-extra.txt" ]; then
+      VIRTUAL_ENV="$VENV" "$UV" pip install --python "$VENV/bin/python" -r "$RES/requirements-extra.txt" >&3 2>&3 \
+        && log "extras installed (OTIO, AAF)" || log "extras failed to install: OTIO/AAF exports will be skipped"
+    fi
   else
     log "could not get uv"
   fi

@@ -4,5 +4,3 @@ imageio-ffmpeg>=0.5
 pywebview>=5.3
 pyobjc-framework-ApplicationServices>=10.0; sys_platform == "darwin"
 pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
-opentimelineio>=0.17
-pyaaf2>=1.7

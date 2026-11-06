@@ -11,7 +11,7 @@ sed -e "s/@APP_NAME@/$NAME/g" -e "s/@BUNDLE_ID@/$BID/g" -e "s/@VERSION@/$VERSION
 sed -e "s/@APP_NAME@/$NAME/g" "$ROOT/packaging/launcher.sh" > "$APP/Contents/MacOS/$NAME"
 chmod 755 "$APP/Contents/MacOS/$NAME"
 cp "$ROOT/packaging/AppIcon.icns" "$APP/Contents/Resources/"
-cp "$ROOT/app/requirements.txt" "$APP/Contents/Resources/"
+cp "$ROOT/app/requirements.txt" "$ROOT/app/requirements-extra.txt" "$APP/Contents/Resources/"
 cp -R "$ROOT/app/midwigsync" "$APP/Contents/Resources/app/"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 mkdir -p "$APP/Contents/Resources/dev"
