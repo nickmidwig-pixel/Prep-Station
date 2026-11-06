@@ -35,13 +35,13 @@ grab, SR, FPS, T0 = g['grab'], g['SR'], g['FPS'], g['T0']
 os.makedirs(OUT, exist_ok=True)
 for n in os.listdir(DAY):
     p = os.path.join(DAY, n)
-    if os.path.isdir(p) and not n.endswith('_MIDWIG') and n != 'SOUND':
+    if os.path.isdir(p) and not n.endswith(('_MIDWIG', '_SYNCED')) and n != 'SOUND':
         if not os.path.exists(os.path.join(OUT, n)):
             os.symlink(p, os.path.join(OUT, n))
 os.makedirs(os.path.join(OUT, 'SOUND'), exist_ok=True)
 for n in os.listdir(os.path.join(DAY, 'SOUND')):
     p = os.path.join(DAY, 'SOUND', n)
-    if os.path.isdir(p) and not n.endswith('_MIDWIG') and not os.path.exists(os.path.join(OUT, 'SOUND', n)):
+    if os.path.isdir(p) and not n.endswith(('_MIDWIG', '_SYNCED')) and not os.path.exists(os.path.join(OUT, 'SOUND', n)):
         os.symlink(p, os.path.join(OUT, 'SOUND', n))
 truth = {}
 

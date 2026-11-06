@@ -129,6 +129,18 @@ def frame_fraction(samples, fps):
     return float(abs(x - round(x)))
 
 
+def day_samples(fps):
+    """One timecode day (24:00:00:00) in engine samples."""
+    return frames_to_samples(nominal(fps) * 86400, fps)
+
+
+def wrap(samples, fps):
+    """Engine samples -> samples since timecode midnight (for writing BWF time references)."""
+    if samples is None:
+        return None
+    return int(samples) % day_samples(fps)
+
+
 def fmt_dur(samples):
     s = int(samples) // SR
     h, m, s = s // 3600, s // 60 % 60, s % 60

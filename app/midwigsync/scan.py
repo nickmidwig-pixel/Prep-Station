@@ -1,9 +1,9 @@
 """Turn dropped files into clips grouped by roll (camera card / recorder track), with flags."""
+import datetime as dt
 import os
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from fractions import Fraction
 import numpy as np
 
 from . import tc as TC
@@ -47,6 +47,54 @@ def audio_roll(path):
     if m:
         return m.group(1).upper()
     return folder or 'AUDIO'
+
+
+NIGHT_HOURS = 5          # recordings before 05:00 belong to the night before
+
+
+def _local(ts):
+    """ISO time string (UTC 'Z', with offset, or naive local) -> naive local datetime, or None."""
+    if not ts:
+        return None
+    t = str(ts).strip().replace(' ', 'T')
+    try:
+        if t.endswith('Z'):
+            d = dt.datetime.fromisoformat(t[:-1].split('.')[0]).replace(tzinfo=dt.timezone.utc)
+            return d.astimezone().replace(tzinfo=None)
+        d = dt.datetime.fromisoformat(t.split('.')[0] if '+' not in t[10:] and '-' not in t[10:] else t)
+        if d.tzinfo is not None:
+            d = d.astimezone().replace(tzinfo=None)
+        return d
+    except ValueError:
+        return None
+
+
+def shoot_day(c):
+    """-> (shoot day 'YYYY-MM-DD' or None, trusted). Trusted: the sound recorder's user-bits or bext date, or a
+    recording date the camera wrote into the file. A file's modified date (when it was copied) isn't trusted."""
+    tc_h = (c['orig_start'] / TC.SR / 3600.0) if c.get('orig_start') is not None else None
+    if c['kind'] == 'audio':
+        ub = c.get('ubits') or ''
+        if len(ub) >= 8 and ub[:8].isdigit() and ub[:2] == '20':
+            try:
+                d = dt.date(int(ub[:4]), int(ub[4:6]), int(ub[6:8]))
+                if tc_h is not None and tc_h < NIGHT_HOURS:
+                    d -= dt.timedelta(days=1)
+                return d.isoformat(), True
+            except ValueError:
+                pass
+        bd = c.get('bext_date') or ''
+        if re.match(r'^20\d\d[-:/]\d\d[-:/]\d\d$', bd):
+            try:
+                d = dt.datetime.strptime(bd.replace(':', '-').replace('/', '-') + ' ' +
+                                         (c.get('bext_time') or '12:00:00')[:8].replace('-', ':'), '%Y-%m-%d %H:%M:%S')
+                return (d - dt.timedelta(hours=NIGHT_HOURS)).date().isoformat(), True
+            except ValueError:
+                pass
+    d = _local(c.get('created'))
+    if d is None or d.year < 2000:
+        return None, False
+    return (d - dt.timedelta(hours=NIGHT_HOURS)).date().isoformat(), bool(c.get('created_meta'))
 
 
 def track_number(roll):
@@ -115,8 +163,115 @@ class Project:
             self.clips.append(c)
             new.append(c)
         self.chain_chapters(new)
+        self.mark_duplicates(new)
+        self.assign_days()
         self.analyze()
         return len(files)
+
+    def mark_duplicates(self, new):
+        """The same clip dropped twice (e.g. a card and its backup): keep the first, leave the rest out."""
+        seen = {}
+        for c in self.clips:
+            if c.get('duplicate_of'):
+                continue
+            try:
+                size = os.path.getsize(c.get('source_path') or c['path'])
+            except OSError:
+                size = None
+            key = (c['name'].lower(), size, c['orig_start'], c['length'])
+            if key in seen and seen[key] is not c:
+                if c in new:
+                    c['duplicate_of'] = seen[key]['path']
+                    c['include'] = False
+            else:
+                seen.setdefault(key, c)
+
+    def assign_days(self):
+        """Group clips into shoot days, and unwrap timecode that runs past midnight within a day."""
+        H = TC.SR * 3600
+        for c in self.clips:
+            c['day'], c['day_trusted'] = shoot_day(c)
+            c.pop('date_note', None)
+        strong = [c for c in self.clips if c['day'] and c['day_trusted']]
+        days = sorted({c['day'] for c in strong})
+
+        def span_of(d):
+            st = [(c['orig_start'], c['orig_start'] + c['length']) for c in strong if c['day'] == d and c['orig_start'] is not None]
+            return (min(a for a, _ in st), max(b for _, b in st)) if st else None
+        # a camera whose clock date is off: one roll alone on a date, timecode inside exactly one other day
+        if len(days) > 1:
+            for d in list(days):
+                cl = [c for c in strong if c['day'] == d]
+                if len({c['roll'] for c in cl}) != 1 or len(cl) > 0.25 * len(strong):
+                    continue
+                st = [c['orig_start'] for c in cl if c['orig_start'] is not None]
+                if not st:
+                    continue
+                hits = [e for e in days if e != d and span_of(e) and span_of(e)[0] - H <= min(st) and max(st) <= span_of(e)[1] + H]
+                if len(hits) == 1:
+                    for c in cl:
+                        c['day'] = hits[0]
+                        c['date_note'] = f'camera date says {d}'
+            days = sorted({c['day'] for c in strong})
+        # everything else: the trusted day whose timecode range it falls in; else its own date; else the biggest day
+        if days:
+            spans = {d: span_of(d) for d in days}
+            big = Counter(c['day'] for c in strong).most_common(1)[0][0]
+            for c in self.clips:
+                if c['day'] and c['day_trusted']:
+                    continue
+                own = c['day']
+                pick = None
+                if c['orig_start'] is not None:
+                    for d in ([own] if own in spans else []) + days:
+                        sp = spans.get(d)
+                        if sp and sp[0] - H / 2 <= c['orig_start'] <= sp[1] + H / 2:
+                            pick = d
+                            break
+                if pick is None:
+                    pick = own if own in spans else big
+                if pick != own:
+                    c['date_note'] = ('grouped by its timecode' if c['orig_start'] is not None
+                                      else 'no recording date or timecode: grouped with the main day')
+                c['day'] = pick
+        # midnight: a day with clips both late evening and early morning -> the early ones are after midnight
+        for d in {c['day'] for c in self.clips}:
+            cl = [c for c in self.clips if c['day'] == d and c['orig_start'] is not None]
+            late = any(c['orig_start'] >= 18 * H for c in cl)
+            early = any(c['orig_start'] < 6 * H and not c.get('after_midnight') for c in cl)
+            if late and early:
+                for c in cl:
+                    if c['orig_start'] < 12 * H and not c.get('after_midnight'):
+                        add = TC.day_samples(c.get('fps') or self.fps)
+                        c['orig_start'] += add
+                        if c['start'] is not None:
+                            c['start'] += add
+                        if c.get('manual'):
+                            c['manual']['start'] += add
+                        c['after_midnight'] = True
+
+    def days(self):
+        cnt = defaultdict(lambda: dict(n=0, rolls=set()))
+        for c in self.clips:
+            k = c.get('day') or 'unknown'
+            cnt[k]['n'] += 1
+            cnt[k]['rolls'].add(c['roll'])
+        out = []
+        for k in sorted(cnt):
+            try:
+                label = dt.date.fromisoformat(k).strftime('%a %b %-d')
+            except ValueError:
+                label = 'No date'
+            out.append(dict(key=k, label=label, n=cnt[k]['n'], rolls=sorted(cnt[k]['rolls'])))
+        return out
+
+    def subset(self, day):
+        """A project holding only one day's clips (the clip dicts are shared, so results show in the window)."""
+        p = Project()
+        p.clips = [c for c in self.clips if (c.get('day') or 'unknown') == day]
+        p.unsupported = self.unsupported
+        p.analyze()
+        return p
 
     def chain_chapters(self, clips):
         """GoPro (and similar) split long takes into chapters. A chapter without its own timecode
@@ -184,17 +339,22 @@ class Project:
                 c['start'] = c['manual']['start']
             if c['kind'] == 'audio' and not c.get('fps'):
                 c['fps_assumed'] = True
-        starts = [c['start'] for c in self.clips if c['start'] is not None and c['start'] > TC.SR]
-        med = float(np.median(starts)) if starts else None
-        ubits = Counter(c.get('ubits') for c in self.clips if c['kind'] == 'audio' and c.get('ubits'))
-        main_ub = ubits.most_common(1)[0][0] if ubits else None
+        med_by_day = {}
+        for d in {c.get('day') for c in self.clips}:
+            st = [c['orig_start'] for c in self.clips if c.get('day') == d and c['orig_start'] is not None
+                  and c['orig_start'] > TC.SR]
+            med_by_day[d] = float(np.median(st)) if st else None
+        main_ub = {}
+        for d in med_by_day:
+            ub = Counter(c.get('ubits') for c in self.clips if c.get('day') == d and c['kind'] == 'audio' and c.get('ubits'))
+            main_ub[d] = ub.most_common(1)[0][0] if ub else None
         for c in self.clips:
             f = c['flags']
             if c['orig_start'] is None:
                 f.append('no_tc')
             elif c['orig_start'] < TC.SR:
                 f.append('zero_tc')
-            elif med is not None and abs(c['orig_start'] - med) > 8 * 3600 * TC.SR:
+            elif med_by_day.get(c.get('day')) is not None and abs(c['orig_start'] - med_by_day[c.get('day')]) > 8 * 3600 * TC.SR:
                 f.append('tc_far')
             if c['kind'] == 'audio' and c['sr'] != TC.SR:
                 f.append('sample_rate')
@@ -210,17 +370,28 @@ class Project:
                 f.append('converted')
             if c.get('manual') and 'sync_manual' not in f:
                 f.append('sync_manual')
-            if main_ub and c['kind'] == 'audio' and c.get('ubits') and c['ubits'] != main_ub:
+            if c.get('duplicate_of'):
+                f.append('duplicate')
+            mu = main_ub.get(c.get('day'))
+            if mu and c['kind'] == 'audio' and c.get('ubits') and c['ubits'] != mu:
                 f.append('ubits')
-        # overlaps within a roll (TC jump / reset)
+        # overlaps within a roll (TC jump / reset), per shoot day
         for r in self.rolls().values():
-            cl = [c for c in r['clips'] if c['start'] is not None]
-            cl.sort(key=lambda c: c['start'])
-            for a, b in zip(cl, cl[1:]):
-                if b['start'] < a['start'] + a['length'] - TC.SR // 2:
-                    for c in (a, b):
-                        if 'tc_overlap' not in c['flags']:
-                            c['flags'].append('tc_overlap')
+            by_day = defaultdict(list)
+            for c in r['clips']:
+                if c['start'] is not None and not c.get('duplicate_of'):
+                    by_day[c.get('day')].append(c)
+            for cl in by_day.values():
+                self._overlaps(cl)
+
+    @staticmethod
+    def _overlaps(cl):
+        cl.sort(key=lambda c: c['start'])
+        for a, b in zip(cl, cl[1:]):
+            if b['start'] < a['start'] + a['length'] - TC.SR // 2:
+                for c in (a, b):
+                    if 'tc_overlap' not in c['flags']:
+                        c['flags'].append('tc_overlap')
 
     def check_short_clips(self, max_len_s=20, quiet_db=-40.0):
         """Mark very short accidental audio clips (lav auto-record on power-up) as excluded."""
@@ -292,11 +463,13 @@ class Project:
                 chapter_of=c.get('chapter_of'), audio_from=os.path.basename(c['audio_path']) if c.get('audio_path') else None,
                 has_audio=media.total_audio_channels(c) > 0 and not (c.get('ltc') and c.get('listen_ch') is None),
                 source_path=c.get('source_path'), opatom=c.get('opatom', False),
+                day=c.get('day') or 'unknown', after_midnight=c.get('after_midnight', False), date_note=c.get('date_note'),
+                duplicate_of=os.path.basename(c['duplicate_of']) if c.get('duplicate_of') else None,
             ))
         return dict(
             fps=TC.rate_label(self.fps), df=self.df, clips=out_clips,
             rolls=[dict(name=r['name'], kind=r['kind'], camera=r['camera'], track_no=r['track_no'], n=len(r['clips']))
                    for r in sorted(rolls.values(), key=lambda r: (r['kind'] != 'camera', r['track_no'] or 999, r['name']))],
             span=self.day_span(False), unsupported=self.unsupported, errors=self.errors,
-            reference=self.default_reference(),
+            reference=self.default_reference(), days=self.days(),
         )

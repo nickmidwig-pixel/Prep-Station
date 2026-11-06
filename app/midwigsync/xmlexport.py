@@ -17,6 +17,7 @@ def _rate(fps):
 
 
 def _tc(fps, frames, df, reel=None):
+    frames = int(frames) % (TC.nominal(fps) * 86400)       # after-midnight clips wrap like the real timecode
     s = TC.frames_to_tc(frames, fps, df)
     reel_x = f'<reel><name>{escape(reel)}</name></reel>' if reel else ''
     return (f'<timecode>{_rate(fps)}<string>{s}</string><frame>{frames}</frame>'
@@ -33,19 +34,20 @@ class XmlBuilder:
         self.n_clip = 0
         self.links = {}
 
-    def _file(self, path, frames, start_frames, kind, channels, width=0, height=0, reel=None):
+    def _file(self, path, frames, start_frames, kind, channels, width=0, height=0, reel=None, fps=None):
+        fps = fps or self.fps
         key = os.path.realpath(path)
         if key in self.files:
             return f'<file id="{self.files[key]}"/>'
         fid = f'file-{len(self.files) + 1}'
         self.files[key] = fid
-        vid = (f'<video><samplecharacteristics>{_rate(self.fps)}<width>{width}</width><height>{height}</height>'
+        vid = (f'<video><samplecharacteristics>{_rate(fps)}<width>{width}</width><height>{height}</height>'
                f'<anamorphic>FALSE</anamorphic><pixelaspectratio>square</pixelaspectratio>'
                f'<fielddominance>none</fielddominance></samplecharacteristics></video>') if kind == 'video' else ''
         aud = (f'<audio><samplecharacteristics><depth>24</depth><samplerate>48000</samplerate></samplecharacteristics>'
                f'<channelcount>{max(1, channels)}</channelcount></audio>') if channels else ''
         return (f'<file id="{fid}"><name>{escape(os.path.basename(path))}</name><pathurl>{pathurl(path)}</pathurl>'
-                f'{_rate(self.fps)}<duration>{frames}</duration>{_tc(self.fps, start_frames, self.df, reel)}'
+                f'{_rate(fps)}<duration>{frames}</duration>{_tc(fps, start_frames, self.df and fps == self.fps, reel)}'
                 f'<media>{vid}{aud}</media></file>')
 
     def frames(self, samples, mode='round'):
@@ -100,17 +102,19 @@ class XmlBuilder:
             self.n_clip += 1
             cid = f'clipitem-{self.n_clip}'
             st = self.frames(c['start']) - seq0
-            dur = max(1, self.frames(c['length'], 'ceil'))
+            dur = max(1, self.frames(c['length'], 'ceil'))              # sequence frames
+            cfps = c.get('fps') or self.fps                               # the clip's own rate (mixed-rate days)
+            sdur = dur if cfps == self.fps else max(1, TC.samples_to_frames(c['length'], cfps, 'ceil'))
             if c.get('link_key'):
                 self.links.setdefault(c['link_key'], []).append((cid, mediatype, c.get('track_no', 1), idx))
-            f = self._file(c['path'], dur, c.get('media_start_frames', self.frames(c['start'])), c['kind'],
-                           c.get('channels', 0), c.get('width', 0), c.get('height', 0), c.get('reel'))
+            f = self._file(c['path'], sdur, c.get('media_start_frames', self.frames(c['start'])), c['kind'],
+                           c.get('channels', 0), c.get('width', 0), c.get('height', 0), c.get('reel'), cfps)
             src = ''
             if mediatype == 'audio':
                 src = f'<sourcetrack><mediatype>audio</mediatype><trackindex>{c.get("src_track", 1)}</trackindex></sourcetrack>'
             return cid, (f'<clipitem id="{cid}"><name>{escape(os.path.basename(c["path"]))}</name><enabled>TRUE</enabled>'
-                         f'<duration>{dur}</duration>{_rate(self.fps)}<start>{st}</start><end>{st + dur}</end>'
-                         f'<in>0</in><out>{dur}</out>{f}{src}@@LINK:{c.get("link_key", "")}@@</clipitem>')
+                         f'<duration>{sdur}</duration>{_rate(cfps)}<start>{st}</start><end>{st + dur}</end>'
+                         f'<in>0</in><out>{sdur}</out>{f}{src}@@LINK:{c.get("link_key", "")}@@</clipitem>')
 
         vxml = []
         for i, (lab, clips) in enumerate(self._place(self.vtracks)):

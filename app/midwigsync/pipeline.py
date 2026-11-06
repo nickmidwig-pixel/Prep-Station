@@ -3,6 +3,7 @@ import datetime as dt
 import json
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -50,17 +51,17 @@ class RefSink:
             tcs = TC.samples_to_tc(self.clip['start'], self.fps, self.df)
             name = f"REF_{self.clip['roll']}"
             desc = f'sTRK1={name}\r\ndTC={tcs}\r\ndFRAMERATE={TC.rate_label(self.fps)}ND\r\n'
-            be = build_bext(desc, APP_NAME, self.clip['roll'], '', '', self.clip['start'],
+            be = build_bext(desc, APP_NAME, self.clip['roll'], '', '', TC.wrap(self.clip['start'], self.fps),
                             f'A=PCM,F={sr},W=24,M=mono,T=ch1 of {self.clip["name"]}\r\n')
             fr = self.fps
             ix = build_ixml(self.clip['roll'], TC.rate_label(fr), f'{fr.numerator}/{fr.denominator}', self.df,
-                            self.clip['start'], sr, 24, [name])
+                            TC.wrap(self.clip['start'], self.fps), sr, 24, [name])
             self.w = StreamWavWriter(self.path, 1, sr, 24, 1, be, ix)
         self.w.write_float(blk)
 
     def close(self, off=0):
         if self.w:
-            self.w.close(self.clip['start'] + off)
+            self.w.close(TC.wrap(self.clip['start'] + off, self.fps))
 
     def abort(self):
         if self.w:
@@ -201,6 +202,7 @@ class Job:
             self.log(f'ERROR: {e}')
             with open(os.path.join(self.mid, 'error.txt'), 'w') as f:
                 f.write(tb)
+            self.state['error'] = str(e)
             self.emit('error', dict(message=str(e), trace=tb[-2000:]))
         finally:
             self.save_state()
@@ -268,7 +270,7 @@ class Job:
                     continue
                 off = an.env.get(c['id'], (None, 0))[1]
                 start = c['start'] + off
-                patch_time_reference(path, start, TC.samples_to_tc(start, fps, df))
+                patch_time_reference(path, TC.wrap(start, fps), TC.samples_to_tc(start, fps, df))
                 self.refs.append(dict(path=path, name=os.path.basename(path), start=start,
                                       length=WavInfo(path).nframes, clip=c['name']))
             self.log(f"Reference: {ref['roll']} channel {ref['channel'] + 1} → {len(self.refs)} WAV(s)")
@@ -320,8 +322,38 @@ class Job:
                                          tc=TC.frames_to_tc(frames, fps, df)))
         self.log(f'{len(self.stamped)} file(s) written to TC_FIXED.')
 
+    def _unique_sources(self, sources):
+        """Auto-Align names its renders after the source file, so two recorders with the same file name
+        (ZOOM0001.WAV on two Zooms, T001.WAV on two Sound Devices) would overwrite each other. Those get a
+        uniquely named link (or copy) for the Auto-Align pass; outputs keep the original names."""
+        stems = Counter(os.path.splitext(s['name'])[0].lower() for s in sources)
+        work = os.path.join(self.mid, 'aap_src')
+        out_names, used = {}, set()
+        for s in sources:
+            stem = os.path.splitext(s['name'])[0]
+            if stems[stem.lower()] > 1:
+                uniq = f"{s['roll']}__{s['name']}"
+                dst = os.path.join(work, uniq)
+                os.makedirs(work, exist_ok=True)
+                if not os.path.exists(dst):
+                    try:
+                        os.link(s['path'], dst)
+                    except OSError:
+                        shutil.copyfile(s['path'], dst)
+                s['path'], s['name'] = dst, uniq
+            ustem = os.path.splitext(s['name'])[0]
+            want = stem + '_ALN'
+            k = 2
+            while (s['roll'], want.lower()) in used:
+                want = f'{stem}_{k}_ALN'
+                k += 1
+            used.add((s['roll'], want.lower()))
+            out_names[ustem] = want
+        return out_names
+
     def do_aap(self):
         sources = self.audio_sources()
+        self._out_names = self._unique_sources(sources)
         if not self.refs:
             self.log('No reference camera audio, so Auto-Align has nothing to align to. Skipping.')
             self.aap_info['status'] = 'skipped: no reference camera'
@@ -416,7 +448,7 @@ class Job:
         try:
             asm.plan_all()
             asm.save_plan(os.path.join(self.mid, 'assembly_plan.json'))
-            self.aligned = asm.write_all()
+            self.aligned = asm.write_all(getattr(self, '_out_names', None))
         except KeyboardInterrupt:
             raise Cancelled()
         self.log(f'{len(self.aligned)} aligned ISO(s) written.')
@@ -463,10 +495,11 @@ class Job:
                     continue
                 path = c.get('stamped_path') or c['path']
                 media_start = c.get('stamped_start') if c.get('stamped_path') else (c['orig_start'] if c['orig_start'] is not None else c['start'])
+                cfps = c.get('fps') or p.fps
                 clips.append(dict(path=path, start=c['start'], length=c['length'], kind='video',
                                   channels=media.total_audio_channels(c), width=c.get('width', 0),
-                                  height=c.get('height', 0), reel=c['roll'],
-                                  media_start_frames=TC.samples_to_frames(media_start, p.fps)))
+                                  height=c.get('height', 0), reel=c['roll'], fps=cfps,
+                                  media_start_frames=TC.samples_to_frames(media_start, cfps)))
             if clips:
                 label = f"{r['camera']} {r['name']}".strip() if r['camera'] and r['camera'] not in r['name'] else r['name']
                 cams.append(dict(label=label, clips=clips))

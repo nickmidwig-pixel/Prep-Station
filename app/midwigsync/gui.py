@@ -74,6 +74,9 @@ class Api:
         paths = [p for p in (paths or []) if p and os.path.exists(p)]
         if not paths or self.scanning:
             return False
+        if self._busy():
+            self.emit('notice', dict(text='Wait for the run to finish before adding files.', ok=False))
+            return False
 
         def work():
             self.scanning = True
@@ -157,6 +160,8 @@ class Api:
         return self._state()
 
     def remove_clips(self, ids):
+        if self._busy():
+            return self._state()
         self.p.remove([int(i) for i in ids])
         self._refresh_defaults()
         return self._state()
@@ -171,12 +176,19 @@ class Api:
         self.user_named = self.user_out = False
         return self._state()
 
-    def run(self):
-        if self.job_thread and self.job_thread.is_alive():
+    def run(self, days=None):
+        """Run one shoot day, several, or all of them (each day becomes its own job and output folder)."""
+        if self._busy() or self.scanning or not self.p.clips:
             return False
-        if not self.p.clips:
+        all_days = [d['key'] for d in self.p.days()]
+        if days in (None, '', 'all'):
+            days = [d for d in all_days if any(c['include'] and (c.get('day') or 'unknown') == d for c in self.p.clips)]
+        elif isinstance(days, str):
+            days = [days]
+        days = [d for d in days if d in all_days]
+        if not days:
             return False
-        # a re-run starts from the files' own timecode again
+        # a re-run starts from the files' own timecode again (positions set by hand are kept)
         for c in self.p.clips:
             c['start'] = c['orig_start']
             c['flags'] = [f for f in c['flags'] if not f.startswith('sync')]
@@ -184,8 +196,47 @@ class Api:
                 c.pop(k, None)
         self.p.analyze()
         self.p.check_short_clips(self.settings.get('short_clip_s', 20))
-        self.job = Job(self.p, dict(self.settings), self.emit)
-        self.job_thread = threading.Thread(target=self.job.run, daemon=True)
+        multi = len(all_days) > 1
+        plans = []
+        for d in days:
+            sub = self.p.subset(d) if multi else self.p
+            s = dict(self.settings)
+            if multi:
+                if self.user_named and self.settings.get('job_name'):
+                    s['job_name'] = f"{self.settings['job_name']}_{d.replace('-', '')}"
+                else:
+                    s['job_name'] = default_job_name(sub)
+                if self.user_out and self.settings.get('out_dir'):
+                    s['out_dir'] = os.path.join(os.path.dirname(self.settings['out_dir']), f"{s['job_name']}{OUT_SUFFIX}")
+                else:
+                    s['out_dir'] = default_out_dir(sub, s['job_name'])
+            ref = s.get('reference')
+            if not ref or ref.get('roll') not in {r['name'] for r in sub.camera_rolls()}:
+                s['reference'] = sub.default_reference()
+            plans.append((d, sub, s))
+        outs = []
+
+        def work():
+            for i, (d, sub, s) in enumerate(plans):
+                last = i == len(plans) - 1
+                if multi:
+                    self.emit('day', dict(i=i + 1, n=len(plans), key=d, label=next(x['label'] for x in self.p.days() if x['key'] == d)))
+
+                def emit(kind, data, last=last):
+                    if kind == 'done':
+                        outs.append(data)
+                        if not last:
+                            return
+                        data = dict(data, all=list(outs))
+                    if kind == 'project':
+                        data = self.p.to_json()
+                    self.emit(kind, data)
+                self.job = Job(sub, s, emit)
+                self.job.run()
+                if self.job.cancelled() or self.job.state.get('error'):
+                    break
+            self.emit('state', self._state())
+        self.job_thread = threading.Thread(target=work, daemon=True)
         self.job_thread.start()
         return True
 

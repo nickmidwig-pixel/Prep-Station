@@ -112,6 +112,7 @@ def probe_wav(path):
         df=df, ubits=ub.strip('$').strip(), track_names=names, originator=w.bext_field('originator'),
         tape=w.ixml_text('TAPE') or '', scene=w.ixml_text('SCENE') or '', take=w.ixml_text('TAKE') or '',
         created=_mtime(path), data_off=w.data_off, rf64=w.is_rf64,
+        bext_date=w.bext_field('date'), bext_time=w.bext_field('time'),
     )
 
 
@@ -196,8 +197,9 @@ def probe_video(path, _audio_from=None):
         if not model:
             model = md.get('camera_type', '') or md.get('encoder_device_name', '')
         out['model'] = (model or make or '').strip()
-        if md.get('creation_time'):
-            out['created'] = md['creation_time']
+        if md.get('creation_time') or md.get('com.apple.quicktime.creationdate'):
+            out['created'] = md.get('com.apple.quicktime.creationdate') or md['creation_time']
+            out['created_meta'] = True
     # P2 / OP-Atom: audio lives in separate files
     if not out['audio_streams']:
         for ap in p2_audio_files(path):
@@ -214,6 +216,7 @@ def probe_video(path, _audio_from=None):
         out['model'] = side.get('model') or out['model']
         if side.get('created'):
             out['created'] = side['created']
+            out['created_meta'] = True
         if not out['fps'] and side.get('fps'):
             out['fps'] = TC.parse_rate(side['fps'])
         if side.get('tc') and not tcs:

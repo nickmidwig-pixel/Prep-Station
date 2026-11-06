@@ -29,7 +29,7 @@ def stamp_wav(clip, out_path, start_48k, fps, df=False, note=None, pad_to_frame=
             pad = 0
         else:
             start_48k = new_start
-    tr = int(round(start_48k * w.sr / TC.SR))
+    tr = int(round(TC.wrap(start_48k, fps) * w.sr / TC.SR))
     tcs = TC.samples_to_tc(start_48k, fps, df)
     hist = f'A=PCM,F={w.sr},W={w.bits},M={"mono" if w.channels == 1 else w.channels},T={note}; TC set to {tcs}\r\n'
     if w.bext_raw:

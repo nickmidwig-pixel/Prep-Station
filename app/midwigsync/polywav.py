@@ -63,8 +63,8 @@ def build_polywavs(sources, channel_names, out_dir, prefix, fps, df=False, ubits
         hist = f'A=PCM,F={SR},W={bits},M={nch},T={note or APP_NAME + " polywav"}\r\n'
         if len(desc) > 256:   # many channels: keep TC fields, names stay in iXML
             desc = f'dTC={tcs}\r\ndUBITS=${ubits}\r\ndFRAMERATE={TC.rate_label(fr)}\r\n'
-        be = build_bext(desc, APP_NAME, project[:32], date, tcs[:8], a, hist)
-        ix = build_ixml(project, TC.rate_label(fr), f'{fr.numerator}/{fr.denominator}', df, a, SR, bits,
+        be = build_bext(desc, APP_NAME, project[:32], date, tcs[:8], TC.wrap(a, fr), hist)
+        ix = build_ixml(project, TC.rate_label(fr), f'{fr.numerator}/{fr.denominator}', df, TC.wrap(a, fr), SR, bits,
                         list(channel_names), note=note)
         return be, ix
 
