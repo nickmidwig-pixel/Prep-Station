@@ -316,6 +316,15 @@ class Project:
             r['clips'].sort(key=lambda c: (c['start'] if c['start'] is not None else 1 << 62, c['name']))
         return out
 
+    def _roll_role(self, r):
+        if r['kind'] == 'camera':
+            return 'cam'
+        roles = [self.clip_roles(c) for c in r['clips']]
+        if any(len(x) > 1 for x in roles):
+            return 'multi'
+        flat = Counter(x[0] for x in roles)
+        return flat.most_common(1)[0][0] if flat else 'lav'
+
     def audio_rolls_ordered(self):
         rs = [r for r in self.rolls().values() if r['kind'] == 'audio']
         return sorted(rs, key=lambda r: (r['track_no'] if r['track_no'] is not None else 999, r['name']))
@@ -445,6 +454,23 @@ class Project:
                 break
         return dict(roll=best['name'], channel=ch)
 
+    @staticmethod
+    def clip_roles(c):
+        """Role of each channel from its name (boom / lav / plant / mix / tc). Cameras: 'cam'."""
+        from .refplan import role_of
+        if c['kind'] != 'audio':
+            return ['cam']
+        names = c.get('track_names') or {}
+        n = c.get('channels', 1)
+        if n == 1:
+            nm = names.get(1)
+            r = role_of(nm) if nm else role_of(c['roll'])
+            return [r]
+        roles = [role_of(names.get(k + 1, f"{c['roll']}_{k + 1}")) for k in range(n)]
+        if c.get('ltc') and c['ltc']['channel'] < n:
+            roles[c['ltc']['channel']] = 'tc'
+        return roles
+
     def to_json(self):
         rolls = self.rolls()
         out_clips = []
@@ -465,10 +491,12 @@ class Project:
                 source_path=c.get('source_path'), opatom=c.get('opatom', False),
                 day=c.get('day') or 'unknown', after_midnight=c.get('after_midnight', False), date_note=c.get('date_note'),
                 duplicate_of=os.path.basename(c['duplicate_of']) if c.get('duplicate_of') else None,
+                roles=self.clip_roles(c), track_names=c.get('track_names') or {}, scene=c.get('scene', ''), take=c.get('take', ''),
             ))
         return dict(
             fps=TC.rate_label(self.fps), df=self.df, clips=out_clips,
-            rolls=[dict(name=r['name'], kind=r['kind'], camera=r['camera'], track_no=r['track_no'], n=len(r['clips']))
+            rolls=[dict(name=r['name'], kind=r['kind'], camera=r['camera'], track_no=r['track_no'], n=len(r['clips']),
+                        role=self._roll_role(r), channels=r.get('channels', 0))
                    for r in sorted(rolls.values(), key=lambda r: (r['kind'] != 'camera', r['track_no'] or 999, r['name']))],
             span=self.day_span(False), unsupported=self.unsupported, errors=self.errors,
             reference=self.default_reference(), days=self.days(),

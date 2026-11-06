@@ -5,12 +5,16 @@
   const RATES = { '23.976': [24000, 1001], '24': [24, 1], '25': [25, 1], '29.97': [30000, 1001], '30': [30, 1],
     '47.952': [48000, 1001], '48': [48, 1], '50': [50, 1], '59.94': [60000, 1001], '60': [60, 1] };
   const COL = {
-    cam: '#6E9CC4', aud: '#93B58A', fix: '#E2A23B', bad: '#E0614A', off: '#5E666E', led: '#FF3B30',
+    cam: '#6E9CC4', aud: '#93B58A', fix: '#E2A23B', bad: '#E0614A', off: '#5E666E', led: '#FF3B30', man: '#F2EFE6',
     paper: '#E6E2D8', muted: '#8E969E', line: '#363E46', well: '#15181B', lane: '#1B1F23', label: '#20252A',
   };
+  // cameras get their own hue each (reference first); sound is coloured by what the mic is
+  const CAM_HUES = ['#6E9CC4', '#5FB3AE', '#9B8BD1', '#7FB0E8', '#C48BB8', '#8FA3B8', '#6FA88F', '#B39C7A'];
+  const ROLE_COL = { boom: '#D9B95B', lav: '#93B58A', plant: '#8FC1A9', multi: '#C99A6B', mix: '#9A938A', tc: '#6F7780', empty: '#5E666E' };
+  const ROLE_LABEL = { boom: 'boom', lav: 'lav', plant: 'plant', multi: 'multitrack', mix: 'mix', tc: 'timecode', cam: 'camera' };
   const STEP_MAP = { 'Building aligned ISOs': 'Auto-Align Post', 'Checking alignment': 'Auto-Align Post' };
 
-  const S = { project: null, settings: {}, running: false, scanning: false, sel: null, view: null, done: null };
+  const S = { project: null, settings: {}, running: false, scanning: false, sel: null, view: null, done: null, day: null, checks: [] };
   const api = () => (window.pywebview && window.pywebview.api) || null;
   const APP = () => (S.app && S.app.name) || 'Prep Station';
   const call = async (name, ...args) => { const a = api(); if (!a || !a[name]) return null; try { return await a[name](...args); } catch (e) { console.error(e); return null; } };
@@ -37,10 +41,15 @@
   }
 
   // ------------------------------------------------------------------ rows
+  const days = () => (S.project && S.project.days) || [];
+  const multiDay = () => days().length > 1;
+  const inDay = (c) => !multiDay() || !S.day || c.day === S.day;
+  const dayClips = () => (S.project ? S.project.clips.filter(inDay) : []);
   function rolls() {
     if (!S.project) return [];
     const ref = S.settings.reference && S.settings.reference.roll;
-    const rs = S.project.rolls.slice();
+    const present = new Set(dayClips().map((c) => c.roll));
+    const rs = S.project.rolls.filter((r) => present.has(r.name));
     rs.sort((a, b) => {
       if (a.kind !== b.kind) return a.kind === 'camera' ? -1 : 1;
       if (a.kind === 'camera') return (b.name === ref) - (a.name === ref) || a.name.localeCompare(b.name);
@@ -48,14 +57,36 @@
     });
     return rs;
   }
-  const clipsOf = (roll) => S.project.clips.filter((c) => c.roll === roll);
+  const clipsOf = (roll) => dayClips().filter((c) => c.roll === roll);
+  // what the run will align to: a camera mic, or (no usable camera sound) the recorder's own boom / lav
+  const hasCamRef = () => !!(S.project && rolls().some((r) => r.kind === 'camera' && dayClips().some((c) => c.roll === r.name && c.has_audio)));
+  function effMode() {
+    const m = S.settings.mode || 'auto';
+    if (m === 'audio') return 'audio';
+    return hasCamRef() ? 'camera' : 'audio';
+  }
+  function rollColor(name) {
+    const r = S.project.rolls.find((x) => x.name === name);
+    if (!r) return COL.aud;
+    if (r.kind === 'camera') {
+      const cams = rolls().filter((x) => x.kind === 'camera').map((x) => x.name);
+      const i = Math.max(0, cams.indexOf(name));
+      return CAM_HUES[i % CAM_HUES.length];
+    }
+    return ROLE_COL[r.role] || COL.aud;
+  }
   const moved = (c) => c.flags.includes('sync_corrected') || c.flags.includes('sync_found') || c.flags.includes('sync_manual');
   const failed = (c) => c.flags.includes('sync_failed') || ['sample_rate'].some((f) => c.flags.includes(f));
   function clipColor(c) {
     if (!c.include) return COL.off;
-    if (failed(c)) return COL.bad;
-    if (moved(c)) return COL.fix;
-    return c.kind === 'video' ? COL.cam : COL.aud;
+    return rollColor(c.roll);
+  }
+  function overlay(c) {
+    if (!c.include) return null;
+    if (failed(c)) return 'bad';
+    if (c.flags.includes('sync_manual')) return 'man';
+    if (moved(c)) return 'fix';
+    return null;
   }
 
   // ------------------------------------------------------------------ status text
@@ -99,7 +130,7 @@
   let hoverX = null;
 
   function span() {
-    const cl = S.project.clips.filter((c) => c.start != null);
+    const cl = dayClips().filter((c) => c.start != null);
     if (!cl.length) return null;
     let a = Infinity, b = -Infinity;
     for (const c of cl) { a = Math.min(a, c.start, c.orig_start ?? c.start); b = Math.max(b, c.start + c.length); }
@@ -168,10 +199,10 @@
       ctx.fillRect(LABEL_W, y, L.W - LABEL_W, L.rowH - 2);
       // label
       ctx.fillStyle = COL.label; ctx.fillRect(0, y, LABEL_W - 1, L.rowH - 2);
-      ctx.fillStyle = r.kind === 'camera' ? COL.cam : COL.aud; ctx.fillRect(0, y, 3, L.rowH - 2);
+      ctx.fillStyle = rollColor(r.name); ctx.fillRect(0, y, 3, L.rowH - 2);
       ctx.fillStyle = COL.paper; ctx.font = '600 12px Barlow, sans-serif';
       const name = r.name.length > 17 ? r.name.slice(0, 16) + '…' : r.name;
-      const sub = r.name === ref ? 'reference' : (r.camera || (r.kind === 'camera' ? 'camera' : 'sound'));
+      const sub = r.name === ref && effMode() !== 'audio' ? 'reference' : (r.kind === 'camera' ? (r.camera || 'camera') : (ROLE_LABEL[r.role] || 'sound'));
       if (L.rowH >= 28) {
         ctx.fillText(name, 12, y + L.rowH / 2 - 7);
         ctx.font = '400 11px Barlow, sans-serif'; ctx.fillStyle = r.name === ref ? COL.led : COL.muted;
@@ -197,9 +228,20 @@
         if (x1 < LABEL_W || x0 > L.W) continue;
         x0 = Math.max(x0, LABEL_W);
         ctx.fillStyle = clipColor(c);
-        ctx.globalAlpha = c.include ? 0.92 : 0.45;
+        ctx.globalAlpha = c.include ? 0.9 : 0.35;
         roundRect(x0, yy, Math.max(2, x1 - x0), h, 2); ctx.fill();
         ctx.globalAlpha = 1;
+        const ov = overlay(c);
+        if (ov === 'bad') {
+          ctx.save(); roundRect(x0, yy, Math.max(2, x1 - x0), h, 2); ctx.clip();
+          ctx.strokeStyle = 'rgba(224,97,74,.85)'; ctx.lineWidth = 3;
+          for (let sx = x0 - h; sx < x1; sx += 8) { ctx.beginPath(); ctx.moveTo(sx, yy + h); ctx.lineTo(sx + h, yy); ctx.stroke(); }
+          ctx.restore();
+        }
+        if (ov) {
+          ctx.strokeStyle = ov === 'bad' ? COL.bad : ov === 'man' ? COL.man : COL.fix; ctx.lineWidth = 2;
+          roundRect(x0 + 1, yy + 1, Math.max(2, x1 - x0) - 2, h - 2, 2); ctx.stroke();
+        }
         if (x1 - x0 > 60 && h >= 14) {
           ctx.save(); ctx.beginPath(); ctx.rect(x0 + 5, yy, x1 - x0 - 10, h); ctx.clip();
           ctx.fillStyle = '#15181B'; ctx.font = '500 11px Barlow, sans-serif';
@@ -294,23 +336,62 @@
 
   // ------------------------------------------------------------------ table
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+  function chips(c) {
+    const f = new Set(c.flags), out = [];
+    const s = c.sync || {};
+    if (f.has('sync_failed')) out.push(['bad', 'Not placed']);
+    if (f.has('sync_manual')) out.push(['man', c.manual && c.manual.how === 'waveform' ? 'Picked by you' : 'Set by you']);
+    else if (f.has('sync_corrected')) out.push(['fix', `Fixed ${((c.start - c.orig_start) / SR >= 0 ? '+' : '−')}${Math.abs((c.start - c.orig_start) / SR).toFixed(3)} s`]);
+    else if (f.has('sync_found')) out.push(['fix', 'Placed by waveform']);
+    else if (f.has('no_tc')) out.push(['fix', 'No timecode']);
+    if (f.has('zero_tc') && !moved(c)) out.push(['fix', 'TC 00:00']);
+    if (f.has('tc_far') && !moved(c)) out.push(['fix', 'TC far off']);
+    if (f.has('tc_overlap') && !moved(c)) out.push(['fix', 'TC jump']);
+    if (f.has('duplicate')) out.push(['bad', `Duplicate`]);
+    if (f.has('short_silent')) out.push(['', 'Accidental, left out']);
+    if (c.ltc) out.push(['info', `LTC ch ${c.ltc.channel + 1}`]);
+    if (f.has('raw')) out.push(['info', 'RAW']);
+    if (c.converted) out.push(['info', c.converted.replace(' → 48 kHz WAV', '→WAV').replace(' → 48 kHz', '→48k')]);
+    if (c.chapter_of && c.chapter) out.push(['info', `Chapter ${c.chapter}`]);
+    if (c.after_midnight) out.push(['info', 'After midnight']);
+    if (c.opatom) out.push(['info', 'P2']);
+    if (f.has('fps_mismatch')) out.push(['info', `${c.fps} fps`]);
+    if (f.has('no_audio')) out.push(['', 'No audio']);
+    if (f.has('ubits')) out.push(['', 'Other user bits']);
+    if (s.note && s.offset != null && !moved(c)) out.push(['', `${(s.offset / 48).toFixed(0)} ms off, Auto-Align fixes it`]);
+    return out;
+  }
+  function tracksCell(c) {
+    if (c.kind === 'video') return c.channels ? `<span class="trk cam">${c.channels} ch</span>` : '<span class="trk">no audio</span>';
+    const roles = c.roles || [];
+    const names = c.track_names || {};
+    return roles.map((r, i) => `<span class="trk ${r}" title="${esc(r)}">${esc(names[i + 1] || names[String(i + 1)] || (roles.length === 1 ? r : 'ch' + (i + 1)))}</span>`).join('');
+  }
   function renderTable() {
     const tb = $('clipRows');
     if (!S.project) { tb.innerHTML = ''; return; }
     const order = rolls().map((r) => r.name);
-    const cl = S.project.clips.slice().sort((a, b) => (a.start ?? 1e18) - (b.start ?? 1e18) || order.indexOf(a.roll) - order.indexOf(b.roll));
+    const cl = tableOrder();
     tb.innerHTML = cl.map((c) => {
       const st = status(c);
       const cls = [c.include ? '' : 'off', S.sel === c.id ? 'sel' : ''].join(' ');
-      const dot = c.kind === 'video' ? COL.cam : COL.aud;
+      const dot = rollColor(c.roll);
       const tc = c.tc ? (st.old && st.old !== c.tc ? `<span class="old">${st.old}</span>${c.tc}` : c.tc) : '—';
+      const ch = chips(c);
+      const chipHtml = ch.map(([k, t]) => `<span class="chip s ${k}">${esc(t)}</span>`).join('');
       return `<tr class="${cls}" data-id="${c.id}">
         <td class="c-inc"><input type="checkbox" ${c.include ? 'checked' : ''} data-inc="${c.id}" aria-label="Use ${esc(c.name)}"></td>
         <td><span class="roll-dot" style="background:${dot}"></span>${esc(c.roll)}</td>
         <td class="file" title="${esc(c.path)}">${esc(c.name)}</td>
+        <td class="tracks">${tracksCell(c)}</td>
         <td class="num">${tc}</td><td class="num">${c.dur}</td>
-        <td class="status ${st.k ? 'st-' + st.k : ''}">${esc(st.t)}</td></tr>`;
+        <td class="status">${chipHtml || `<span class="txt">${esc(st.t)}</span>`}</td></tr>`;
     }).join('');
+    void order;
+  }
+  function tableOrder() {
+    const order = rolls().map((r) => r.name);
+    return dayClips().slice().sort((a, b) => (a.start ?? 1e18) - (b.start ?? 1e18) || order.indexOf(a.roll) - order.indexOf(b.roll));
   }
   $('clipRows').addEventListener('change', async (e) => {
     const id = e.target.dataset.inc;
@@ -424,16 +505,131 @@
   });
 
   // ------------------------------------------------------------------ panel
+  function renderDays() {
+    const el = $('days');
+    const ds = days();
+    el.hidden = ds.length < 2;
+    if (ds.length < 2) { S.day = null; el.innerHTML = ''; return; }
+    if (S.day && !ds.some((d) => d.key === S.day)) S.day = null;
+    if (!S.day) S.day = ds[0].key;
+    el.innerHTML = ds.map((d) => `<button role="tab" data-day="${esc(d.key)}" aria-selected="${d.key === S.day}">` +
+      `<b>${esc(d.label)}</b>${d.n} file${d.n === 1 ? '' : 's'} · ${d.rolls.length} roll${d.rolls.length === 1 ? '' : 's'}</button>`).join('');
+  }
+  $('days').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-day]'); if (!b) return;
+    S.day = b.dataset.day; S.sel = null; fit();
+    renderDays(); renderPanel(); renderTable(); renderInspector(); slateIdle(); draw();
+  });
+
+  // everything that needs a person, in one list: click a name to jump to the clip
+  function attention() {
+    const P = S.project; if (!P) return [];
+    const out = [];
+    for (const c of dayClips()) {
+      const f = new Set(c.flags);
+      if (f.has('sync_failed')) out.push(['bad', c, 'couldn’t be placed by waveform. Type its timecode or use Find.']);
+      else if (c.start == null && c.include) {
+        if (S.settings.waveform_check) out.push(['warn', c, 'has no timecode. The waveform check places it when you sync, or select it and use Find now.']);
+        else out.push(['bad', c, 'has no timecode. Turn on “Check timecode by waveform”, or select it and use Find.']);
+      }
+      else if (f.has('duplicate')) out.push(['warn', c, `is the same recording as ${c.duplicate_of || 'another file'}, so it’s left out.`]);
+      else if (f.has('sample_rate') && !c.converted) out.push(['bad', c, 'isn’t 48 kHz.']);
+      else if (c.kind === 'video' && c.has_audio === false && c.include && !f.has('raw')) out.push(['warn', c, 'has no sound to check its timecode against.']);
+      else if (f.has('raw') && !c.channels) out.push(['warn', c, 'is RAW with no proxy beside it, so there’s nothing to read. Put the proxy next to it.']);
+    }
+    if (multiDay()) {
+      const guessed = dayClips().filter((c) => c.date_note);
+      if (guessed.length === 1) out.push(['warn', guessed[0], `${guessed[0].date_note}. Check it’s on the right day.`]);
+      else if (guessed.length) out.push(['warn', { name: `${guessed.length} files` }, 'had no recording date, so they were put on this day by their timecode. Check they belong here.']);
+    }
+    for (const u of (P.unsupported || [])) out.push(['warn', { name: (u.path || u).split('/').pop() }, u.why || 'can’t be read.']);
+    for (const e of (P.errors || [])) out.push(['bad', { name: String(e[0] || '').split('/').pop() }, `couldn’t be read: ${e[1] || ''}`]);
+    return out;
+  }
+  function renderAttention() {
+    const a = attention();
+    const el = $('attn');
+    el.hidden = !a.length;
+    if (!a.length) return;
+    const bad = a.filter((x) => x[0] === 'bad').length;
+    el.classList.toggle('only-warn', !bad);
+    $('attnSum').innerHTML = bad ? `<b>${bad} need${bad === 1 ? 's' : ''} you</b>${a.length - bad ? `and ${a.length - bad} to know about` : ''}`
+      : `<b>${a.length} to know about</b>`;
+    $('attnList').innerHTML = a.slice(0, 80).map(([k, c, t]) =>
+      `<li><i class="k ${k}"></i><span>${c.id != null ? `<button data-jump="${c.id}">${esc(c.name)}</button>` : `<b>${esc(c.name)}</b>`} <span class="w">${esc(t)}</span></span></li>`).join('');
+    if (bad && !el.dataset.seen) { el.open = true; el.dataset.seen = '1'; }
+  }
+  $('attnList').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-jump]'); if (!b) return;
+    selectClip(+b.dataset.jump, true);
+  });
+  function selectClip(id, zoom) {
+    const c = S.project && S.project.clips.find((x) => x.id === id);
+    if (!c) return;
+    S.sel = id;
+    if (zoom && c.start != null) { const L = c.length || SR * 10, pad = Math.max(L * 0.6, SR * 20); S.view = [c.start - pad, c.start + L + pad]; }
+    renderTable(); renderInspector(); slateIdle(); draw();
+    const row = document.querySelector(`tr[data-id="${id}"]`); if (row) row.scrollIntoView({ block: 'nearest' });
+  }
+
+  function renderMode() {
+    const m = S.settings.mode || 'auto', eff = effMode();
+    document.querySelectorAll('#modeSeg [data-mode]').forEach((b) => {
+      b.setAttribute('aria-checked', String(b.dataset.mode === m));
+      b.disabled = S.running || (b.dataset.mode === 'camera' && !hasCamRef());
+    });
+    const P = S.project;
+    let hint = '';
+    if (!P || !P.clips.length) hint = 'Auto picks a camera mic when there is one, otherwise the boom.';
+    else if (eff === 'camera') {
+      const r = (S.settings.reference || {}).roll;
+      hint = m === 'auto' ? `Camera sound found, so everything aligns to ${r || 'the camera'}.` : `Everything aligns to ${r || 'the camera'}.`;
+    } else {
+      const roles = new Set(dayClips().filter((c) => c.kind === 'audio' && c.include).flatMap((c) => c.roles || []));
+      const ref = roles.has('boom') ? 'the boom' : roles.has('plant') ? 'the plant mic' : 'the main lav';
+      hint = (m === 'audio' ? 'Audio only: ' : 'No camera sound, so audio only: ') +
+        `each take aligns to ${ref}, falling back to the next mic when it drops out. Mix and timecode tracks pass through untouched.`;
+    }
+    $('modeHint').textContent = hint;
+    $('refRow').hidden = eff !== 'camera';
+  }
+  document.querySelectorAll('#modeSeg [data-mode]').forEach((b) => b.addEventListener('click', async () => {
+    if (b.disabled) return;
+    applyState(await call('set_setting', 'mode', b.dataset.mode));
+  }));
+
+  // preflight: refreshed a moment after anything changes
+  let checkT = null;
+  function queueChecks() {
+    clearTimeout(checkT);
+    checkT = setTimeout(async () => {
+      if (!S.project || !S.project.clips.length || S.running) { $('checks').hidden = true; return; }
+      const r = await call('preflight');
+      S.checks = Array.isArray(r) ? r : [];
+      renderChecks();
+    }, 400);
+  }
+  function renderChecks() {
+    const ck = S.checks.filter((c) => c.status !== 'skip' || c.id === 'space');
+    const el = $('checks');
+    el.hidden = !ck.length || S.running || !!S.done;
+    const order = { fail: 0, warn: 1, skip: 2, ok: 3 };
+    $('checkList').innerHTML = ck.slice().sort((a, b) => order[a.status] - order[b.status]).map((c) =>
+      `<li><i class="${esc(c.status)}"></i><b>${esc(c.label)}</b>${c.detail ? `<span>${esc(c.detail)}</span>` : ''}</li>`).join('');
+  }
+
   function renderPanel() {
     const P = S.project, st = S.settings;
     const has = P && P.clips.length;
     $('empty').hidden = !!has;
     $('loaded').hidden = !has;
-    $('jobName').value = st.job_name || '';
-    $('outDirText').textContent = st.out_dir || 'Choose where results go';
+    const dn = multiDay() && S.day && S.dayNames ? S.dayNames[S.day] : null;
+    if (document.activeElement !== $('jobName')) $('jobName').value = (dn ? dn.job_name : st.job_name) || '';
+    $('outDirText').textContent = (dn ? dn.out_dir : st.out_dir) || 'Choose where results go';
+    $('outDir').title = dn ? 'Each day gets its own folder. Click to change where they go.' : 'Change the output folder';
     $('tcFps').textContent = P ? `${P.fps}${P.df ? ' DF' : ''} fps` : '';
     // reference
-    const cams = P ? P.rolls.filter((r) => r.kind === 'camera') : [];
+    const cams = P ? rolls().filter((r) => r.kind === 'camera') : [];
     const ref = st.reference || {};
     $('refRoll').innerHTML = cams.length ? cams.map((r) => `<option value="${esc(r.name)}" ${r.name === ref.roll ? 'selected' : ''}>${esc(r.name)}${r.camera ? ' (' + esc(r.camera) + ')' : ''}</option>`).join('')
       : '<option>No camera yet</option>';
@@ -441,35 +637,43 @@
     const nch = P ? Math.max(1, ...P.clips.filter((c) => c.roll === ref.roll).map((c) => c.channels || 1)) : 1;
     $('refCh').innerHTML = Array.from({ length: Math.max(nch, 1) }, (_, i) => `<option value="${i}" ${i === (ref.channel || 0) ? 'selected' : ''}>Ch ${i + 1}</option>`).join('');
     $('refCh').disabled = !cams.length;
+    renderMode();
     // toggles
     document.querySelectorAll('[data-set]').forEach((el) => {
       const k = el.dataset.set; const v = st[k];
       if (el.type === 'checkbox') el.checked = el.dataset.on ? v === el.dataset.on : !!v;
-      else el.value = v;
-      const li = el.closest('li'); if (li) li.classList.toggle('off', !el.checked);
+      else if (v != null) el.value = v;
+      const li = el.closest('.steps > li');
+      if (li && el.type === 'checkbox' && li.querySelector('input') === el) li.classList.toggle('off', !el.checked);
     });
+    const subs = document.querySelector('.steps .subopts');
+    if (subs) subs.classList.toggle('dim', !st.xml_iso);
     // summary line
     if (has) {
-      const cams_n = P.clips.filter((c) => c.kind === 'video').length, aud_n = P.clips.length - cams_n;
-      $('sumLine').textContent = `${cams_n} camera clip${cams_n === 1 ? '' : 's'}, ${aud_n} sound file${aud_n === 1 ? '' : 's'}`;
+      const cl = dayClips();
+      const cams_n = cl.filter((c) => c.kind === 'video').length, aud_n = cl.length - cams_n;
+      const parts = [];
+      if (cams_n) parts.push(`${cams_n} camera clip${cams_n === 1 ? '' : 's'}`);
+      if (aud_n) parts.push(`${aud_n} sound file${aud_n === 1 ? '' : 's'}`);
+      $('sumLine').textContent = parts.join(', ') || 'Nothing on this day';
       const sp = span();
       const notes = [];
       if (sp) notes.push(`${samplesToTc(sp[0], false)} to ${samplesToTc(sp[1], false)}`);
-      const nt = P.clips.filter((c) => c.flags.includes('no_tc') && c.start == null).length;
-      if (nt) notes.push(`${nt} without timecode`);
-      if (P.unsupported && P.unsupported.length) notes.push(`${P.unsupported.length} file${P.unsupported.length > 1 ? 's' : ''} it can’t read`);
-      $('sumSub').textContent = notes.join(', ');
+      const fixed = cl.filter(moved).length;
+      if (fixed) notes.push(`${fixed} timecode${fixed === 1 ? '' : 's'} fixed`);
+      $('sumSub').textContent = notes.join(' · ');
     }
-    const un = (P && P.unsupported) || [];
-    $('unsup').hidden = !un.length;
-    if (un.length) {
-      $('unsupSum').textContent = `${un.length} file${un.length > 1 ? 's' : ''} ${APP()} can’t read: why, and what to do`;
-      $('unsupList').innerHTML = un.slice(0, 60).map((u) => `<li><b>${esc((u.path || u).split('/').pop())}</b> ${esc(u.why || '')}</li>`).join('');
-    }
+    renderAttention();
     const gb = $('goBtn');
+    const ds = days();
+    const dayLabel = multiDay() && S.day ? (ds.find((d) => d.key === S.day) || {}).label : '';
     gb.disabled = !has || S.scanning;
-    gb.textContent = S.running ? 'Stop' : (S.done ? 'Sync the day again' : 'Sync the day');
+    gb.textContent = S.running ? 'Stop' : (dayLabel ? `Sync ${dayLabel}` : (S.done ? 'Sync the day again' : 'Sync the day'));
     gb.classList.toggle('stop', S.running);
+    const ga = $('goAll');
+    ga.hidden = !multiDay() || S.running;
+    ga.textContent = `Sync all ${ds.length} days, one folder each`;
+    ga.disabled = S.scanning;
     document.body.classList.toggle('running', S.running);
     document.querySelectorAll('[data-set], #refRoll, #refCh, #jobName, #outDir, #addMore, #clearAll').forEach((el) => { el.disabled = S.running || (el.id === 'refRoll' && !cams.length); });
   }
@@ -479,9 +683,12 @@
     if (st.clip_msg !== undefined) showClipMsg(st.clip_msg);
     const hadClips = S.project && S.project.clips.length;
     S.project = st.project; S.settings = st.settings || {}; S.running = !!st.running; S.scanning = !!st.scanning;
-    if (st.app) { S.app = st.app; document.title = st.app.name; $('appName').textContent = st.app.name; }
+    S.dayNames = st.day_names || {};
+    if (st.app) { S.app = st.app; document.title = st.app.name; $('appName').textContent = st.app.name; $('appVer').textContent = st.app.version ? ` ${st.app.version}` : ''; }
+    renderDays();
     if (!hadClips || !S.view) fit();
     renderPanel(); renderTable(); renderInspector(); slateIdle(); draw();
+    queueChecks();
   }
 
   // inputs
@@ -499,14 +706,19 @@
   $('addMore').addEventListener('click', () => call('choose_folders'));
   $('fitDay').addEventListener('click', () => { fit(); draw(); });
   $('clearAll').addEventListener('click', async () => { S.done = null; resetRun(); applyState(await call('clear')); });
-  $('goBtn').addEventListener('click', async () => {
+  async function go(which) {
     if (S.running) { await call('cancel'); return; }
+    if (S.scanning || !S.project || !S.project.clips.length) return;
     resetRun();
-    const ok = await call('run');
-    if (ok) { S.running = true; S.done = null; renderPanel(); $('progress').hidden = false; }
-  });
+    const ok = await call('run', which);
+    if (ok) { S.running = true; S.done = null; $('checks').hidden = true; renderPanel(); $('progress').hidden = false; }
+    else { $('msg').className = 'msg err'; $('msg').textContent = 'Nothing to sync on that day. Tick at least one clip.'; }
+  }
+  $('goBtn').addEventListener('click', () => go(S.running ? null : (multiDay() ? S.day : null)));
+  $('goAll').addEventListener('click', () => go('all'));
   $('showOut').addEventListener('click', () => S.done && call('open_path', S.done.out));
   $('openReport').addEventListener('click', () => S.done && call('open_path', S.done.report));
+  $('openReadme').addEventListener('click', () => S.done && call('open_path', `${S.done.out}/READ ME.txt`));
   $('aapContinue').addEventListener('click', () => call('aap_continue'));
   $('aapPress').addEventListener('click', () => { $('aapLead').textContent = 'Opening the Auto-Align Post panel and pressing Render…'; call('aap_press_again'); });
   $('copyDir').addEventListener('click', () => { call('copy_text', $('aapDir').dataset.full || $('aapDir').textContent); $('copyDir').textContent = 'Copied'; setTimeout(() => { $('copyDir').textContent = 'Copy'; }, 1500); });
@@ -519,8 +731,9 @@
   document.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging'); });
 
   // ------------------------------------------------------------------ run state
+  function resetSteps() { document.querySelectorAll('#steps li').forEach((li) => li.classList.remove('active', 'done')); }
   function resetRun() {
-    document.querySelectorAll('#steps li').forEach((li) => li.classList.remove('active', 'done'));
+    resetSteps();
     $('progFill').style.width = '0'; $('progText').textContent = '';
     $('doneRow').hidden = true; $('aapCard').hidden = true;
     $('msg').textContent = ''; $('msg').className = 'msg';
@@ -602,14 +815,51 @@
       document.querySelectorAll('#steps li').forEach((li) => { li.classList.remove('active'); if (!li.classList.contains('off')) li.classList.add('done'); });
       $('progFill').style.width = '100%'; $('progText').textContent = 'Finished';
       $('doneRow').hidden = false;
-      $('msg').textContent = `Everything is in ${d.out}`;
+      const all = d.all || [d];
+      $('msg').className = 'msg ok';
+      $('msg').textContent = all.length > 1 ? `${all.length} days synced, each in its own folder next to ${d.out.split('/').slice(-1)[0]}.` : `Everything is in ${d.out}`;
       renderPanel();
     },
+    day: (d) => { log(`══ Day ${d.i} of ${d.n}: ${d.label}`); $('progText').textContent = `Day ${d.i} of ${d.n}: ${d.label}`; resetSteps(); },
+    notice: (d) => { $('msg').className = 'msg' + (d.ok === false ? ' err' : ''); $('msg').textContent = d.text || ''; },
     stopped: () => { S.running = false; $('msg').textContent = 'Stopped. Nothing you already have was changed.'; renderPanel(); },
     error: (d) => { S.running = false; $('msg').className = 'msg err'; $('msg').textContent = d.message; renderPanel(); log(d.trace || ''); },
   };
 
   window.MS = { event: (kind, data) => { const h = handlers[kind]; if (h) h(data); } };
+
+  // ------------------------------------------------------------------ keyboard
+  document.addEventListener('keydown', async (e) => {
+    const typing = e.target.matches('input[type=text], textarea, select');
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); if (!S.running) call('choose_folders'); return; }
+    if (mod && e.key === 'Enter') { e.preventDefault(); if (!S.running) go(multiDay() ? S.day : null); return; }
+    if (typing) { if (e.key === 'Escape') e.target.blur(); return; }
+    if (e.key === 'Escape') { if (S.sel != null) { S.sel = null; renderTable(); renderInspector(); slateIdle(); draw(); } return; }
+    if (!S.project || !S.project.clips.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const list = tableOrder();
+      if (!list.length) return;
+      let i = list.findIndex((c) => c.id === S.sel);
+      i = i < 0 ? 0 : Math.min(list.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)));
+      selectClip(list[i].id, false);
+      return;
+    }
+    const c = selClip();
+    if (!c || S.running) return;
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && c.start != null) {
+      e.preventDefault();
+      const dir = e.key === 'ArrowRight' ? 1 : -1;
+      const [n, d] = fpsPair();
+      applyState(await call('clip_nudge', c.id, dir * (e.shiftKey ? Math.round(n / d) : 1)));
+      return;
+    }
+    if (e.key === 'Backspace' || e.key === 'Delete' || e.key === ' ') {
+      e.preventDefault();
+      applyState(await call('set_include', c.id, !c.include));
+    }
+  });
 
   async function boot() {
     const st = await call('get_state');

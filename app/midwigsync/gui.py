@@ -1,6 +1,7 @@
 """App window (pywebview). Python owns the project and the job; the page just shows them."""
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -11,9 +12,15 @@ from .scan import Project
 from .pipeline import Job, DEFAULTS, default_job_name, default_out_dir
 from . import resolve_aap as RA
 from .manual import ClipTools, parse_tc_input
+from . import preflight as PF
 
 UI = os.path.join(os.path.dirname(__file__), 'ui', 'index.html')
 from .brand import APP_NAME, APP_VERSION, SETTINGS_FILE, OUT_SUFFIX
+
+
+PREF_KEYS = ('poly_unaligned', 'stamp_corrected_video', 'chunk_mode', 'aap_auto_press', 'waveform_check', 'xml_iso',
+             'xml_poly', 'poly_aligned', 'aap_mode', 'mode', 'export_otio', 'export_aaf', 'export_ale', 'export_csv',
+             'synced_clips', 'aligned_names', 'poly_per_take')
 
 
 def load_prefs():
@@ -39,8 +46,7 @@ class Api:
         self.p = Project()
         prefs = load_prefs()
         self.settings = dict(DEFAULTS)
-        for k in ('poly_unaligned', 'stamp_corrected_video', 'chunk_mode', 'aap_auto_press', 'waveform_check',
-                  'xml_iso', 'xml_poly', 'poly_aligned', 'aap_mode'):
+        for k in PREF_KEYS:
             if k in prefs:
                 self.settings[k] = prefs[k]
         self.job = None
@@ -61,8 +67,16 @@ class Api:
     def _state(self):
         pj = self.p.to_json()
         s = {k: v for k, v in self.settings.items() if not k.startswith('_')}
+        day_names = {}
+        if len(pj.get('days') or []) > 1:
+            for d in pj['days']:
+                try:
+                    day_names[d['key']] = self._day_names(d['key'])
+                except Exception:  # noqa: BLE001
+                    pass
         return dict(project=pj, settings=s, running=bool(self.job and self.job_thread and self.job_thread.is_alive()),
-                    scanning=self.scanning, platform=sys.platform, app=dict(name=APP_NAME, version=APP_VERSION))
+                    scanning=self.scanning, platform=sys.platform, app=dict(name=APP_NAME, version=APP_VERSION),
+                    day_names=day_names, user_named=self.user_named)
 
     job_thread = None
 
@@ -143,8 +157,7 @@ class Api:
                 self.settings['out_dir'] = default_out_dir(self.p, value)
         self.settings[key] = value
         prefs = load_prefs()
-        if key in ('poly_unaligned', 'stamp_corrected_video', 'chunk_mode', 'aap_auto_press', 'waveform_check',
-                   'xml_iso', 'xml_poly', 'poly_aligned', 'aap_mode'):
+        if key in PREF_KEYS:
             prefs[key] = value
             save_prefs(prefs)
         return self._state()
@@ -202,14 +215,7 @@ class Api:
             sub = self.p.subset(d) if multi else self.p
             s = dict(self.settings)
             if multi:
-                if self.user_named and self.settings.get('job_name'):
-                    s['job_name'] = f"{self.settings['job_name']}_{d.replace('-', '')}"
-                else:
-                    s['job_name'] = default_job_name(sub)
-                if self.user_out and self.settings.get('out_dir'):
-                    s['out_dir'] = os.path.join(os.path.dirname(self.settings['out_dir']), f"{s['job_name']}{OUT_SUFFIX}")
-                else:
-                    s['out_dir'] = default_out_dir(sub, s['job_name'])
+                s.update(self._day_names(d, sub))
             ref = s.get('reference')
             if not ref or ref.get('roll') not in {r['name'] for r in sub.camera_rolls()}:
                 s['reference'] = sub.default_reference()
@@ -235,10 +241,32 @@ class Api:
                 self.job.run()
                 if self.job.cancelled() or self.job.state.get('error'):
                     break
+            if self.job and self.job.state.get('error'):
+                PF.notify(APP_NAME, f"Stopped with an error: {self.job.state['error'][:120]}", 'Basso')
+            elif self.job and not self.job.cancelled():
+                PF.notify(APP_NAME, f"Done: {len(outs)} day(s) synced." if len(outs) > 1 else
+                          f"Done: {os.path.basename(outs[0]['out']) if outs else 'finished'}")
             self.emit('state', self._state())
         self.job_thread = threading.Thread(target=work, daemon=True)
         self.job_thread.start()
         return True
+
+    def _day_names(self, d, sub=None):
+        """Job name and output folder one shoot day gets when several days are loaded together."""
+        if sub is None:
+            sub = Project()
+            sub.clips = [c for c in self.p.clips if (c.get('day') or 'unknown') == d]
+        date = d.replace('-', '') if d[:4].isdigit() else ''
+        if self.user_named and self.settings.get('job_name'):
+            base = re.sub(r'^\d{8}_?', '', self.settings['job_name'])
+            job = f'{date}_{base}'.strip('_') if date else f"{self.settings['job_name']}_{d}"
+        else:
+            job = default_job_name(sub, date)
+        if self.user_out and self.settings.get('out_dir'):
+            out = os.path.join(os.path.dirname(self.settings['out_dir']), f'{job}{OUT_SUFFIX}')
+        else:
+            out = default_out_dir(sub, job)
+        return dict(job_name=job, out_dir=out)
 
     def cancel(self):
         if self.job:
@@ -266,6 +294,12 @@ class Api:
                 self.emit('aap_pressed', dict(ok=False))
         threading.Thread(target=work, daemon=True).start()
         return True
+
+    def preflight(self):
+        try:
+            return PF.run_checks(self.p, self.settings)
+        except Exception as e:  # noqa: BLE001
+            return [dict(id='err', label='Checks', status='warn', detail=str(e))]
 
     # ------------------------------------------------------------ one clip, by hand
     def _busy(self):

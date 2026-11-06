@@ -10,7 +10,7 @@
 <header class="top">
   <div class="brand">
     <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-    <span class="name" id="appName">Prep Station</span>
+    <span class="name" id="appName">Prep Station</span><span class="ver" id="appVer"></span>
   </div>
   <label class="job">
     <span class="sr">Job name</span>
@@ -50,18 +50,25 @@
           <button class="btn small ghosted" id="clearAll">Clear</button>
         </div>
       </div>
+      <div class="days" id="days" hidden role="tablist" aria-label="Shoot days"></div>
       <div class="timeline" id="timeline">
         <canvas id="tl"></canvas>
         <div class="tip" id="tip" hidden></div>
       </div>
       <div class="legend">
         <span><i class="sw cam"></i>Camera</span>
-        <span><i class="sw aud"></i>Sound</span>
-        <span><i class="sw fix"></i>Timecode fixed by waveform</span>
-        <span><i class="sw bad"></i>Needs you</span>
+        <span><i class="sw boom"></i>Boom</span>
+        <span><i class="sw lav"></i>Lav</span>
+        <span><i class="sw multi"></i>Multitrack</span>
+        <span><i class="sw mix"></i>Mix / other</span>
+        <span class="sep"></span>
+        <span><i class="sw ov-fix"></i>Timecode fixed</span>
+        <span><i class="sw ov-man"></i>Set by you</span>
+        <span><i class="sw ov-bad"></i>Needs you</span>
         <span><i class="sw off"></i>Left out</span>
+        <span class="keys" title="Keyboard shortcuts">⌘O add · ⌘↩ sync · ↑↓ clips · ←→ nudge (⇧ 1 s) · Esc close</span>
       </div>
-      <details class="unsup" id="unsup" hidden><summary id="unsupSum"></summary><ul id="unsupList"></ul></details>
+      <details class="attn" id="attn" hidden><summary id="attnSum"></summary><ul id="attnList"></ul></details>
       <section class="insp" id="insp" hidden aria-label="Selected clip">
         <div class="insp-head">
           <div class="insp-title"><strong id="iName"></strong><span id="iSub"></span></div>
@@ -104,7 +111,7 @@
       </section>
       <div class="table-wrap">
         <table class="clips">
-          <thead><tr><th class="c-inc" title="Include">Use</th><th>Roll</th><th>File</th><th class="num">Start</th><th class="num">Length</th><th>Status</th></tr></thead>
+          <thead><tr><th class="c-inc" title="Include">Use</th><th>Roll</th><th>File</th><th>Tracks</th><th class="num">Start</th><th class="num">Length</th><th>Status</th></tr></thead>
           <tbody id="clipRows"></tbody>
         </table>
       </div>
@@ -114,9 +121,14 @@
 
   <aside class="run" id="run">
     <div class="block">
-      <h2>Reference mic</h2>
-      <p class="hint">Auto-Align lines every ISO up to this channel.</p>
-      <div class="row">
+      <h2>Sync to</h2>
+      <div class="seg" role="radiogroup" aria-label="What to align to" id="modeSeg">
+        <button data-mode="auto" role="radio">Auto</button>
+        <button data-mode="camera" role="radio">Camera mic</button>
+        <button data-mode="audio" role="radio">Audio only</button>
+      </div>
+      <p class="hint" id="modeHint"></p>
+      <div class="row" id="refRow">
         <select id="refRoll" aria-label="Reference camera roll"></select>
         <select id="refCh" aria-label="Reference channel"></select>
       </div>
@@ -134,7 +146,14 @@
         <li data-step="Writing timecode to copies"><span class="fixed">Write timecode to copies</span><span class="detail">Originals stay untouched.</span></li>
         <li data-step="Auto-Align Post"><label><input type="checkbox" data-set="aap_mode" data-on="resolve" data-off="skip"> Auto-Align Post in Resolve</label><span class="detail">Builds the Resolve timeline and presses Render.</span></li>
         <li data-step="Polywav"><label><input type="checkbox" data-set="poly_aligned"> Polywav files</label><span class="detail">Largest whole minutes under 4 GB.</span></li>
-        <li data-step="XML"><label><input type="checkbox" data-set="xml_iso"> XML for Premiere and Resolve</label><span class="detail">Cameras plus aligned audio on one timeline.</span></li>
+        <li data-step="XML"><label><input type="checkbox" data-set="xml_iso"> Timelines for editorial</label><span class="detail">XML for Premiere and Resolve, plus:</span>
+          <span class="subopts">
+            <label><input type="checkbox" data-set="export_otio"> OTIO</label>
+            <label><input type="checkbox" data-set="export_aaf"> AAF for Pro Tools</label>
+            <label><input type="checkbox" data-set="export_ale"> ALE for Avid</label>
+            <label><input type="checkbox" data-set="export_csv"> Clip list</label>
+          </span></li>
+        <li data-step="Synced camera clips" class="opt"><label><input type="checkbox" data-set="synced_clips"> Synced camera clips</label><span class="detail">Camera files with the aligned sound inside. Copies the picture, so it needs space.</span></li>
         <li data-step="Report"><span class="fixed">Report</span><span class="detail">What moved, what was skipped, and the checks.</span></li>
       </ol>
       <details class="more">
@@ -143,6 +162,10 @@
         <label><input type="checkbox" data-set="xml_poly"> Also make an XML with the polywavs</label>
         <label><input type="checkbox" data-set="stamp_corrected_video"> Rewrite camera files whose timecode was fixed (copies whole clips)</label>
         <label><input type="checkbox" data-set="aap_auto_press"> Press Render in Auto-Align for me</label>
+        <label class="inline">Aligned file names
+          <select data-set="aligned_names"><option value="auto">Automatic</option><option value="same">Same as the originals</option><option value="suffix">Add _ALN</option></select>
+        </label>
+        <label><input type="checkbox" data-set="poly_per_take"> Day-long polywavs from per-take recorder files</label>
         <label class="inline">Polywav length
           <select data-set="chunk_mode"><option value="max">As long as fits in 4 GB</option><option value="hour">Whole hours</option></select>
         </label>
@@ -167,15 +190,22 @@
       </div>
     </div>
 
+    <div class="block checks" id="checks" hidden>
+      <h2>Before you run</h2>
+      <ul id="checkList"></ul>
+    </div>
+
     <div class="go">
       <div class="progress" id="progress" hidden>
         <div class="bar"><div id="progFill"></div></div>
         <span id="progText"></span>
       </div>
       <button class="btn primary" id="goBtn" disabled>Sync the day</button>
+      <button class="link all" id="goAll" hidden></button>
       <div class="row done-row" id="doneRow" hidden>
         <button class="btn small" id="showOut">Show in Finder</button>
         <button class="btn small ghosted" id="openReport">Open report</button>
+        <button class="btn small ghosted" id="openReadme">Read me</button>
       </div>
       <p class="msg" id="msg"></p>
     </div>

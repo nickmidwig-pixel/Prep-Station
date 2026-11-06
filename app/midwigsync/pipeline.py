@@ -75,10 +75,9 @@ class RefSink:
             self.w.abort()
 
 
-def default_job_name(project):
+def default_job_name(project, date=''):
     ub = Counter(c.get('ubits') for c in project.clips if c.get('ubits'))
-    date = ''
-    if ub:
+    if ub and not date:
         u = ub.most_common(1)[0][0]
         if len(u) >= 8 and u[:8].isdigit():
             date = u[:8]
@@ -87,10 +86,21 @@ def default_job_name(project):
         date = (sorted(times)[0][:10].replace('-', '') if times else dt.date.today().strftime('%Y%m%d'))
     # common parent of the audio folders
     aud = [os.path.dirname(os.path.dirname(c.get('source_path') or c['path'])) for c in project.clips if c['kind'] == 'audio']
-    base = os.path.basename(os.path.commonpath(aud)) if aud else ''
+    top = _job_folder(os.path.commonpath(aud)) if aud else ''
+    base = os.path.basename(top)
     base = re.sub(r'(?i)^\d{8}_?', '', base)
     base = re.sub(r'(?i)[_ -]*(audio|sound|snd|iso|isos)$', '', base)
     return f'{date}_{base}'.strip('_') if base else date
+
+
+_GENERIC = re.compile(r'(?i)^(audio|sound|snd|isos?|wavs?|recorder|mixer|sound[_ -]?rolls?|audio[_ -]?files)$')
+
+
+def _job_folder(path):
+    """A folder called just SOUND or AUDIO belongs to the shoot folder around it, so names and output go there."""
+    while path and _GENERIC.match(os.path.basename(path)) and os.path.dirname(path) != path:
+        path = os.path.dirname(path)
+    return path
 
 
 def default_out_dir(project, job):
@@ -98,7 +108,7 @@ def default_out_dir(project, job):
            if c['kind'] == 'audio' and not c.get('converted', '').startswith(('M4A', 'MP3', 'AAC'))]
     if not aud:
         aud = [os.path.dirname(c.get('source_path') or c['path']) for c in project.clips]
-    base = os.path.commonpath(aud) if aud else os.path.expanduser('~/Desktop')
+    base = _job_folder(os.path.commonpath(aud)) if aud else os.path.expanduser('~/Desktop')
     return os.path.join(base, f'{job}{OUT_SUFFIX}')
 
 

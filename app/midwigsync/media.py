@@ -513,7 +513,7 @@ def find_media(paths, skip_dirs=()):
                 dirs[:] = []
                 continue
             dirs[:] = sorted(d for d in dirs if d.lower() not in skip_names and not d.startswith('.')
-                             and not d.startswith(out_markers))
+                             and not d.startswith(out_markers) and not d.endswith(('_SYNCED', '_MIDWIG')))
             for fn in sorted(files):
                 consider(os.path.join(root, fn))
     seen, uniq = set(), []
