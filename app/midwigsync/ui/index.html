@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Midwig Sync</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+    <span class="name">Midwig Sync</span>
+  </div>
+  <label class="job">
+    <span class="sr">Job name</span>
+    <input id="jobName" type="text" spellcheck="false" placeholder="Job name">
+  </label>
+  <div class="slate" aria-live="off">
+    <div class="slate-digits">
+      <span class="ghost">88:88:88:88</span>
+      <span id="tcLit" class="lit">--:--:--:--</span>
+    </div>
+    <div class="slate-meta">
+      <span id="tcFps">23.976</span>
+      <span id="tcWhat">day start</span>
+    </div>
+  </div>
+</header>
+
+<main class="grid">
+  <section class="work" id="work">
+    <div class="empty" id="empty">
+      <div class="drop-target" id="dropTarget">
+        <h1>Drop a day’s camera cards and sound folders</h1>
+        <p>Sony, Canon (incl. RAW Light), Blackmagic RAW, Nikon, Panasonic P2, GoPro, iPhone, any MOV/MP4/MXF, and any WAV, AIFF or M4A recorder. Drop the folders as they came off the cards.</p>
+        <div class="row">
+          <button class="btn" id="chooseFolders">Choose folders…</button>
+          <button class="btn ghosted" id="chooseFiles">Choose files…</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="loaded" id="loaded" hidden>
+      <div class="tl-bar">
+        <div class="tl-title"><strong id="sumLine">0 clips</strong><span id="sumSub"></span></div>
+        <div class="tl-tools">
+          <button class="btn small ghosted" id="addMore">Add more…</button>
+          <button class="btn small ghosted" id="fitDay">Fit day</button>
+          <button class="btn small ghosted" id="clearAll">Clear</button>
+        </div>
+      </div>
+      <div class="timeline" id="timeline">
+        <canvas id="tl"></canvas>
+        <div class="tip" id="tip" hidden></div>
+      </div>
+      <div class="legend">
+        <span><i class="sw cam"></i>Camera</span>
+        <span><i class="sw aud"></i>Sound</span>
+        <span><i class="sw fix"></i>Timecode fixed by waveform</span>
+        <span><i class="sw bad"></i>Needs you</span>
+        <span><i class="sw off"></i>Left out</span>
+      </div>
+      <details class="unsup" id="unsup" hidden><summary id="unsupSum"></summary><ul id="unsupList"></ul></details>
+      <section class="insp" id="insp" hidden aria-label="Selected clip">
+        <div class="insp-head">
+          <div class="insp-title"><strong id="iName"></strong><span id="iSub"></span></div>
+          <button class="link" id="iClose" aria-label="Close">Close</button>
+        </div>
+        <div class="insp-grid">
+          <div class="insp-tc">
+            <dl class="insp-facts">
+              <dt>In the file</dt><dd id="iFileTc"></dd>
+              <dt>Now</dt><dd id="iNowTc"></dd>
+            </dl>
+            <div class="row tc-row">
+              <label class="sr" for="iTcIn">Timecode</label>
+              <input id="iTcIn" class="tc-in" type="text" spellcheck="false" placeholder="HH:MM:SS:FF" autocomplete="off">
+              <button class="btn small" id="iSet">Set</button>
+              <span class="nudge" role="group" aria-label="Nudge">
+                <button class="btn small ghosted" data-nudge="-sec" title="Back one second">−1 s</button>
+                <button class="btn small ghosted" data-nudge="-1" title="Back one frame">−1 fr</button>
+                <button class="btn small ghosted" data-nudge="1" title="Forward one frame">+1 fr</button>
+                <button class="btn small ghosted" data-nudge="sec" title="Forward one second">+1 s</button>
+              </span>
+            </div>
+            <div class="row">
+              <button class="btn small ghosted" id="iReset">Use the file’s timecode</button>
+              <button class="btn small ghosted" id="iStamp" title="Writes a copy with this timecode into TC_FIXED in the output folder">Write a copy now</button>
+            </div>
+          </div>
+          <div class="insp-wave">
+            <div class="row">
+              <span class="lbl">Find by waveform against</span>
+              <select id="iAgainst" aria-label="Find by waveform against"></select>
+              <button class="btn small" id="iFind">Find</button>
+            </div>
+            <div class="insp-prog" id="iProg" hidden><div id="iProgFill"></div><span id="iProgText">Listening…</span></div>
+            <ol class="cands" id="iCands"></ol>
+            <p class="insp-note" id="iNote"></p>
+          </div>
+        </div>
+        <p class="insp-msg" id="iMsg" aria-live="polite"></p>
+      </section>
+      <div class="table-wrap">
+        <table class="clips">
+          <thead><tr><th class="c-inc" title="Include">Use</th><th>Roll</th><th>File</th><th class="num">Start</th><th class="num">Length</th><th>Status</th></tr></thead>
+          <tbody id="clipRows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="scan" id="scanBar" hidden><div class="scan-fill" id="scanFill"></div><span id="scanText">Reading files…</span></div>
+  </section>
+
+  <aside class="run" id="run">
+    <div class="block">
+      <h2>Reference mic</h2>
+      <p class="hint">Auto-Align lines every ISO up to this channel.</p>
+      <div class="row">
+        <select id="refRoll" aria-label="Reference camera roll"></select>
+        <select id="refCh" aria-label="Reference channel"></select>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>Output</h2>
+      <button class="path" id="outDir" title="Change the output folder"><span id="outDirText">Choose where results go</span></button>
+    </div>
+
+    <div class="block steps-block">
+      <h2>What happens</h2>
+      <ol class="steps" id="steps">
+        <li data-step="Checking timecode"><label><input type="checkbox" data-set="waveform_check"> Check timecode by waveform</label><span class="detail">Places files with no timecode, catches missed jams.</span></li>
+        <li data-step="Writing timecode to copies"><span class="fixed">Write timecode to copies</span><span class="detail">Originals stay untouched.</span></li>
+        <li data-step="Auto-Align Post"><label><input type="checkbox" data-set="aap_mode" data-on="resolve" data-off="skip"> Auto-Align Post in Resolve</label><span class="detail">Builds the Resolve timeline and presses Render.</span></li>
+        <li data-step="Polywav"><label><input type="checkbox" data-set="poly_aligned"> Polywav files</label><span class="detail">Largest whole minutes under 4 GB.</span></li>
+        <li data-step="XML"><label><input type="checkbox" data-set="xml_iso"> XML for Premiere and Resolve</label><span class="detail">Cameras plus aligned audio on one timeline.</span></li>
+        <li data-step="Report"><span class="fixed">Report</span><span class="detail">What moved, what was skipped, and the checks.</span></li>
+      </ol>
+      <details class="more">
+        <summary>More options</summary>
+        <label><input type="checkbox" data-set="poly_unaligned"> Also make unaligned polywavs</label>
+        <label><input type="checkbox" data-set="xml_poly"> Also make an XML with the polywavs</label>
+        <label><input type="checkbox" data-set="stamp_corrected_video"> Rewrite camera files whose timecode was fixed (copies whole clips)</label>
+        <label><input type="checkbox" data-set="aap_auto_press"> Press Render in Auto-Align for me</label>
+        <label class="inline">Polywav length
+          <select data-set="chunk_mode"><option value="max">As long as fits in 4 GB</option><option value="hour">Whole hours</option></select>
+        </label>
+      </details>
+    </div>
+
+    <div class="aap" id="aapCard" hidden>
+      <h3 id="aapTitle">Waiting for Auto-Align Post</h3>
+      <p id="aapLead"></p>
+      <dl class="aap-set" id="aapSet">
+        <dt>Reference</dt><dd id="aapRef">Audio 1</dd>
+        <dt>Sources</dt><dd id="aapSrc">Audio 2–5</dd>
+        <dt>Time</dt><dd>Dynamic</dd>
+        <dt>Phase</dt><dd>Spectral</dd>
+        <dt>Output</dt><dd><span id="aapDir"></span> <button class="link" id="copyDir">Copy</button></dd>
+      </dl>
+      <div class="meter"><div id="aapFill"></div></div>
+      <p class="count" id="aapCount">0 of 0 pieces rendered</p>
+      <div class="row wrap">
+        <button class="btn small" id="aapPress">Press Render again</button>
+        <button class="btn small ghosted" id="aapContinue">Continue with what’s rendered</button>
+      </div>
+    </div>
+
+    <div class="go">
+      <div class="progress" id="progress" hidden>
+        <div class="bar"><div id="progFill"></div></div>
+        <span id="progText"></span>
+      </div>
+      <button class="btn primary" id="goBtn" disabled>Sync the day</button>
+      <div class="row done-row" id="doneRow" hidden>
+        <button class="btn small" id="showOut">Show in Finder</button>
+        <button class="btn small ghosted" id="openReport">Open report</button>
+      </div>
+      <p class="msg" id="msg"></p>
+    </div>
+
+    <details class="log-wrap">
+      <summary>Log</summary>
+      <pre class="log" id="log"></pre>
+    </details>
+  </aside>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

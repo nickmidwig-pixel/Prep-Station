@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Midwig Sync</string>
+  <key>CFBundleDisplayName</key><string>Midwig Sync</string>
+  <key>CFBundleIdentifier</key><string>com.midwigproductions.sync</string>
+  <key>CFBundleExecutable</key><string>Midwig Sync</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.1</string>
+  <key>CFBundleVersion</key><string>2</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>Midwig Sync opens the Auto-Align Post panel in DaVinci Resolve for you.</string>
+  <key>NSRemovableVolumesUsageDescription</key><string>Midwig Sync reads camera cards and sound drives you drop in.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>Midwig Sync reads and writes the media folders you choose.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Midwig Sync reads and writes the media folders you choose.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Midwig Sync reads and writes the media folders you choose.</string>
+</dict>
+</plist>
