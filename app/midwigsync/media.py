@@ -122,10 +122,11 @@ def qt_atoms(f, start, end):
         pos += size
 
 
-def _qt_trak(f, a, b):
+def _qt_trak(f, a, b, tables=False):
     """What one trak says about itself: media handler, media timescale, first sample description,
-    time-to-sample table and the first chunk's file offset."""
-    t = dict(handler=None, timescale=None, stsd=None, stts=[], chunk=None)
+    time-to-sample table and the first chunk's file offset. tables=True also returns every chunk offset (co),
+    the sample-to-chunk runs (stsc) and the sample size table header (stsz), for reading samples directly."""
+    t = dict(handler=None, timescale=None, stsd=None, stts=[], chunk=None, co=None, stsc=None, stsz=None)
     stack = [(a, b)]
     while stack:
         x, y = stack.pop()
@@ -152,9 +153,22 @@ def _qt_trak(f, a, b):
                 t['stts'] = [struct.unpack('>II', raw[i:i + 8]) for i in range(0, len(raw) - 7, 8)]
             elif typ in (b'stco', b'co64'):
                 f.seek(pl + 4)
-                if struct.unpack('>I', f.read(4))[0]:
-                    t['chunk'] = (struct.unpack('>Q', f.read(8))[0] if typ == b'co64'
-                                  else struct.unpack('>I', f.read(4))[0])
+                cnt = struct.unpack('>I', f.read(4))[0]
+                if cnt:
+                    if tables:
+                        w = 8 if typ == b'co64' else 4
+                        t['co'] = np.frombuffer(f.read(cnt * w), '>u8' if w == 8 else '>u4').astype(np.int64)
+                        t['chunk'] = int(t['co'][0])
+                    else:
+                        t['chunk'] = (struct.unpack('>Q', f.read(8))[0] if typ == b'co64'
+                                      else struct.unpack('>I', f.read(4))[0])
+            elif tables and typ == b'stsc':
+                f.seek(pl + 4)
+                cnt = struct.unpack('>I', f.read(4))[0]
+                t['stsc'] = np.frombuffer(f.read(cnt * 12), '>u4').reshape(-1, 3).astype(np.int64)
+            elif tables and typ == b'stsz':
+                f.seek(pl + 4)
+                t['stsz'] = struct.unpack('>II', f.read(8))          # (constant size or 0, sample count)
     return t
 
 
@@ -220,6 +234,48 @@ def qt_info(path):
                         out.setdefault(k, v)
             break
     return out
+
+
+_CANON_PRVW_UUID = bytes.fromhex('eaf42b5e1c984b88b9fbb7dc406e4d16')
+
+
+def _jpeg_in(buf):
+    a = buf.find(b'\xff\xd8\xff')
+    if a < 0:
+        return None
+    b = buf.rfind(b'\xff\xd9')
+    return bytes(buf[a:b + 2]) if b > a else None
+
+
+def embedded_preview(path, kind='prvw'):
+    """The picture the camera saved inside the file, read without decoding the video: Canon RAW (.CRM) keeps a
+    2048x1080 preview JPEG in a top-level uuid box (PRVW) and a 160x120 thumbnail inside moov (THMB). Both are of
+    the start of the clip, in the clip's own gamma (usually Canon Log). -> JPEG bytes or None. Reads only."""
+    try:
+        f = open(path, 'rb')
+    except OSError:
+        return None
+    with f:
+        f.seek(0, 2)
+        size = f.tell()
+        for typ, _, pl, end in qt_atoms(f, 0, size):
+            if kind == 'prvw' and typ == b'uuid' and end - pl > 16:
+                f.seek(pl)
+                if f.read(16) == _CANON_PRVW_UUID:
+                    return _jpeg_in(f.read(min(end - pl - 16, 16 << 20)))
+            if kind == 'thmb' and typ == b'moov':
+                for t2, _, pl2, end2 in qt_atoms(f, pl, end):
+                    if t2 == b'uuid' and end2 - pl2 > 16:
+                        f.seek(pl2)
+                        if f.read(16) != _CANON_UUID:
+                            continue
+                        for t3, _, pl3, end3 in qt_atoms(f, pl2 + 16, end2):
+                            if t3 == b'THMB':
+                                f.seek(pl3)
+                                return _jpeg_in(f.read(min(end3 - pl3, 1 << 20)))
+            if typ == b'mdat' and kind == 'prvw' and end >= size:
+                break
+    return None
 
 
 def qt_timecode(info):
@@ -628,6 +684,23 @@ def iter_audio(item, channel=0, max_samples=None, block=48000 * 10):
             acc += s['channels']
     sinfo = sinfo[0] if sinfo else streams[0]
     src = sinfo.get('path') or item.get('audio_path') or item['path']
+    if (os.path.splitext(src)[1].lower() in QT_EXT and ch != 'mix' and not item.get('no_fast_audio')
+            and os.environ.get('PREP_SLOW_AUDIO') != '1'):
+        fast = _iter_qt_pcm(src, sinfo, int(ch), max_samples, block)
+        if fast is not None:
+            first_off = 0
+            try:                               # audio that starts after the picture (edit lists): same offset as below
+                with av.open(src) as c0:
+                    a0 = c0.streams[sinfo['index']]
+                    v0 = c0.streams.video[0] if c0.streams.video else None
+                    if a0.start_time is not None and v0 is not None and v0.start_time is not None:
+                        first_off = int(round((float(a0.start_time * a0.time_base) - float(v0.start_time * v0.time_base))
+                                              * (sinfo.get('sr') or 48000)))
+            except Exception:  # noqa: BLE001
+                first_off = 0
+            for off, blk in fast:
+                yield (first_off if off is not None else None), blk
+            return
     with av.open(src) as c:
         st = c.streams[sinfo['index']] if sinfo['index'] < len(c.streams) else c.streams.audio[0]
         nch = sinfo['channels']
@@ -660,6 +733,97 @@ def iter_audio(item, channel=0, max_samples=None, block=48000 * 10):
                 break
         if buf:
             yield (first_off if not first and first_off is not None else None), np.concatenate(buf)
+
+
+_PCM = {'pcm_s16le': '<i2', 'pcm_s16be': '>i2', 'pcm_s24le': 's24le', 'pcm_s24be': 's24be',
+        'pcm_s32le': '<i4', 'pcm_s32be': '>i4', 'pcm_f32le': '<f4', 'pcm_f32be': '>f4'}
+_QT_AUDIO_CACHE = {}
+
+
+def _qt_pcm_layout(path, stream_index):
+    """Where one PCM audio track's samples sit in a QuickTime file: [(file offset, frames)] per chunk.
+    stream_index is ffmpeg's stream number, which follows the trak order. None if anything doesn't add up."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    key = (path, st.st_size, st.st_mtime_ns, stream_index)
+    if key in _QT_AUDIO_CACHE:
+        return _QT_AUDIO_CACHE[key]
+    out = None
+    try:
+        with open(path, 'rb') as f:
+            f.seek(0, 2)
+            n = f.tell()
+            for typ, _, pl, end in qt_atoms(f, 0, n):
+                if typ != b'moov':
+                    continue
+                traks = [(pl2, end2) for t2, _, pl2, end2 in qt_atoms(f, pl, end) if t2 == b'trak']
+                if stream_index < len(traks):
+                    t = _qt_trak(f, *traks[stream_index], tables=True)
+                    if t['handler'] == b'soun' and t['co'] is not None and t['stsc'] is not None and t['stsz']:
+                        co, stsc = t['co'], t['stsc']
+                        per = np.zeros(len(co), np.int64)
+                        for i, (first, spc, _) in enumerate(stsc):
+                            stop = stsc[i + 1][0] - 1 if i + 1 < len(stsc) else len(co)
+                            per[first - 1:stop] = spc
+                        if per.sum() == t['stsz'][1]:
+                            out = dict(chunks=list(zip(co.tolist(), per.tolist())), size=t['stsz'][0])
+                break
+    except (OSError, struct.error, ValueError):
+        out = None
+    if len(_QT_AUDIO_CACHE) > 512:
+        _QT_AUDIO_CACHE.clear()
+    _QT_AUDIO_CACHE[key] = out
+    return out
+
+
+def _iter_qt_pcm(path, sinfo, ch, max_samples, block):
+    """Camera audio straight from the file's sample table: only the audio bytes are read, never the picture
+    (a 17 GB Canon RAW clip holds ~23 MB of audio per channel). Yields like iter_audio; None if not possible."""
+    fmt = _PCM.get(sinfo.get('codec') or '')
+    nch = int(sinfo.get('channels') or 1)
+    if not fmt:
+        return None
+    lay = _qt_pcm_layout(path, sinfo['index'])
+    if not lay:
+        return None
+    bps = 3 if fmt.startswith('s24') else int(fmt[-1])
+    frame_bytes = bps * nch
+    if lay['size'] not in (frame_bytes, 0):
+        return None
+
+    def gen():
+        got, buf, bufn, first = 0, [], 0, True
+        with open(path, 'rb') as f:
+            for off, frames in lay['chunks']:
+                if max_samples is not None and got >= max_samples:
+                    break
+                f.seek(off)
+                raw = f.read(frames * frame_bytes)
+                k = len(raw) // frame_bytes
+                if not k:
+                    break
+                raw = raw[:k * frame_bytes]
+                if fmt.startswith('s24'):
+                    a = np.frombuffer(raw, np.uint8).reshape(-1, nch, 3)[:, ch, :].astype(np.int32)
+                    v = (a[:, 0] | (a[:, 1] << 8) | (a[:, 2] << 16)) if fmt == 's24le' else (a[:, 2] | (a[:, 1] << 8) | (a[:, 0] << 16))
+                    v = np.where(v & 0x800000, v - 0x1000000, v)
+                    x = v.astype(np.float32) / 8388608.0
+                else:
+                    a = np.frombuffer(raw, fmt).reshape(-1, nch)[:, ch]
+                    x = a.astype(np.float32) / (1.0 if 'f' in fmt else float(2 ** (8 * bps - 1)))
+                if max_samples is not None and got + len(x) > max_samples:
+                    x = x[:max_samples - got]
+                buf.append(x)
+                bufn += len(x)
+                got += len(x)
+                if bufn >= block:
+                    yield (0 if first else None), np.concatenate(buf)
+                    first, buf, bufn = False, [], 0
+            if buf:
+                yield (0 if first else None), np.concatenate(buf)
+    return gen()
 
 
 def audio_sr(item, channel=0):

@@ -70,6 +70,24 @@ got = media.probe(path)
 check(TC.samples_to_tc(got['start'], got['fps']) == '10:57:16:05' and 0 < diff <= 4 and got.get('serial') == '012919000260',
       f"{c['name']} -> {TC.samples_to_tc(got['start'], got['fps'])} ({how}; {diff} bytes differ)")
 
+print('camera pictures and fast audio')
+import numpy as np
+c0 = p.clips[0]
+pv, th = media.embedded_preview(c0['path']), media.embedded_preview(c0['path'], 'thmb')
+check(pv and th and pv[:3] == th[:3] == b'\xff\xd8\xff', f'preview {len(pv or b"")} bytes, thumbnail {len(th or b"")} bytes, both JPEG')
+for ch in range(media.total_audio_channels(c0)):
+    os.environ['PREP_SLOW_AUDIO'] = '1'; slow = np.concatenate([b for _, b in media.iter_audio(c0, ch)])
+    os.environ['PREP_SLOW_AUDIO'] = '0'; fast = np.concatenate([b for _, b in media.iter_audio(c0, ch)])
+    check(np.array_equal(slow, fast), f'ch{ch + 1}: audio read from the sample table = audio read through ffmpeg ({len(fast)} samples)')
+from midwigsync.gui import Api
+api = Api(); api.p = p
+c0['raw_picture'] = True                     # as on real Canon RAW: ffmpeg can't decode the picture
+fr = api.frame(c0['start'] + 1000, c0['id'])
+check(fr['ok'] and fr.get('preview') and fr['img'].startswith('data:image/jpeg'), f"viewer shows the camera preview: {fr.get('label')}")
+th = api.thumbs([c['id'] for c in p.clips])
+check(len(th) == 4 and all(v and v.startswith('data:image/jpeg') for v in th.values()), f'{len(th)} thumbnails')
+c0['raw_picture'] = False
+
 real = os.environ.get('REAL_CANON')
 if real:
     print('real clips (read only)')

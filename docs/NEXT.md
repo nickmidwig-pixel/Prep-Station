@@ -94,6 +94,23 @@ Read AudioTC · Sync Map · Settings. One window, no panels to open.
   the time of day: 39 s at 10:49, 63 s at 17:31). The app converts correctly. Sound rolled ~6 s before A CAM.
 - C4 next: one run with Auto-Align off on the Mac to see the waveform check's verdict on the real day.
 
+## 1.5 (2026-11-07): speed and pictures
+- **Camera audio straight from the sample table** (media._iter_qt_pcm): PCM audio in MOV/MP4/CRM/BRAW is read chunk by
+  chunk from stco/co64 + stsc + stsz, never through the demuxer. ffmpeg read the whole file (picture included) to get
+  the audio: 17 GB to get 164 s of audio from A002C001 (21 s); the new path reads it in 0.27 s, and the 483 GB
+  A001C001 (76 min) in 7.9 s, sample-identical (checked on the real files and on every test MOV/MP4/CRM/BRAW).
+  Falls back to PyAV for anything else (AAC, MXF, odd stsz). PREP_SLOW_AUDIO=1 forces the old way.
+- **Resolve start-up:** the first real run stopped at "Resolve would not create a new project": the app asked 20 s
+  after launching Resolve and gave up in under a second. It now waits up to 3 minutes for Resolve's project manager
+  and skips names already taken.
+- **Pictures:** every CRM carries the camera's 2048x1080 preview JPEG (top-level uuid eaf42b5e..., box PRVW) and a
+  160x120 THMB in the moov uuid. media.embedded_preview reads them; the viewer shows the preview for Canon RAW
+  ("camera preview, start of clip"), and the clip list and timeline tooltip get thumbnails (Api.thumbs, cached in
+  CACHE/thumbs). "Open in Cinema RAW Development" (⇧⌘O) hands a clip to Canon's app (installed on Nick's Mac).
+- **Real-day result of the first run:** the timecode check found nothing to fix (no clips moved).
+- **Still to speed up:** read several clips at once during the check; run the transcript while Resolve renders;
+  later, Resolve stills at the playhead and small preview copies for scrubbing Canon RAW.
+
 ## C. Order of work for the next model
 
 1. A1–A3 (CRM timecode, serial, letters) + a test using the small real clips (A005C004 370 MB, C_0001C002 1.3 GB):

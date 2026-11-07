@@ -4,6 +4,14 @@ serial) inside moov. Layout copied from the real C500 Mark II / C80 files of 202
 import os, struct, subprocess, sys
 
 CANON_UUID = bytes.fromhex('85c0b687820f11e08111f4ce462b6a48')
+PRVW_UUID = bytes.fromhex('eaf42b5e1c984b88b9fbb7dc406e4d16')
+
+
+def jpeg(w, h, src):
+    """A small JPEG of the clip's first frame (what the camera stores as THMB / PRVW)."""
+    r = subprocess.run(['ffmpeg', '-v', 'error', '-i', src, '-frames:v', '1', '-vf', f'scale={w}:{h}',
+                        '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1'], capture_output=True, check=True)
+    return r.stdout
 
 
 def atoms(buf, a, b):
@@ -22,6 +30,7 @@ def box(typ, payload):
 
 
 def canonize(src, dst, model, serial, clip, fourcc=b'CRAW'):
+    thmb, prvw = jpeg(160, 120, src), jpeg(2048, 1080, src)
     buf = bytearray(open(src, 'rb').read())
     top = list(atoms(buf, 0, len(buf)))
     assert top[-1][0] == b'moov', 'moov must be last'
@@ -47,10 +56,13 @@ def canonize(src, dst, model, serial, clip, fourcc=b'CRAW'):
     inner = (box(b'CNCV', b'CanonCRM0001\0') + box(b'CNMN', model.encode() + b'\0')
              + box(b'CNFV', b'Firmware Ver.01.00.00\0') + box(b'CNSN', serial.encode() + b'\0')
              + box(b'CNDT', b'2026-11-06T10:49:02-05:00\0') + box(b'CNCN', clip.encode() + b'\0')
+             + box(b'THMB', struct.pack('>BBBBHHI', 0, 0, 0, 0, 160, 120, len(thmb)) + b'\0' * 4 + thmb)
              + struct.pack('>IIII', 0, 1, 2, 3))
     u = box(b'uuid', CANON_UUID + inner)
     buf[mpos:mpos + 4] = struct.pack('>I', mend - mpos + len(u))
     buf += u
+    # the 2048x1080 preview sits in its own top-level uuid box after moov, as on the real cards
+    buf += box(b'uuid', PRVW_UUID + struct.pack('>QQ', 0, 0) + box(b'PRVW', struct.pack('>IHHHHI', 0, 1, 2048, 1080, 1, len(prvw)) + prvw))
     open(dst, 'wb').write(bytes(buf))
 
 

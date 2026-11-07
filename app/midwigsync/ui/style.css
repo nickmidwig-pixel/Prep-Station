@@ -135,7 +135,7 @@ body.dragging .loaded .timeline { box-shadow: inset 0 0 0 2px var(--cam); }
 table.clips { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .clips th { position: sticky; top: 0; z-index: 1; background: var(--panel); text-align: left; font-weight: 500; color: var(--muted); padding: 7px 10px; border-bottom: 1px solid var(--line); }
 .clips td { padding: 6px 10px; border-bottom: 1px solid rgba(54, 62, 70, .55); white-space: nowrap; }
-.clips td.file { max-width: 520px; width: 46%; overflow: hidden; text-overflow: ellipsis; }
+.clips td.file { max-width: 440px; width: 42%; overflow: hidden; text-overflow: ellipsis; }
 .clips td.status { white-space: normal; color: var(--muted); min-width: 160px; }
 .clips .num { text-align: right; font-variant-numeric: tabular-nums; }
 .clips tr { cursor: default; }
@@ -315,7 +315,7 @@ body.running .block:not(.steps-block) { display: none; }
 .attn li span.w { color: var(--muted); }
 
 /* ---------- table: tracks + chips */
-.clips td.tracks { max-width: 220px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.clips td.tracks { max-width: 190px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .trk { display: inline-block; font-size: 11px; padding: 0 5px; border-radius: 3px; margin-right: 3px; line-height: 16px;
   background: rgba(255,255,255,.05); color: var(--muted); }
 .trk.boom { color: var(--boom); } .trk.lav { color: var(--lav); } .trk.mix, .trk.tc { color: var(--mix); }
@@ -471,3 +471,13 @@ kbd { font: 500 12px/1 'SF Mono', Menlo, ui-monospace, monospace; background: va
 .steps li[data-key]:hover .t { color: #fff; }
 .steps li[data-key]:hover .state { text-decoration: underline; }
 body.running .steps li[data-key] { cursor: default; }
+
+/* ---------- thumbnails */
+table.clips td.file .fc { display: flex; align-items: center; gap: 10px; min-width: 0; }
+table.clips td.file .fn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+table.clips .th { flex: none; width: 64px; height: 34px; border-radius: 3px; background: #0B0D0F; object-fit: cover; display: block; }
+table.clips img.th:not([src]) { background: linear-gradient(90deg, #15181B, #1E2328, #15181B); }
+table.clips .th.aud { width: 64px; height: 34px; background:
+  repeating-linear-gradient(90deg, transparent 0 3px, rgba(147,181,138,.35) 3px 4px) center / 100% 60% no-repeat, #15181B; }
+.tip .tip-th { display: block; width: 192px; border-radius: 3px; margin-bottom: 6px; }
+.viewer .screen img.pv { filter: none; }

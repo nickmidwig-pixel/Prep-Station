@@ -117,16 +117,30 @@ class ResolveBridge:
 
     def build(self, plan, project_name, render_dir):
         r = self.resolve or self.connect()
-        pm = r.GetProjectManager()
-        name = project_name
-        proj = pm.CreateProject(name)
-        k = 2
-        while proj is None and k < 50:
-            name = f'{project_name}_{k}'
+        # Resolve answers scripting calls a while before it can make projects (still loading its database, or a
+        # start-up window such as the project library or an update prompt is open). Wait for it, don't give up.
+        t0, waited, proj, name = time.time(), False, None, project_name
+        while proj is None and time.time() - t0 < 180:
+            pm = r.GetProjectManager()
+            if pm is None or pm.GetCurrentProject() is None:
+                if not waited:
+                    self.log('Waiting for Resolve to finish starting (close any window it shows at start-up)...')
+                    waited = True
+                time.sleep(3)
+                continue
+            try:
+                taken = set(pm.GetProjectListInCurrentFolder() or [])
+            except Exception:  # noqa: BLE001
+                taken = set()
+            name, k = project_name, 2
+            while name in taken and k < 100:
+                name, k = f'{project_name}_{k}', k + 1
             proj = pm.CreateProject(name)
-            k += 1
+            if proj is None:
+                time.sleep(3)
         if proj is None:
-            raise ResolveError('Resolve would not create a new project.')
+            raise ResolveError('Resolve would not create a new project after 3 minutes. If Resolve is showing a window '
+                               '(project library, update, a message), close it, then run Sync the day again.')
         fps = plan['fps']
         for key in ('timelineFrameRate', 'timelinePlaybackFrameRate'):
             proj.SetSetting(key, fps)

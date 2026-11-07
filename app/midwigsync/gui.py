@@ -386,7 +386,12 @@ class Api:
             c = cams[0] if cams else None
         if c is None:
             return dict(ok=False, why='No camera rolling here.')
+        lane = next((l for l in self.p.lanes() if l['key'] == c.get('lane')), None)
+        who = f"{lane['label'] if lane else c['roll']} · {c['name']}"
         if c.get('raw_picture'):
+            img = self._still(c, 608)
+            if img:                    # Canon RAW: the picture the camera saved with the clip (its first frame)
+                return dict(ok=True, img=img, label=f'{who} · camera preview, start of clip', preview=True)
             return dict(ok=False, why=f"{c['name']}: RAW, no picture preview here.")
         off = max(0, at - c['start']) / TC.SR
         key = (c['path'], round(off, 1))
@@ -402,8 +407,77 @@ class Api:
                 cache.clear()
             import base64
             cache[key] = 'data:image/jpeg;base64,' + base64.b64encode(r.stdout).decode()
-        lane = next((l for l in self.p.lanes() if l['key'] == c.get('lane')), None)
-        return dict(ok=True, img=cache[key], label=f"{lane['label'] if lane else c['roll']} · {c['name']}")
+        return dict(ok=True, img=cache[key], label=who)
+
+    # ------------------------------------------------------------ thumbnails (read-only; cached in the app's cache)
+    def _jpeg_scaled(self, data_or_path, width, seek=None):
+        ff = __import__('midwigsync.stamp', fromlist=['x']).ffmpeg_exe()
+        if isinstance(data_or_path, bytes):
+            cmd = [ff, '-v', 'error', '-f', 'image2pipe', '-c:v', 'mjpeg', '-i', 'pipe:0']
+            inp = data_or_path
+        else:
+            cmd = [ff, '-v', 'error'] + (['-ss', f'{seek:.3f}'] if seek else []) + ['-i', data_or_path, '-frames:v', '1']
+            inp = None
+        cmd += ['-vf', f'scale={width}:-2', '-q:v', '4', '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1']
+        try:
+            r = subprocess.run(cmd, input=inp, capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return r.stdout if r.returncode == 0 and r.stdout else None
+
+    def _still(self, c, width):
+        """A small JPEG of a camera clip as a data: URI, or None. Canon RAW: the preview the camera stored in the
+        file. Anything ffmpeg can decode: a frame one second in. Cached on disk by file, size and date."""
+        import base64
+        import hashlib
+        try:
+            st = os.stat(c['path'])
+        except OSError:
+            return None
+        key = hashlib.sha1(f"{c['path']}|{st.st_size}|{st.st_mtime_ns}|{width}".encode()).hexdigest()
+        d = os.path.join(CACHE, 'thumbs')
+        fp = os.path.join(d, key + '.jpg')
+        data = None
+        if os.path.exists(fp):
+            with open(fp, 'rb') as f:
+                data = f.read()
+        else:
+            src = media.embedded_preview(c['path']) or media.embedded_preview(c['path'], 'thmb')
+            if src:
+                data = self._jpeg_scaled(src, width)
+            elif not c.get('raw_picture'):
+                data = self._jpeg_scaled(c['path'], width, seek=min(1.0, c['length'] / TC.SR / 2))
+            if data:
+                os.makedirs(d, exist_ok=True)
+                with open(fp, 'wb') as f:
+                    f.write(data)
+        return 'data:image/jpeg;base64,' + base64.b64encode(data).decode() if data else None
+
+    def thumbs(self, ids):
+        """{id: data URI or None} for camera clips, for the clip list (like Tentacle's)."""
+        from concurrent.futures import ThreadPoolExecutor
+        cl = [c for c in (self.p.by_id(int(i)) for i in ids or []) if c and c['kind'] == 'video']
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            got = list(ex.map(lambda c: self._still(c, 192), cl))
+        return {str(c['id']): g for c, g in zip(cl, got)}
+
+    def open_in_app(self, cid):
+        """Open a clip in its own app: Canon RAW in Canon's Cinema RAW Development, anything else in its
+        default app. Prep Station only asks macOS to open it; it writes nothing."""
+        c = self.p.by_id(int(cid)) if cid is not None else None
+        if not c:
+            return dict(ok=False, text='Select a clip first.')
+        path = c.get('source_path') or c['path']
+        if sys.platform != 'darwin':
+            return dict(ok=False, text='Opening clips in other apps works on the Mac.')
+        crm = path.lower().endswith('.crm')
+        cmd = ['open', '-a', 'Cinema RAW Development', path] if crm else ['open', path]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0 and crm:
+            return dict(ok=False, text='Cinema RAW Development isn’t installed. It’s free from Canon’s support site.')
+        if r.returncode != 0:
+            return dict(ok=False, text=f"macOS couldn't open {c['name']}.")
+        return dict(ok=True, text=f"Opened {c['name']} in {'Cinema RAW Development' if crm else 'its app'}.")
 
     def set_reference(self, roll, channel):
         return self._edit('the reference mic', lambda: self._set_reference_raw(roll, channel))

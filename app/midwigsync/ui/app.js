@@ -15,7 +15,8 @@
   const STEP_MAP = { 'Building aligned ISOs': 'Auto-Align Post', 'Checking alignment': 'Auto-Align Post' };
 
   const S = { project: null, settings: {}, running: false, scanning: false, sel: null, view: null, done: null, day: null, checks: [],
-    expanded: new Set(), collapsed: new Set(), ph: null, playing: null, picked: new Set(), undo: null, redo: null };
+    expanded: new Set(), collapsed: new Set(), ph: null, playing: null, picked: new Set(), undo: null, redo: null,
+    thumbs: {}, thumbAsked: new Set() };
   const api = () => (window.pywebview && window.pywebview.api) || null;
   const APP = () => (S.app && S.app.name) || 'Prep Station';
   const call = async (name, ...args) => { const a = api(); if (!a || !a[name]) return null; try { return await a[name](...args); } catch (e) { console.error(e); return null; } };
@@ -360,7 +361,7 @@
     const tip = $('tip');
     if (c) {
       const st = status(c);
-      tip.innerHTML = `<b>${esc(c.name)}</b><br><span class="t">${c.tc} → ${samplesToTc(c.start + c.length)} (${c.dur})</span>` +
+      tip.innerHTML = (S.thumbs[c.id] ? `<img class="tip-th" src="${S.thumbs[c.id]}" alt="">` : '') + `<b>${esc(c.name)}</b><br><span class="t">${c.tc} → ${samplesToTc(c.start + c.length)} (${c.dur})</span>` +
         (st.t ? `<br>${esc(st.t)}` : '');
       tip.hidden = false;
       const tx = Math.min(mx + 14, r.width - 370), ty = Math.min(my + 14, r.height - 70);
@@ -452,7 +453,7 @@
   async function showFrame(s) {
     const r = await call('frame', Math.round(s), S.sel);
     const img = $('frame');
-    if (r && r.ok) { img.src = r.img; img.classList.add('on'); $('frameNote').textContent = r.label || ''; }
+    if (r && r.ok) { img.src = r.img; img.classList.add('on'); $('frameNote').textContent = r.label || ''; img.classList.toggle('pv', !!r.preview); }
     else { img.classList.remove('on'); $('frameNote').textContent = (r && r.why) || 'No picture here'; }
   }
   async function togglePlay() {
@@ -573,13 +574,34 @@
         const sub2 = `<span class="sub2">${esc(facts(c, ln))}</span>`;
         html.push(`<tr class="${cls}" data-id="${c.id}">
           <td class="c-inc"><input type="checkbox" ${c.include ? 'checked' : ''} data-inc="${c.id}" aria-label="Use ${esc(c.name)}"></td>
-          <td class="file" title="${esc(c.path)}">${esc(c.name)}${sub2}</td>
+          <td class="file" title="${esc(c.path)}"><div class="fc">${c.kind === 'video' ? `<img class="th" data-thumb="${c.id}" alt="" ${S.thumbs[c.id] ? `src="${S.thumbs[c.id]}"` : ''}>` : '<span class="th aud"></span>'}<span class="fn">${esc(c.name)}${sub2}</span></div></td>
           <td class="num">${tc}</td><td class="num">${c.dur}</td>
           <td class="tracks">${tracksCell(c)}</td>
           <td class="status">${chipHtml || `<span class="txt">${esc(st.t)}</span>`}</td></tr>`);
       }
     }
     tb.innerHTML = html.join('');
+    askThumbs();
+  }
+  // thumbnails arrive a few at a time; rows update in place
+  let thumbBusy = false;
+  async function askThumbs() {
+    if (thumbBusy || !S.project) return;
+    const want = S.project.clips.filter((c) => c.kind === 'video' && !S.thumbAsked.has(c.id)).map((c) => c.id);
+    if (!want.length) return;
+    thumbBusy = true;
+    try {
+      for (let i = 0; i < want.length; i += 6) {
+        const ids = want.slice(i, i + 6); ids.forEach((id) => S.thumbAsked.add(id));
+        const got = await call('thumbs', ids) || {};
+        for (const [id, uri] of Object.entries(got)) {
+          if (!uri) continue;
+          S.thumbs[id] = uri;
+          document.querySelectorAll(`img[data-thumb="${id}"]`).forEach((im) => { im.src = uri; });
+        }
+      }
+    } finally { thumbBusy = false; }
+    if (S.project.clips.some((c) => c.kind === 'video' && !S.thumbAsked.has(c.id))) askThumbs();
   }
   // the facts Tentacle shows under each clip, on one line
   function gb(n) { return !n ? '' : n >= 1e9 ? `${(n / 1e9).toFixed(n >= 1e11 ? 0 : 1)} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`; }
@@ -686,6 +708,7 @@
     if (c.slowmo) { $('iFind').disabled = true; $('iAgainst').disabled = true; }
     $('iStamp').disabled = busy || c.start == null || !S.settings.out_dir;
     $('iStamp').hidden = c.kind === 'video';
+    $('iOpen').textContent = /\.crm$/i.test(c.name) ? 'Open in Cinema RAW Development' : 'Open in its app';
     $('iProg').hidden = finding !== c.id;
     let note = '';
     if (c.slowmo) note = 'Slow motion isn’t synced to sound, so there’s nothing to find.';
@@ -730,6 +753,12 @@
     applyState(await call('clip_nudge', c.id, fr));
   }));
   $('iReset').addEventListener('click', async () => { const c = selClip(); if (c) applyState(await call('clip_reset', c.id)); });
+  async function openInApp() {
+    const c = selClip(); if (!c) { toast('Select a clip first'); return; }
+    const r = await call('open_in_app', c.id);
+    if (r) toast(r.text);
+  }
+  $('iOpen').addEventListener('click', openInApp);
   $('iStamp').addEventListener('click', async () => { const c = selClip(); if (c) applyState(await call('clip_stamp', c.id)); });
   $('iClose').addEventListener('click', () => { pick(null); renderTable(); renderInspector(); draw(); });
   $('iFind').addEventListener('click', async () => {
@@ -1280,6 +1309,7 @@
     ['⌘I', 'Show info for the selected clip (Tentacle: Show Info)', 'Clips', K('i', '⌘'), () => { const c = selClip(); if (c) $('insp').scrollIntoView({ block: 'nearest' }); else toast('Select a clip first'); }],
     ['T', 'Type a timecode for the selected clip', 'Clips', K('t'), () => { const c = selClip(); if (c && !$('insp').hidden) { $('iTcIn').focus(); $('iTcIn').select(); } }],
     ['⌘F', 'Find the selected clip by waveform', 'Clips', K('f', '⌘'), () => { if (selClip() && !$('iFind').disabled) $('iFind').click(); }],
+    ['⇧⌘O', 'Open the selected clip in its own app (Canon RAW: Cinema RAW Development)', 'Clips', K('o', '⌘⇧'), openInApp],
     ['+ / −', 'Zoom in / out', 'View', (e) => !isMod(e) && ['+', '=', '-', '_'].includes(e.key), (e) => zoom(e.key === '+' || e.key === '=' ? 0.5 : 2)],
     ['⌘+ / ⌘−', 'Zoom in / out', 'View', (e) => isMod(e) && ['+', '=', '-', '_'].includes(e.key), (e) => zoom(e.key === '+' || e.key === '=' ? 0.5 : 2)],
     ['⇧Z or \\', 'Fit the day', 'View', (e) => (!isMod(e) && e.shiftKey && e.key.toLowerCase() === 'z') || e.key === '\\', () => { fit(); draw(); }],
