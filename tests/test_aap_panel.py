@@ -115,6 +115,8 @@ class FakeBackend:
             return el.value
         if name == 'AXEnabled':
             return el.enabled
+        if name == 'AXCloseButton' and el.role == 'AXWindow':
+            return El('AXButton', 'close', on_press=lambda: setattr(self, 'closed', True))
         return None
 
     def children(self, el):
@@ -193,6 +195,10 @@ def main():
     ok, msg = AP.drive('REF', SOURCES, backend=b, log=lambda m: None, wait_s=0)
     assert not ok and 'did not appear' in msg, msg
     print(f'  panel not open: {msg}')
+    b = FakeBackend(FakePanel(TRACKS))
+    p = AP.Panel(b, log=lambda m: None)
+    assert p.find(0) and p.close() and getattr(b, 'closed', False)
+    print('  panel left open from before: closed (to reopen on the new timeline)')
     print('AAP PANEL OK')
 
 

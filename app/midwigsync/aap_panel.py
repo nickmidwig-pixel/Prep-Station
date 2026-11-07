@@ -121,6 +121,12 @@ class Panel:
                 return False
             self.b.sleep(1.0)
 
+    def close(self):
+        """Close the panel's window (its close button). A panel left open from another project can show that
+        project's tracks; reopening it from Resolve's menu loads the current timeline."""
+        btn = self.b.attr(self.window, 'AXCloseButton')
+        return bool(btn is not None and self.b.press(btn))
+
     # -- reading it
     def nodes(self):
         """Every element of the window in reading order: dict(el, role, label, enabled, value)."""

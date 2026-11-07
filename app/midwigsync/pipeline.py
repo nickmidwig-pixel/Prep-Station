@@ -628,6 +628,7 @@ class Job:
             if 'error' not in info and self.s['aap_auto_press'] and sys.platform == 'darwin':
                 try:
                     if RA.ax_trusted(prompt=True):
+                        RA.close_aap_panel()      # one left open from an earlier project shows that project's tracks
                         RA.open_aap_panel(self.log)
                         time.sleep(4)
                         self._aap_names = (info.get('ref_name', 'REF'), info.get('source_names') or

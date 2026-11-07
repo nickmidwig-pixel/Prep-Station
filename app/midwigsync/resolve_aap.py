@@ -404,6 +404,18 @@ def aap_window_open():
         return False
 
 
+def close_aap_panel():
+    from . import aap_panel as AP
+    try:
+        p = AP.Panel(AP.MacBackend())
+        if p.find(wait_s=0) and p.close():
+            time.sleep(1.5)
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
 def open_aap_panel(log=print):
     """Workspace > Workflow Integrations > Auto-Align Post, via the Resolve menu bar (skipped when the panel's
     window is already open, so a second click can't close it)."""
