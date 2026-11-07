@@ -45,9 +45,12 @@
       <div class="tl-bar">
         <div class="tl-title"><strong id="sumLine">0 clips</strong><span id="sumSub"></span></div>
         <div class="tl-tools">
-          <button class="btn small ghosted" id="addMore">Add more…</button>
-          <button class="btn small ghosted" id="fitDay">Fit day</button>
+          <button class="btn small ghosted icon" id="undoBtn" title="Undo (⌘Z)" aria-label="Undo" disabled>↶</button>
+          <button class="btn small ghosted icon" id="redoBtn" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
+          <span class="tsep"></span>
+          <button class="btn small ghosted" id="addMore" title="Add camera cards or sound (⌘O)">Add more…</button>
           <button class="btn small ghosted" id="clearAll">Clear</button>
+          <button class="btn small ghosted" id="settingsBtn" title="Settings (⌘,)">Settings</button>
         </div>
       </div>
       <div class="days" id="days" hidden role="tablist" aria-label="Shoot days"></div>
@@ -56,6 +59,14 @@
         <div class="tip" id="tip" hidden></div>
       </div>
       <div class="legend">
+        <span class="zoomctl" title="Zoom (+ / −, ⇧Z fits the day)">
+          <button class="zb" id="zoomOut" aria-label="Zoom out">−</button>
+          <input type="range" id="zoomSlider" min="0" max="1000" value="0" aria-label="Timeline zoom">
+          <button class="zb" id="zoomIn" aria-label="Zoom in">+</button>
+          <b id="zoomPct">100%</b>
+          <button class="zb fitb" id="fitDay" title="Fit the day (⇧Z)">Fit</button>
+        </span>
+        <span class="sep"></span>
         <span><i class="sw cam"></i>Camera</span>
         <span><i class="sw boom"></i>Boom</span>
         <span><i class="sw lav"></i>Lav</span>
@@ -67,13 +78,17 @@
         <span><i class="sw ov-bad"></i>Needs you</span>
         <span><i class="sw ov-slow"></i>Slow motion (own timeline)</span>
         <span><i class="sw off"></i>Left out</span>
-        <span class="keys" title="Keyboard shortcuts">Space play · + − zoom · ⌘O add · ⌘↩ sync · ↑↓ clips · Esc close</span>
+        <button class="keys" id="keysBtn" title="Keyboard shortcuts (⌘/)">Shortcuts ⌘/</button>
       </div>
       <div class="viewer" id="viewer" hidden>
-        <div class="screen"><img id="frame" alt=""><span id="frameNote">Click the timeline to see the picture there</span></div>
+        <div class="screen"><img id="frame" alt=""><span id="frameNote">Click the timeline to see the picture there</span><b class="bigtc" id="phTc">--:--:--:--</b></div>
         <div class="transport">
-          <button class="btn small" id="playBtn" title="Play from the playhead (Space)">▶ Play</button>
-          <div class="ptc"><b id="phTc">--:--:--:--</b><span id="phWhat">Click the ruler or an empty spot to move the playhead.</span></div>
+          <div class="row">
+            <button class="btn small" id="playBtn" title="Play from the playhead (Space or L; K stops)">▶ Play</button>
+            <button class="btn small ghosted" id="backBtn" title="Back 5 seconds (J)">↺ 5 s</button>
+          </div>
+          <div class="ptc"><span id="phWhat">Click the ruler or an empty spot to move the playhead. ← → move a frame, ⇧← ⇧→ a second.</span></div>
+          <div class="selline" id="selLine" hidden></div>
         </div>
       </div>
       <details class="attn" id="attn" hidden><summary id="attnSum"></summary><ul id="attnList"></ul></details>
@@ -181,38 +196,16 @@
     </div>
 
     <div class="block steps-block">
-      <h2>What happens</h2>
+      <h2>What happens <button class="link" id="stepsSettings">Settings…</button></h2>
       <ol class="steps" id="steps">
-        <li data-step="Checking timecode"><label><input type="checkbox" data-set="waveform_check"> Check timecode by waveform</label><span class="detail">Every camera and recorder compared across the day. Catches missed jams, files with no timecode, and timecode that looks right but isn’t in sync.</span></li>
-        <li data-step="Writing corrected sound"><span class="fixed">You confirm the fixes, then corrected sound</span><span class="detail">Stops to show you every fix. Then a full copy of the day’s sound with the right timecode, same format and track names. Originals never change.</span></li>
-        <li data-step="Auto-Align Post"><label><input type="checkbox" data-set="aap_mode" data-on="resolve" data-off="skip"> Auto-Align Post in Resolve</label><span class="detail" id="aapDetail">Aligns to the best onboard camera mic, picked by listening. Never to a mix. Presses Render for you.</span></li>
-        <li data-step="Polywav"><span class="fixed">Aligned polywavs</span><span class="detail">Always under 4 GB. Mix tracks included as recorded.</span>
-          <span class="subopts">
-            <label><input type="checkbox" data-set="iso_folder"> Aligned ISOs too (each mic on its own, no mix)</label>
-          </span></li>
-        <li data-step="XML"><span class="fixed">Timelines for editorial</span><span class="detail">XML with the cameras and aligned polywavs for Premiere and Resolve. Slow motion and other frame rates get their own. Plus:</span>
-          <span class="subopts">
-            <label><input type="checkbox" data-set="export_otio"> OTIO</label>
-            <label><input type="checkbox" data-set="export_aaf"> AAF for Pro Tools</label>
-            <label><input type="checkbox" data-set="export_ale"> ALE for Avid</label>
-            <label><input type="checkbox" data-set="export_csv"> Clip list</label>
-          </span></li>
-        <li data-step="Transcript" class="opt"><label><input type="checkbox" data-set="transcribe"> Transcript of the day</label><span class="detail" id="trDetail">Who said what, from the sound files, with timecode at every speaker change and every minute. Word file for producers, plus text and a spreadsheet. Runs on this Mac.</span></li>
-        <li data-step="Report"><span class="fixed">Report</span><span class="detail">What moved, what was skipped, and the checks.</span></li>
+        <li data-step="Checking timecode" data-key="waveform_check"><span class="t">Check timecode by waveform</span><span class="state"></span></li>
+        <li data-step="Writing corrected sound"><span class="t">You confirm the fixes, then corrected sound</span><span class="state always">always</span></li>
+        <li data-step="Auto-Align Post" data-key="aap_mode" data-on="resolve"><span class="t">Auto-Align Post in Resolve</span><span class="state"></span></li>
+        <li data-step="Polywav"><span class="t">Aligned polywavs, under 4 GB</span><span class="state" id="polyState">always</span></li>
+        <li data-step="XML"><span class="t">Timelines for editorial</span><span class="state" id="xmlState">XML</span></li>
+        <li data-step="Transcript" data-key="transcribe"><span class="t">Transcript of the day</span><span class="state"></span></li>
+        <li data-step="Report"><span class="t">Report</span><span class="state always">always</span></li>
       </ol>
-      <details class="more">
-        <summary>More options</summary>
-        <label><input type="checkbox" data-set="aap_auto_press"> Press Render in Auto-Align for me</label>
-        <label class="inline">Aligned file names
-          <select data-set="aligned_names"><option value="same">Same as the originals</option><option value="suffix">Add _ALN</option></select>
-        </label>
-        <label class="inline">Transcript language
-          <select data-set="transcribe_language"><option value="en">English</option><option value="auto">Detect</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="it">Italian</option><option value="pt">Portuguese</option></select>
-        </label>
-        <label class="inline">Polywav length
-          <select data-set="chunk_mode"><option value="max">As much as fits in 4 GB</option><option value="hour">Whole hours (under 4 GB)</option></select>
-        </label>
-      </details>
     </div>
 
     <div class="aap" id="aapCard" hidden>
@@ -259,6 +252,50 @@
     </details>
   </aside>
 </main>
+<div class="sheet-back" id="sheetBack" hidden></div>
+<section class="sheet" id="settingsSheet" hidden role="dialog" aria-modal="true" aria-labelledby="setTitle">
+  <header><h2 id="setTitle">Settings</h2><button class="link" data-close>Done</button></header>
+  <div class="sheet-body">
+    <fieldset>
+      <legend>Synchronisation</legend>
+      <label class="opt"><input type="checkbox" data-set="waveform_check"><span><b>Check timecode by waveform</b>Every camera and recorder compared across the day. Catches missed jams, files with no timecode, and timecode that looks right but isn’t in sync.</span></label>
+      <label class="opt"><input type="checkbox" data-set="aap_mode" data-on="resolve" data-off="skip"><span><b>Auto-Align Post in Resolve</b><i id="aapDetail">Aligns to the best onboard camera mic, picked by listening. Never to a mix.</i></span></label>
+      <label class="opt sub"><input type="checkbox" data-set="aap_auto_press"><span><b>Press Render in Auto-Align for me</b>Uses Accessibility to click Render in the panel. Off: you press it.</span></label>
+      <p class="fixed-note">Always: you confirm every timecode fix before anything is written, then the day’s sound is rewritten with the right timecode (same format, same track names). Originals never change.</p>
+    </fieldset>
+    <fieldset>
+      <legend>Sound out</legend>
+      <label class="inline">Polywav length
+        <select data-set="chunk_mode"><option value="max">As much as fits in 4 GB</option><option value="hour">Whole hours (under 4 GB)</option></select>
+      </label>
+      <label class="opt" id="isoOpt"><input type="checkbox" data-set="iso_folder"><span><b>Aligned ISOs too</b>Each mic on its own, mix tracks left out. Needs Auto-Align.</span></label>
+      <label class="inline">Aligned file names
+        <select data-set="aligned_names"><option value="same">Same as the originals</option><option value="suffix">Add _ALN</option></select>
+      </label>
+    </fieldset>
+    <fieldset>
+      <legend>Export</legend>
+      <p class="fixed-note">Always: an XML for Premiere and Resolve with the cameras and the aligned polywavs. Slow motion and other frame rates get their own.</p>
+      <label class="opt"><input type="checkbox" data-set="export_otio"><span><b>OTIO</b>OpenTimelineIO, for Resolve and others.</span></label>
+      <label class="opt"><input type="checkbox" data-set="export_aaf"><span><b>AAF for Pro Tools</b>Audio only, linked to the aligned files.</span></label>
+      <label class="opt"><input type="checkbox" data-set="export_ale"><span><b>ALE for Avid</b></span></label>
+      <label class="opt"><input type="checkbox" data-set="export_csv"><span><b>Clip list</b>CSV of every file with its timecode, what moved and why.</span></label>
+    </fieldset>
+    <fieldset>
+      <legend>Transcript</legend>
+      <label class="opt"><input type="checkbox" data-set="transcribe"><span><b>Transcript of the day</b><i id="trDetail">Who said what, from the sound files, with timecode at every speaker change and every minute. Word file for producers, plus text and a spreadsheet. Runs on this Mac.</i></span></label>
+      <label class="inline">Language
+        <select data-set="transcribe_language"><option value="en">English</option><option value="auto">Detect</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="it">Italian</option><option value="pt">Portuguese</option></select>
+      </label>
+    </fieldset>
+  </div>
+</section>
+<section class="sheet keys-sheet" id="keysSheet" hidden role="dialog" aria-modal="true" aria-labelledby="keysTitle">
+  <header><h2 id="keysTitle">Keyboard shortcuts</h2><button class="link" data-close>Done</button></header>
+  <div class="sheet-body" id="keysBody"></div>
+</section>
+<div class="toast" id="toast" hidden></div>
+<div class="popmenu" id="popMenu" hidden></div>
 <script src="app.js"></script>
 </body>
 </html>

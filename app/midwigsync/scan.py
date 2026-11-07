@@ -147,6 +147,7 @@ class Project:
         self.dropped = []          # what you dropped (folders/files), for where the output goes
         self.fps_override = None   # '25', '29.97 DF'... when you set the project rate yourself
         self.reports = []          # sound reports found next to the media (frame rate evidence)
+        self.lane_user = {}        # card/roll name -> camera letter you gave it (⌘G grouping, relettering)
         self.fps_info = FR.assess(self)
 
     # ------------------------------------------------------------ scanning
@@ -204,6 +205,10 @@ class Project:
             c['id'] = next_id
             next_id += 1
             c['name'] = os.path.basename(c.get('source_path') or c['path'])
+            try:
+                c['size'] = os.path.getsize(c.get('source_path') or c['path'])
+            except OSError:
+                c['size'] = 0
             if c.get('source_path'):
                 c['out_name'] = os.path.basename(c['path'])
                 c['roll'] = audio_roll(c['source_path'])
@@ -425,7 +430,11 @@ class Project:
             letter = letters.most_common(1)[0][0] if letters else None
             serial = Counter(c.get('serial') for c in r['clips'] if c.get('serial')).most_common(1)
             model = r['camera'] or ''
-            if serial:
+            user = (getattr(self, 'lane_user', None) or {}).get(r['name'])
+            if user:                           # you said which camera this card is
+                letter = user
+                key = ('user', user)
+            elif serial:
                 key = ('serial', model, serial[0][0])
             elif letter:
                 key = ('letter', model, letter)
@@ -437,7 +446,7 @@ class Project:
                 n += 1                         # one camera can't record two clips at once: another body
                 k2 = key + (n,)
             key = k2
-            b = bodies.setdefault(key, dict(rolls=[], letter=letter, model=model, dur=0, ref=False, spans=[]))
+            b = bodies.setdefault(key, dict(rolls=[], letter=letter, model=model, dur=0, ref=False, spans=[], user=bool(user)))
             b['spans'] += spans
             b['rolls'].append(r['name'])
             b['dur'] += sum(c['length'] for c in r['clips'] if c['include'])
@@ -446,6 +455,7 @@ class Project:
                 b['letter'] = letter
         order = sorted(bodies.values(), key=lambda b: (not b['ref'], b['letter'] is None, b['letter'] or '', -b['dur']))
         used, lanes = set(), []
+        order.sort(key=lambda b: not b['user'])     # letters you gave win over letters read from names
         for b in order:            # explicit letters first (unless taken by another body), then the rest in order
             if b['letter'] and b['letter'] not in used:
                 used.add(b['letter'])
@@ -461,7 +471,8 @@ class Project:
             n = len(b['rolls'])
             sub = b['model'] or b['rolls'][0]
             lanes.append(dict(key=key, label=f"{b['letter']} CAM", sub=sub + (f' · {n} cards' if n > 1 else ''),
-                              kind='camera', rolls=sorted(b['rolls']), role='cam', channels=0, letter=b['letter']))
+                              kind='camera', rolls=sorted(b['rolls']), role='cam', channels=0, letter=b['letter'],
+                              user=b['user']))
             for rn in b['rolls']:
                 for c in rolls[rn]['clips']:
                     c['lane'] = key
@@ -724,6 +735,8 @@ class Project:
                 day=c.get('day') or 'unknown', after_midnight=c.get('after_midnight', False), date_note=c.get('date_note'),
                 duplicate_of=os.path.basename(c['duplicate_of']) if c.get('duplicate_of') else None,
                 roles=self.clip_roles(c), track_names=c.get('track_names') or {}, scene=c.get('scene', ''), take=c.get('take', ''),
+                size=c.get('size', 0), width=c.get('width', 0), height=c.get('height', 0), sr=c.get('sr') or c.get('source_sr'),
+                bits=c.get('bits'), serial=c.get('serial'), model=c.get('model', ''),
             ))
         return dict(
             fps=TC.rate_label(self.fps), df=self.df, clips=out_clips,

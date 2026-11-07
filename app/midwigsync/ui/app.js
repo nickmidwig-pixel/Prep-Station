@@ -15,7 +15,7 @@
   const STEP_MAP = { 'Building aligned ISOs': 'Auto-Align Post', 'Checking alignment': 'Auto-Align Post' };
 
   const S = { project: null, settings: {}, running: false, scanning: false, sel: null, view: null, done: null, day: null, checks: [],
-    expanded: new Set(), collapsed: new Set(), ph: null, playing: null };
+    expanded: new Set(), collapsed: new Set(), ph: null, playing: null, picked: new Set(), undo: null, redo: null };
   const api = () => (window.pywebview && window.pywebview.api) || null;
   const APP = () => (S.app && S.app.name) || 'Prep Station';
   const call = async (name, ...args) => { const a = api(); if (!a || !a[name]) return null; try { return await a[name](...args); } catch (e) { console.error(e); return null; } };
@@ -150,6 +150,22 @@
     if (f.has('ubits')) extra.push('User bits differ from the rest of the day');
     return { t: extra.join('. '), k: '' };
   }
+
+  // ------------------------------------------------------------------ selection (one clip, or several: ⌘-click, ⇧-click, ⌘A)
+  function pick(id, how = 'one') {
+    if (id == null) { S.sel = null; S.picked.clear(); return; }
+    if (how === 'toggle') {
+      if (S.picked.has(id)) { S.picked.delete(id); if (S.sel === id) S.sel = S.picked.size ? [...S.picked][S.picked.size - 1] : null; }
+      else { S.picked.add(id); S.sel = id; }
+    } else if (how === 'range' && S.sel != null) {
+      const list = tableOrder().map((c) => c.id);
+      const a = list.indexOf(S.sel), b = list.indexOf(id);
+      if (a < 0 || b < 0) { S.picked = new Set([id]); S.sel = id; return; }
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) S.picked.add(list[i]);
+    } else { S.picked = new Set([id]); S.sel = id; }
+  }
+  const pickedClips = () => (S.project ? S.project.clips.filter((c) => S.picked.has(c.id)) : []);
+  const howFrom = (e) => (e.shiftKey ? 'range' : (e.metaKey || e.ctrlKey) ? 'toggle' : 'one');
 
   // ------------------------------------------------------------------ timeline canvas
   const cv = $('tl');
@@ -296,7 +312,7 @@
           ctx.fillStyle = '#15181B'; ctx.font = `500 ${isTrack ? 10 : 11}px Barlow, sans-serif`;
           ctx.fillText(label, x0 + 6, yy + h / 2 + 0.5); ctx.restore();
         }
-        if (S.sel === c.id) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; roundRect(x0 - 1, yy - 1, Math.max(2, x1 - x0) + 2, h + 2, 3); ctx.stroke(); }
+        if (S.picked.has(c.id)) { ctx.strokeStyle = S.sel === c.id ? '#fff' : 'rgba(255,255,255,.7)'; ctx.lineWidth = 1.5; roundRect(x0 - 1, yy - 1, Math.max(2, x1 - x0) + 2, h + 2, 3); ctx.stroke(); }
       }
       if (!isTrack) {
         const unplaced = laneClips(ln.key).filter((c) => c.start == null).length;
@@ -317,6 +333,7 @@
         ctx.beginPath(); ctx.moveTo(px - 5, 0); ctx.lineTo(px + 6, 0); ctx.lineTo(px + 0.5, 7); ctx.closePath(); ctx.fill();
       }
     }
+    syncZoomUI();
   }
   function roundRect(x, y, w, h, r) {
     ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
@@ -356,17 +373,17 @@
     const r = cv.getBoundingClientRect();
     const mx = e.clientX - r.left, my = e.clientY - r.top;
     const L = layout();
-    if (mx < LABEL_W) {                       // lane labels: open / close a multitrack lane
+    if (mx < LABEL_W) {                       // lane labels: open / close a multitrack lane, or a camera's menu
       const row = rowAt(my, L);
       if (row && row.type === 'lane' && row.multi) {
         if (S.expanded.has(row.key)) S.expanded.delete(row.key); else S.expanded.add(row.key);
         draw();
-      }
+      } else if (row && row.type === 'lane' && row.lane.kind === 'camera') laneMenu(row.lane, e.clientX, e.clientY);
       return;
     }
     const c = my > RULER_H ? hit(mx, my) : null;
-    setPlayhead(sOf(mx, L));
-    if (my > RULER_H) S.sel = c ? c.id : null;
+    if (!(e.shiftKey || e.metaKey || e.ctrlKey) || !c) setPlayhead(sOf(mx, L));
+    if (my > RULER_H) { if (c) pick(c.id, howFrom(e)); else if (!(e.metaKey || e.ctrlKey || e.shiftKey)) pick(null); }
     renderTable(); renderInspector(); draw();
     if (c) { const row = document.querySelector(`tr[data-id="${c.id}"]`); if (row) row.scrollIntoView({ block: 'nearest' }); }
   });
@@ -394,15 +411,34 @@
     draw();
   }, { passive: false });
   window.addEventListener('resize', draw);
-  function zoom(k) {
+  const MIN_VIEW = SR * 5;
+  function fitWidth() { const sp = span(); if (!sp) return SR * 60; return (sp[1] - sp[0]) + 2 * Math.max((sp[1] - sp[0]) * 0.03, SR * 10); }
+  function zoomTo(nw) {
     if (!S.view) return;
     const w = S.view[1] - S.view[0];
     const at = S.ph != null && S.ph > S.view[0] && S.ph < S.view[1] ? S.ph : (S.view[0] + S.view[1]) / 2;
-    const nw = Math.min(Math.max(w * k, SR * 5), SR * 86400);
+    nw = Math.min(Math.max(nw, MIN_VIEW), SR * 86400);
     const f = (at - S.view[0]) / w;
     S.view = [at - f * nw, at - f * nw + nw];
     draw();
   }
+  function zoom(k) { if (S.view) zoomTo((S.view[1] - S.view[0]) * k); }
+  // the slider: 0 = the whole day (100%), right = closer, on a log scale like an NLE
+  function syncZoomUI() {
+    if (!S.view) return;
+    const fw = fitWidth(), w = S.view[1] - S.view[0];
+    const span = Math.log(Math.max(fw / MIN_VIEW, 1.0001));
+    const v = Math.max(0, Math.min(1000, Math.round(1000 * Math.log(Math.max(fw / w, 1e-6)) / span)));
+    if (document.activeElement !== $('zoomSlider')) $('zoomSlider').value = v;
+    const pct = 100 * fw / w;
+    $('zoomPct').textContent = pct >= 1000 ? `${Math.round(pct / 100) / 10}k%` : `${Math.round(pct)}%`;
+  }
+  $('zoomSlider').addEventListener('input', (e) => {
+    const fw = fitWidth(), span = Math.log(Math.max(fw / MIN_VIEW, 1.0001));
+    zoomTo(fw / Math.exp(span * (+e.target.value) / 1000));
+  });
+  $('zoomIn').addEventListener('click', () => zoom(0.5));
+  $('zoomOut').addEventListener('click', () => zoom(2));
 
   // ------------------------------------------------------------------ playhead, sound and picture
   let frameT = null;
@@ -453,6 +489,14 @@
     showFrame(S.ph); draw();
   }
   $('playBtn').addEventListener('click', togglePlay);
+  $('backBtn').addEventListener('click', () => stepPlayhead(-5 * SR));
+  function stepPlayhead(ds) {
+    if (S.ph == null) { const sp = span(); if (!sp) return; S.ph = sp[0]; }
+    setPlayhead(Math.max(0, S.ph + ds));
+    if (S.view && (S.ph < S.view[0] || S.ph > S.view[1])) { const w = S.view[1] - S.view[0]; S.view = [S.ph - w / 2, S.ph + w / 2]; }
+    draw();
+  }
+  const frameS = () => { const [n, d] = fpsPair(); return SR * d / n; };
 
   function slateIdle() {
     const sp = S.project && span();
@@ -522,11 +566,11 @@
       if (closed) continue;
       for (const c of cl) {
         const st = status(c);
-        const cls = [c.include ? '' : 'off', S.sel === c.id ? 'sel' : ''].join(' ');
+        const cls = [c.include ? '' : 'off', S.picked.has(c.id) ? 'sel' : '', S.sel === c.id ? 'primary' : ''].join(' ');
         const tc = c.tc ? (st.old && st.old !== c.tc ? `<span class="old">${st.old}</span>${c.tc}` : c.tc) : '—';
         const ch = chips(c);
         const chipHtml = ch.map(([kk, t]) => `<span class="chip s ${kk}">${esc(t)}</span>`).join('');
-        const sub2 = ln.kind === 'camera' && ln.rolls.length > 1 ? `<span class="sub2">${esc(c.roll)}</span>` : '';
+        const sub2 = `<span class="sub2">${esc(facts(c, ln))}</span>`;
         html.push(`<tr class="${cls}" data-id="${c.id}">
           <td class="c-inc"><input type="checkbox" ${c.include ? 'checked' : ''} data-inc="${c.id}" aria-label="Use ${esc(c.name)}"></td>
           <td class="file" title="${esc(c.path)}">${esc(c.name)}${sub2}</td>
@@ -536,6 +580,25 @@
       }
     }
     tb.innerHTML = html.join('');
+  }
+  // the facts Tentacle shows under each clip, on one line
+  function gb(n) { return !n ? '' : n >= 1e9 ? `${(n / 1e9).toFixed(n >= 1e11 ? 0 : 1)} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`; }
+  function facts(c, ln) {
+    const out = [];
+    if (c.kind === 'video') {
+      if (ln && ln.rolls.length > 1) out.push(c.roll);
+      out.push([c.camera, c.codec && !/not decodable/.test(c.codec) ? c.codec : (c.flags.includes('raw') || /CRM|BRAW|R3D/i.test(c.name) ? 'RAW' : '')].filter(Boolean).join(' '));
+      if (c.width && c.height) out.push(`${c.width}×${c.height}`);
+      if (c.fps) out.push(`${c.fps} fps`);
+      out.push(c.channels ? `${c.channels} × audio` : 'no audio');
+    } else {
+      out.push(`${c.channels} track${c.channels === 1 ? '' : 's'}`);
+      if (c.bits || c.sr) out.push([c.bits ? `${c.bits}-bit` : '', c.sr ? `${c.sr / 1000} kHz` : ''].filter(Boolean).join(' '));
+      if (c.scene || c.take) out.push(`scene ${c.scene || '–'} take ${c.take || '–'}`);
+    }
+    if (c.size) out.push(gb(c.size));
+    if (c.tc_source) out.push(`TC from ${c.tc_source === 'qt-tmcd' ? 'tmcd' : c.tc_source}`);
+    return out.filter(Boolean).join(' · ');
   }
   function tableOrder() {
     const out = [];
@@ -559,8 +622,9 @@
       if (S.collapsed.has(k)) S.collapsed.delete(k); else S.collapsed.add(k);
       renderTable(); return;
     }
-    { const c0 = S.project.clips.find((x) => x.id === +tr.dataset.id); if (c0 && c0.start != null) setPlayhead(c0.start); }
-    S.sel = +tr.dataset.id; renderTable(); renderInspector(); slateIdle(); draw();
+    const how = howFrom(e);
+    { const c0 = S.project.clips.find((x) => x.id === +tr.dataset.id); if (how === 'one' && c0 && c0.start != null) setPlayhead(c0.start); }
+    pick(+tr.dataset.id, how); renderTable(); renderInspector(); slateIdle(); draw();
   });
 
   // ------------------------------------------------------------------ selected clip: timecode by hand + waveform
@@ -574,7 +638,15 @@
   }
   function signedSec(s) { return `${s >= 0 ? '+' : '−'}${Math.abs(s).toFixed(3)} s`; }
   function renderInspector() {
-    const c = selClip();
+    const many = S.picked.size > 1;
+    const c = many ? null : selClip();
+    const sl = $('selLine');
+    sl.hidden = !many;
+    if (many) {
+      const pc = pickedClips(), cams = pc.filter((x) => x.kind === 'video').length;
+      sl.innerHTML = `<b>${pc.length} clips selected</b> ⌫ ${pc.every((x) => x.include) ? 'leave them out' : 'use them'}` +
+        (cams > 1 ? ' · ⌘G one camera' : '') + ' · Esc clear';
+    }
     $('insp').hidden = !c;
     if (!c) return;
     const busy = S.running || S.scanning;
@@ -659,7 +731,7 @@
   }));
   $('iReset').addEventListener('click', async () => { const c = selClip(); if (c) applyState(await call('clip_reset', c.id)); });
   $('iStamp').addEventListener('click', async () => { const c = selClip(); if (c) applyState(await call('clip_stamp', c.id)); });
-  $('iClose').addEventListener('click', () => { S.sel = null; renderTable(); renderInspector(); draw(); });
+  $('iClose').addEventListener('click', () => { pick(null); renderTable(); renderInspector(); draw(); });
   $('iFind').addEventListener('click', async () => {
     const c = selClip(); if (!c) return;
     finding = c.id; delete FIND[c.id];
@@ -687,7 +759,7 @@
   }
   $('days').addEventListener('click', (e) => {
     const b = e.target.closest('[data-day]'); if (!b) return;
-    S.day = b.dataset.day; S.sel = null; fit();
+    S.day = b.dataset.day; pick(null); fit();
     renderDays(); renderPanel(); renderTable(); renderInspector(); slateIdle(); draw();
   });
 
@@ -740,7 +812,7 @@
   function selectClip(id, zoom) {
     const c = S.project && S.project.clips.find((x) => x.id === id);
     if (!c) return;
-    S.sel = id;
+    pick(id);
     if (zoom && c.start != null) { const L = c.length || SR * 10, pad = Math.max(L * 0.6, SR * 20); S.view = [c.start - pad, c.start + L + pad]; }
     renderTable(); renderInspector(); slateIdle(); draw();
     const row = document.querySelector(`tr[data-id="${id}"]`); if (row) row.scrollIntoView({ block: 'nearest' });
@@ -851,11 +923,15 @@
       const k = el.dataset.set; const v = st[k];
       if (el.type === 'checkbox') el.checked = el.dataset.on ? v === el.dataset.on : !!v;
       else if (v != null) el.value = v;
-      const li = el.closest('.steps > li');
-      if (li && el.type === 'checkbox' && li.querySelector('input') === el) li.classList.toggle('off', !el.checked);
     });
-    const subs = document.querySelector('.steps .subopts');
-    if (subs) subs.classList.toggle('dim', st.aap_mode !== 'resolve');     // aligned ISOs need Auto-Align
+    document.querySelectorAll('#steps li[data-key]').forEach((li) => {
+      const v = st[li.dataset.key], on = li.dataset.on ? v === li.dataset.on : !!v;
+      li.classList.toggle('off', !on);
+      li.querySelector('.state').textContent = on ? 'on' : 'off';
+    });
+    $('isoOpt').classList.toggle('dim', st.aap_mode !== 'resolve');     // aligned ISOs need Auto-Align
+    $('polyState').textContent = st.iso_folder && st.aap_mode === 'resolve' ? '+ ISOs' : 'always';
+    $('xmlState').textContent = ['XML'].concat(st.export_otio ? ['OTIO'] : [], st.export_aaf ? ['AAF'] : [], st.export_ale ? ['ALE'] : [], st.export_csv ? ['CSV'] : []).join(' · ');
     // summary line
     if (has) {
       const cl = dayClips();
@@ -875,7 +951,7 @@
     }
     renderAttention();
     $('viewer').hidden = !has;
-    document.querySelector('#viewer .screen').hidden = !lanesAll().some((l) => l.kind === 'camera');
+    document.querySelector('#viewer .screen').classList.toggle('nocam', !lanesAll().some((l) => l.kind === 'camera'));
     const gb = $('goBtn');
     const ds = days();
     const dayLabel = multiDay() && S.day ? (ds.find((d) => d.key === S.day) || {}).label : '';
@@ -888,6 +964,10 @@
     ga.disabled = S.scanning || fpsAsk();
     document.body.classList.toggle('running', S.running);
     document.querySelectorAll('[data-set], #refRoll, #refCh, #jobName, #outDir, #addMore, #clearAll').forEach((el) => { el.disabled = S.running || (el.id === 'refRoll' && !cams.length); });
+    $('undoBtn').disabled = !S.undo || S.running || S.scanning;
+    $('redoBtn').disabled = !S.redo || S.running || S.scanning;
+    $('undoBtn').title = S.undo ? `Undo ${S.undo} (⌘Z)` : 'Nothing to undo (⌘Z)';
+    $('redoBtn').title = S.redo ? `Redo ${S.redo} (⇧⌘Z)` : 'Nothing to redo (⇧⌘Z)';
   }
 
   function applyState(st) {
@@ -896,6 +976,9 @@
     const hadClips = S.project && S.project.clips.length;
     S.project = st.project; S.settings = st.settings || {}; S.running = !!st.running; S.scanning = !!st.scanning;
     S.dayNames = st.day_names || {};
+    S.undo = st.undo || null; S.redo = st.redo || null;
+    if (st.toast) toast(st.toast);
+    { const ids = new Set(S.project.clips.map((c) => c.id)); for (const id of [...S.picked]) if (!ids.has(id)) S.picked.delete(id); if (S.sel != null && !ids.has(S.sel)) S.sel = null; }
     if (st.app) { S.app = st.app; document.title = st.app.name; $('appName').textContent = st.app.name; $('appVer').textContent = st.app.version ? ` ${st.app.version}` : ''; }
     renderDays();
     if (!hadClips || !S.view) fit();
@@ -917,6 +1000,11 @@
   $('chooseFiles').addEventListener('click', () => call('choose_files'));
   $('addMore').addEventListener('click', () => call('choose_folders'));
   $('fitDay').addEventListener('click', () => { fit(); draw(); });
+  $('undoBtn').addEventListener('click', () => doUndo(false));
+  $('redoBtn').addEventListener('click', () => doUndo(true));
+  $('settingsBtn').addEventListener('click', () => openSheet('settingsSheet'));
+  $('stepsSettings').addEventListener('click', () => openSheet('settingsSheet'));
+  $('keysBtn').addEventListener('click', () => openSheet('keysSheet'));
   $('clearAll').addEventListener('click', async () => { S.done = null; resetRun(); applyState(await call('clear')); });
   async function go(which) {
     if (S.running) { await call('cancel'); return; }
@@ -1079,32 +1167,139 @@
   });
   window.MS = { event: (kind, data) => { const h = handlers[kind]; if (h) h(data); } };
 
-  // ------------------------------------------------------------------ keyboard
+  // ------------------------------------------------------------------ sheets, toast, menus
+  let toastT = null;
+  function toast(text) {
+    const el = $('toast'); el.textContent = text; el.hidden = false;
+    clearTimeout(toastT); toastT = setTimeout(() => { el.hidden = true; }, 2200);
+  }
+  function openSheet(id) {
+    closeSheets();
+    $('sheetBack').hidden = false; $(id).hidden = false;
+    if (id === 'keysSheet') renderKeys();
+    const f = $(id).querySelector('input, select, button'); if (f) f.focus();
+  }
+  function closeSheets() { let was = false; document.querySelectorAll('.sheet').forEach((el) => { was = was || !el.hidden; el.hidden = true; }); $('sheetBack').hidden = true; return was; }
+  const sheetOpen = () => [...document.querySelectorAll('.sheet')].some((el) => !el.hidden);
+  $('sheetBack').addEventListener('click', closeSheets);
+  document.querySelectorAll('.sheet [data-close]').forEach((b) => b.addEventListener('click', closeSheets));
+
+  function closeMenu() { const m = $('popMenu'); const was = !m.hidden; m.hidden = true; return was; }
+  function laneMenu(ln, x, y) {
+    const m = $('popMenu');
+    const taken = new Map(lanesAll().filter((l) => l.kind === 'camera').map((l) => [l.letter, l]));
+    m.innerHTML = `<div class="pm-h">${esc(ln.label)} · ${esc(ln.sub)}</div><div class="pm-l">Camera letter</div><div class="pm-letters">` +
+      'ABCDEFGH'.split('').map((L) => `<button data-letter="${L}" class="${L === ln.letter ? 'on' : ''}" title="${taken.has(L) && L !== ln.letter ? 'Swaps with ' + esc(taken.get(L).label) : ''}">${L}</button>`).join('') +
+      `</div><button class="pm-i" data-selall="${esc(ln.key)}">Select every clip on ${esc(ln.label)}</button>`;
+    m.hidden = false;
+    m.style.left = `${Math.min(x, window.innerWidth - 260)}px`; m.style.top = `${Math.min(y, window.innerHeight - 160)}px`;
+    m.dataset.lane = ln.key;
+  }
+  $('popMenu').addEventListener('click', async (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    const key = $('popMenu').dataset.lane;
+    closeMenu();
+    if (b.dataset.letter) applyState(await call('set_lane_letter', key, b.dataset.letter));
+    else if (b.dataset.selall) { S.picked = new Set(laneClips(key).map((c) => c.id)); S.sel = [...S.picked][0] ?? null; renderTable(); renderInspector(); draw(); }
+  });
+  document.addEventListener('mousedown', (e) => { if (!e.target.closest('#popMenu')) closeMenu(); });
+
+  async function doUndo(redo) {
+    if (S.running || S.scanning) return;
+    if (redo ? !S.redo : !S.undo) { toast(redo ? 'Nothing to redo' : 'Nothing to undo'); return; }
+    applyState(await call(redo ? 'redo' : 'undo'));
+  }
+  async function useOrLeaveOut() {
+    const pc = pickedClips(); if (!pc.length || S.running) return;
+    const all = pc.every((c) => c.include);
+    applyState(await call('set_include_many', pc.map((c) => c.id), !all));
+  }
+  async function removePicked() {
+    const pc = pickedClips(); if (!pc.length || S.running) return;
+    applyState(await call('remove_clips', pc.map((c) => c.id)));
+    pick(null); renderTable(); renderInspector(); draw();
+    toast(`Removed ${pc.length} clip${pc.length === 1 ? '' : 's'} from the list (⌘Z brings ${pc.length === 1 ? 'it' : 'them'} back). Files on disk are untouched.`);
+  }
+  function selectWhere(test) {
+    S.picked = new Set(tableOrder().filter(test).map((c) => c.id));
+    S.sel = S.picked.size ? [...S.picked][0] : null;
+    renderTable(); renderInspector(); slateIdle(); draw();
+  }
+  async function copyTc() {
+    const c = selClip();
+    const tc = c && c.start != null ? c.tc : S.ph != null ? samplesToTc(S.ph) : null;
+    if (!tc) return;
+    await call('copy_text', tc); toast(`Copied ${tc}`);
+  }
+  function moveSel(d) {
+    const list = tableOrder(); if (!list.length) return;
+    let i = list.findIndex((c) => c.id === S.sel);
+    i = i < 0 ? 0 : Math.min(list.length - 1, Math.max(0, i + d));
+    selectClip(list[i].id, false);
+    if (list[i].start != null) setPlayhead(list[i].start);
+  }
+  function jumpEdge(d) {               // previous / next clip start or end on any lane, from the playhead
+    const pts = [...new Set(dayClips().filter((c) => c.start != null && c.include).flatMap((c) => [c.start, c.start + c.length]))].sort((a, b) => a - b);
+    const at = S.ph ?? (span() || [0])[0];
+    const t = d > 0 ? pts.find((p) => p > at + 1) : [...pts].reverse().find((p) => p < at - 1);
+    if (t != null) stepPlayhead(t - at);
+  }
+
+  // [keys, label, group, test(e), run()]  ·  the shortcuts sheet is built from this table
+  const isMod = (e) => e.metaKey || e.ctrlKey;
+  const K = (key, mods = '') => (e) => e.key.toLowerCase() === key && isMod(e) === mods.includes('⌘') && e.shiftKey === mods.includes('⇧') && e.altKey === mods.includes('⌥');
+  const has = () => S.project && S.project.clips.length;
+  const KEYS = [
+    ['⌘Z', 'Undo', 'Edit', K('z', '⌘'), () => doUndo(false), true],
+    ['⇧⌘Z', 'Redo', 'Edit', K('z', '⌘⇧'), () => doUndo(true), true],
+    ['⌘A', 'Select every clip (this day)', 'Edit', K('a', '⌘'), () => has() && selectWhere(() => true)],
+    ['⌘1', 'Select camera clips (Tentacle: Select Video Files)', 'Edit', K('1', '⌘'), () => has() && selectWhere((c) => c.kind === 'video')],
+    ['⌘2', 'Select sound files (Tentacle: Select Audio Files)', 'Edit', K('2', '⌘'), () => has() && selectWhere((c) => c.kind === 'audio')],
+    ['⌘C', 'Copy timecode (selected clip, or the playhead)', 'Edit', (e) => K('c', '⌘')(e) && !String(window.getSelection() || ''), copyTc],
+    ['⌫', 'Leave out / use the selected clips', 'Edit', (e) => !isMod(e) && (e.key === 'Backspace' || e.key === 'Delete'), useOrLeaveOut],
+    ['⌘⌫', 'Remove the selected clips from the list (files untouched)', 'Edit', (e) => isMod(e) && (e.key === 'Backspace' || e.key === 'Delete'), removePicked],
+    ['⌘G', 'These cards are one camera (Tentacle: Create new Sync Group)', 'Edit', K('g', '⌘'), async () => { const pc = pickedClips().filter((c) => c.kind === 'video'); if (pc.length) applyState(await call('group_camera', pc.map((c) => c.id), null)); else toast('Select camera clips first'); }],
+    ['Esc', 'Close / clear the selection', 'Edit', (e) => e.key === 'Escape', () => { if (closeSheets() || closeMenu()) return; if (S.playing) { stopPlay(); return; } pick(null); renderTable(); renderInspector(); slateIdle(); draw(); }, true],
+    ['Space', 'Play / stop', 'Playback', (e) => e.key === ' ' && !isMod(e), togglePlay],
+    ['L', 'Play', 'Playback', K('l'), () => { if (!S.playing) togglePlay(); }],
+    ['K', 'Stop', 'Playback', K('k'), () => { if (S.playing) stopPlay(); }],
+    ['J', 'Back 5 seconds', 'Playback', K('j'), () => stepPlayhead(-5 * SR)],
+    ['← / →', 'Playhead one frame back / on', 'Playback', (e) => !isMod(e) && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => stepPlayhead((e.key === 'ArrowLeft' ? -1 : 1) * frameS())],
+    ['⇧← / ⇧→', 'Playhead one second back / on', 'Playback', (e) => !isMod(e) && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => stepPlayhead((e.key === 'ArrowLeft' ? -1 : 1) * SR)],
+    ['⌥← / ⌥→', 'Playhead to the previous / next clip edge', 'Playback', (e) => e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => jumpEdge(e.key === 'ArrowLeft' ? -1 : 1)],
+    ['Home / End', 'Playhead to the start / end of the day', 'Playback', (e) => e.key === 'Home' || e.key === 'End', (e) => { const sp = span(); if (sp) stepPlayhead((e.key === 'Home' ? sp[0] : sp[1]) - (S.ph ?? sp[0])); }],
+    ['↑ / ↓', 'Previous / next clip in the list', 'Clips', (e) => !isMod(e) && (e.key === 'ArrowUp' || e.key === 'ArrowDown'), (e) => moveSel(e.key === 'ArrowDown' ? 1 : -1)],
+    ['⌘I', 'Show info for the selected clip (Tentacle: Show Info)', 'Clips', K('i', '⌘'), () => { const c = selClip(); if (c) $('insp').scrollIntoView({ block: 'nearest' }); else toast('Select a clip first'); }],
+    ['T', 'Type a timecode for the selected clip', 'Clips', K('t'), () => { const c = selClip(); if (c && !$('insp').hidden) { $('iTcIn').focus(); $('iTcIn').select(); } }],
+    ['⌘F', 'Find the selected clip by waveform', 'Clips', K('f', '⌘'), () => { if (selClip() && !$('iFind').disabled) $('iFind').click(); }],
+    ['+ / −', 'Zoom in / out', 'View', (e) => !isMod(e) && ['+', '=', '-', '_'].includes(e.key), (e) => zoom(e.key === '+' || e.key === '=' ? 0.5 : 2)],
+    ['⌘+ / ⌘−', 'Zoom in / out', 'View', (e) => isMod(e) && ['+', '=', '-', '_'].includes(e.key), (e) => zoom(e.key === '+' || e.key === '=' ? 0.5 : 2)],
+    ['⇧Z or \\', 'Fit the day', 'View', (e) => (!isMod(e) && e.shiftKey && e.key.toLowerCase() === 'z') || e.key === '\\', () => { fit(); draw(); }],
+    ['⌘O', 'Add camera cards or sound (Tentacle: Open)', 'File', K('o', '⌘'), () => { if (!S.running) call('choose_folders'); }, true],
+    ['⌘↩', 'Sync the day', 'File', (e) => isMod(e) && e.key === 'Enter', () => { if (!S.running) go(multiDay() ? S.day : null); }, true],
+    ['⌘,', 'Settings', 'File', (e) => isMod(e) && e.key === ',', () => openSheet('settingsSheet'), true],
+    ['⌘/ or ?', 'This list', 'File', (e) => (isMod(e) && e.key === '/') || e.key === '?', () => openSheet('keysSheet'), true],
+  ];
+  function renderKeys() {
+    const groups = [...new Set(KEYS.map((k) => k[2]))];
+    $('keysBody').innerHTML = groups.map((g) => `<fieldset><legend>${g}</legend><dl>` +
+      KEYS.filter((k) => k[2] === g).map((k) => `<dt><kbd>${esc(k[0])}</kbd></dt><dd>${esc(k[1])}</dd>`).join('') + '</dl></fieldset>').join('') +
+      '<p class="fixed-note">Click: select one · ⌘-click: add or remove · ⇧-click: a range. Click a camera’s name on the timeline to change its letter. Double-click a clip to zoom to it. Pinch or ⌘-scroll zooms the timeline.</p>';
+  }
   document.addEventListener('keydown', async (e) => {
     const typing = e.target.matches('input[type=text], textarea, select');
-    const mod = e.metaKey || e.ctrlKey;
-    if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); if (!S.running) call('choose_folders'); return; }
-    if (mod && e.key === 'Enter') { e.preventDefault(); if (!S.running) go(multiDay() ? S.day : null); return; }
-    if (typing) { if (e.key === 'Escape') e.target.blur(); return; }
-    if (e.key === 'Escape') { if (S.playing) { stopPlay(); return; } if (S.sel != null) { S.sel = null; renderTable(); renderInspector(); slateIdle(); draw(); } return; }
-    if (!S.project || !S.project.clips.length) return;
-    if (e.key === '+' || e.key === '=') { e.preventDefault(); zoom(0.5); return; }
-    if (e.key === '-' || e.key === '_') { e.preventDefault(); zoom(2); return; }
-    if (e.key === ' ') { e.preventDefault(); togglePlay(); return; }
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      const list = tableOrder();
-      if (!list.length) return;
-      let i = list.findIndex((c) => c.id === S.sel);
-      i = i < 0 ? 0 : Math.min(list.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)));
-      selectClip(list[i].id, false);
-      return;
+    // in a text field the field keeps its own keys (its own undo, copy, arrows); only these still work
+    if (typing) {
+      if (e.key === 'Escape') { e.target.blur(); return; }
+      if (!(isMod(e) && (e.key === 'Enter' || e.key.toLowerCase() === 'o' || e.key === ','))) return;
     }
-    const c = selClip();
-    if (!c || S.running) return;
-    if (e.key === 'Backspace' || e.key === 'Delete') {
+    if (sheetOpen() && e.key !== 'Escape' && !(isMod(e) && e.key === ',')) return;
+    for (const [, , , test, run, always] of KEYS) {
+      if (!test(e)) continue;
+      if (!always && (!S.project || !S.project.clips.length)) return;
       e.preventDefault();
-      applyState(await call('set_include', c.id, !c.include));
+      await run(e);
+      return;
     }
   });
 

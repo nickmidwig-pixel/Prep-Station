@@ -76,6 +76,17 @@ Read AudioTC · Sync Map · Settings. One window, no panels to open.
 7. What Tentacle lacks and we keep: the review stop before writing, originals lock, Auto-Align, polywavs, slow
    motion separation, transcript, frame-rate assessment.
 
+## Progress (1.4, 2026-11-06)
+- C1 done: A1-A3 (CRM tmcd, serial + model from the uuid box, card-folder and C80 letters), CRM/REEL_xxx treated as a
+  card. Real A005C004 = 17:17:58:07 / 582022100067 and C_0001C002 = 10:56:37:05 / 012919000260, read in place.
+- C2 done: A4 roles (safety copies, Best Mic / Lavs mixes, iXML interleave order), speaker names (ALEX, CLARA...);
+  A8 (TRASH/UNDO skipped, FALSETAKES left out with a chip).
+- C5 mostly done: B5 settings sheet, B3 zoom slider, B4 big timecode over the picture, B1 facts line per clip, plus
+  undo/redo and the full keyboard map (Nick asked for both). Still open: B2 mute/solo per lane, pale clip blocks,
+  B6 "fixed" corner ribbon (the chips cover it for now).
+- C3/C4 next: the real-day scan and the TC check need the app on Nick's Mac (the Cowork VM can read the drive but
+  can't receive the code cheaply). Ask Nick to drop 261106 into 1.4: it only reads.
+
 ## C. Order of work for the next model
 
 1. A1–A3 (CRM timecode, serial, letters) + a test using the small real clips (A005C004 370 MB, C_0001C002 1.3 GB):

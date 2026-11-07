@@ -34,7 +34,7 @@ before = walk()
 print(f'{len(before)} original files fingerprinted')
 runs = [['run_pipeline.py'], ['run_extras.py'], ['run_mixer_day.py'], ['run_two_days.py'], ['test_guard.py'],
         ['test_framerate.py'], ['test_slowmo.py'], ['test_refpick.py'], ['test_camera_copy.py'], ['test_transcript.py'],
-        ['test_review.py'], ['test_canon_raw.py']]
+        ['test_review.py'], ['test_canon_raw.py'], ['test_window_keys.py']]
 for r in runs:
     t = time.time()
     p = subprocess.run([sys.executable, os.path.join(HERE, r[0])], capture_output=True, text=True)

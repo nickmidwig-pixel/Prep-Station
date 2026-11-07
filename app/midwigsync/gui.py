@@ -1,4 +1,5 @@
 """App window (pywebview). Python owns the project and the job; the page just shows them."""
+import copy
 import json
 import os
 import re
@@ -59,6 +60,100 @@ class Api:
         self.scanning = False
         self.user_named = False
         self.user_out = False
+        self.undo_stack = []       # [(label, snapshot)] newest last
+        self.redo_stack = []
+
+    # ------------------------------------------------------------ undo / redo
+    # Every edit you make in the window (which clips are used, timecode you set or picked, slow-motion marks,
+    # cameras grouped or relettered, frame rate, reference mic, files added, removed or cleared) is one step.
+    # Snapshots hold the edit fields of every clip plus the project-level choices; files on disk are never involved.
+    EDIT_KEYS = ('include', 'manual', 'start', 'flags', 'slowmo_user', 'sync')
+    UNDO_DEPTH = 200
+
+    def _snap(self):
+        p = self.p
+        return dict(
+            clips=list(p.clips), vals=[(c, copy.deepcopy({k: c.get(k) for k in self.EDIT_KEYS})) for c in p.clips],
+            proj=copy.deepcopy(dict(fps_override=p.fps_override, dropped=p.dropped, reports=p.reports,
+                                    unsupported=p.unsupported, errors=p.errors, lane_user=getattr(p, 'lane_user', {}))),
+            settings=copy.deepcopy({k: self.settings.get(k) for k in ('reference', 'mode', 'job_name', 'out_dir')}),
+            flags=(self.user_named, self.user_out))
+
+    def _diff(self, a, b):
+        """Only what one edit changed (so undoing it never touches what a sync run did in between)."""
+        d = dict(clips=None, vals=[], proj={}, settings={}, flags=None)
+        if not (len(a['clips']) == len(b['clips']) and all(x is y for x, y in zip(a['clips'], b['clips']))):
+            d['clips'] = (a['clips'], b['clips'])
+        av = {id(c): (c, v) for c, v in a['vals']}
+        bv = {id(c): v for c, v in b['vals']}
+        for k, (c, va) in av.items():
+            vb = bv.get(k)
+            if vb is None:
+                continue                       # removed: it comes back with the clip list, as it was
+            ch = {f: (va[f], vb[f]) for f in self.EDIT_KEYS if va[f] != vb[f]}
+            if ch:
+                d['vals'].append((c, ch))
+        for part in ('proj', 'settings'):
+            for k in a[part]:
+                if a[part][k] != b[part][k]:
+                    d[part][k] = (a[part][k], b[part][k])
+        if a['flags'] != b['flags']:
+            d['flags'] = (a['flags'], b['flags'])
+        return d if (d['clips'] or d['vals'] or d['proj'] or d['settings'] or d['flags']) else None
+
+    def _apply(self, d, which):
+        """which 0 = as before the edit (undo), 1 = as after it (redo)."""
+        p = self.p
+        if d['clips']:
+            p.clips = list(d['clips'][which])
+        for c, ch in d['vals']:
+            for k, pair in ch.items():
+                c[k] = copy.deepcopy(pair[which])
+        for k, pair in d['proj'].items():
+            setattr(p, k, copy.deepcopy(pair[which]))
+        for k, pair in d['settings'].items():
+            self.settings[k] = copy.deepcopy(pair[which])
+        if d['flags']:
+            self.user_named, self.user_out = d['flags'][which]
+        if p.clips:
+            p.assign_days()
+        p.analyze()
+
+    def _push(self, label, before):
+        d = self._diff(before, self._snap())
+        if d:
+            self.undo_stack.append((label, d))
+            del self.undo_stack[:-self.UNDO_DEPTH]
+            self.redo_stack.clear()
+        return bool(d)
+
+    def _edit(self, label, fn):
+        """Run one edit; if it changed anything, it becomes one undo step."""
+        before = self._snap()
+        res = fn()
+        if self._push(label, before) and isinstance(res, dict) and 'project' in res:
+            res.update(undo=label, redo=None)
+        return res
+
+    def undo(self):
+        if self._busy() or self.scanning or not self.undo_stack:
+            return self._state()
+        label, d = self.undo_stack.pop()
+        self._apply(d, 0)
+        self.redo_stack.append((label, d))
+        st = self._state()
+        st['toast'] = f'Undid {label}'
+        return st
+
+    def redo(self):
+        if self._busy() or self.scanning or not self.redo_stack:
+            return self._state()
+        label, d = self.redo_stack.pop()
+        self._apply(d, 1)
+        self.undo_stack.append((label, d))
+        st = self._state()
+        st['toast'] = f'Redid {label}'
+        return st
 
     # ------------------------------------------------------------ push to page
     def emit(self, kind, data=None):
@@ -81,7 +176,9 @@ class Api:
                     pass
         return dict(project=pj, settings=s, running=bool(self.job and self.job_thread and self.job_thread.is_alive()),
                     scanning=self.scanning, platform=sys.platform, app=dict(name=APP_NAME, version=APP_VERSION),
-                    day_names=day_names, user_named=self.user_named)
+                    day_names=day_names, user_named=self.user_named,
+                    undo=self.undo_stack[-1][0] if self.undo_stack else None,
+                    redo=self.redo_stack[-1][0] if self.redo_stack else None)
 
     job_thread = None
 
@@ -97,13 +194,19 @@ class Api:
             self.emit('notice', dict(text='Wait for the run to finish before adding files.', ok=False))
             return False
 
+        before = self._snap()
+
         def work():
             self.scanning = True
             self.emit('scan', dict(active=True, done=0, total=0, name=''))
             try:
+                n0 = len(self.p.clips)
                 self.p.add_paths(paths, progress=lambda i, n, name: self.emit('scan', dict(active=True, done=i, total=n, name=name)))
                 self.p.check_short_clips(self.settings.get('short_clip_s', 20))
                 self._refresh_defaults()
+                added = len(self.p.clips) - n0
+                if added:
+                    self._push(f"adding {added} file{'s' if added != 1 else ''}", before)
             except Exception as e:  # noqa: BLE001
                 self.emit('error', dict(message=f'Could not read the files: {e}', trace=traceback.format_exc()[-1500:]))
             finally:
@@ -155,6 +258,13 @@ class Api:
         return self._state()
 
     def set_setting(self, key, value):
+        if key in ('mode', 'job_name') and not getattr(self, '_in_edit', False):
+            self._in_edit = True
+            try:
+                return self._edit({'mode': 'the sync-to choice', 'job_name': 'the job name'}[key],
+                                  lambda: self.set_setting(key, value))
+            finally:
+                self._in_edit = False
         if key == 'job_name':
             value = ''.join(ch for ch in str(value) if ch.isalnum() or ch in '_-. ').strip().replace(' ', '_')
             self.user_named = True
@@ -169,6 +279,9 @@ class Api:
         return self._state()
 
     def set_fps(self, choice):
+        return self._edit('the frame rate', lambda: self._set_fps_raw(choice))
+
+    def _set_fps_raw(self, choice):
         """Project frame rate: 'auto' lets the day decide (23.976 unless it clearly isn't); anything else is yours."""
         if self._busy():
             return self._state()
@@ -176,6 +289,9 @@ class Api:
         return self._state()
 
     def clip_slowmo(self, cid, value):
+        return self._edit(f'the slow-motion mark on {self._cname(cid)}', lambda: self._clip_slowmo_raw(cid, value))
+
+    def _clip_slowmo_raw(self, cid, value):
         """Mark (True), unmark (False) or let the app decide (None) whether a clip is slow motion."""
         c = self.p.by_id(int(cid))
         if c and not self._busy():
@@ -286,6 +402,9 @@ class Api:
         return dict(ok=True, img=cache[key], label=f"{lane['label'] if lane else c['roll']} · {c['name']}")
 
     def set_reference(self, roll, channel):
+        return self._edit('the reference mic', lambda: self._set_reference_raw(roll, channel))
+
+    def _set_reference_raw(self, roll, channel):
         if roll in (None, '', 'auto'):
             dr = self.p.default_reference()
             self.settings['reference'] = dict(dr, auto=True) if dr else None
@@ -294,12 +413,80 @@ class Api:
         return self._state()
 
     def set_include(self, cid, include):
+        return self._edit(f"{'using' if include else 'leaving out'} {self._cname(cid)}", lambda: self._set_include_raw(cid, include))
+
+    def _set_include_raw(self, cid, include):
         c = self.p.by_id(int(cid))
         if c:
             c['include'] = bool(include)
         return self._state()
 
+    def _cname(self, cid):
+        try:
+            c = self.p.by_id(int(cid))
+        except (TypeError, ValueError):
+            c = None
+        return c['name'] if c else 'a clip'
+
+    def set_include_many(self, ids, include):
+        """Use or leave out several clips at once (one undo step)."""
+        ids = [int(i) for i in ids or []]
+        label = (f"{'using' if include else 'leaving out'} "
+                 + (self._cname(ids[0]) if len(ids) == 1 else f'{len(ids)} clips'))
+
+        def go():
+            if self._busy():
+                return self._state()
+            for i in ids:
+                c = self.p.by_id(i)
+                if c:
+                    c['include'] = bool(include)
+            return self._state()
+        return self._edit(label, go)
+
+    def group_camera(self, ids, letter=None):
+        """Like Tentacle's Create Sync Group (⌘G): the cards these clips came from are one camera. Their lane takes
+        `letter`, or the letter of the first selected clip's camera. Only camera clips count."""
+        def go():
+            if self._busy():
+                return self._state()
+            cl = [c for c in (self.p.by_id(int(i)) for i in ids or []) if c and c['kind'] == 'video']
+            if not cl:
+                return self._with_msg('Select camera clips to group them as one camera.', False)
+            lanes = {l['key']: l for l in self.p.lanes()}
+            first = lanes.get(cl[0].get('lane')) or {}
+            L = (letter or first.get('letter') or 'A').upper()[:1]
+            for c in cl:
+                self.p.lane_user[c['roll']] = L
+            self.p.analyze()
+            return self._state()
+        return self._edit('grouping cameras', go)
+
+    def set_lane_letter(self, lane_key, letter):
+        """Give a camera lane another letter (every card on it moves together). Taking a letter another camera has
+        swaps them."""
+        def go():
+            if self._busy():
+                return self._state()
+            lanes = self.p.lanes()
+            ln = next((l for l in lanes if l['key'] == lane_key and l['kind'] == 'camera'), None)
+            L = str(letter or '').upper()[:1]
+            if not ln or not L.isalpha() or L == ln['letter']:
+                return self._state()
+            other = next((l for l in lanes if l['kind'] == 'camera' and l['letter'] == L), None)
+            if other:
+                for r in other['rolls']:
+                    self.p.lane_user[r] = ln['letter']
+            for r in ln['rolls']:
+                self.p.lane_user[r] = L
+            self.p.analyze()
+            return self._state()
+        return self._edit('the camera letter', go)
+
     def remove_clips(self, ids):
+        return self._edit(f"removing {len(ids)} clip{'s' if len(ids) != 1 else ''}", lambda: self._remove_clips_raw(ids))
+
+    def _remove_clips_raw(self, ids):
         if self._busy():
             return self._state()
         self.p.remove([int(i) for i in ids])
@@ -307,6 +494,9 @@ class Api:
         return self._state()
 
     def clear(self):
+        return self._edit('clearing the day', lambda: self._clear_raw())
+
+    def _clear_raw(self):
         if self.job_thread and self.job_thread.is_alive():
             return self._state()
         self.p = Project()
@@ -480,6 +670,9 @@ class Api:
         return st
 
     def clip_set_tc(self, cid, text):
+        return self._edit(f'the timecode of {self._cname(cid)}', lambda: self._clip_set_tc_raw(cid, text))
+
+    def _clip_set_tc_raw(self, cid, text):
         c = self.p.by_id(int(cid))
         if not c or self._busy():
             return self._with_msg('Wait for the run to finish.', False) if c else self._state()
@@ -491,6 +684,9 @@ class Api:
         return self._with_msg(f"{c['name']} now starts at {TC.samples_to_tc(start, self.p.fps, self.p.df)}.")
 
     def clip_nudge(self, cid, frames):
+        return self._edit(f'the nudge on {self._cname(cid)}', lambda: self._clip_nudge_raw(cid, frames))
+
+    def _clip_nudge_raw(self, cid, frames):
         c = self.p.by_id(int(cid))
         if not c or self._busy():
             return self._state()
@@ -503,6 +699,9 @@ class Api:
         return self._state()
 
     def clip_accept(self, cid, start, note=''):
+        return self._edit(f'placing {self._cname(cid)}', lambda: self._clip_accept_raw(cid, start, note))
+
+    def _clip_accept_raw(self, cid, start, note=''):
         c = self.p.by_id(int(cid))
         if not c or self._busy():
             return self._state()
@@ -510,6 +709,9 @@ class Api:
         return self._with_msg(f"{c['name']} placed at {TC.samples_to_tc(int(start), self.p.fps, self.p.df)}.")
 
     def clip_reset(self, cid):
+        return self._edit(f'the timecode of {self._cname(cid)}', lambda: self._clip_reset_raw(cid))
+
+    def _clip_reset_raw(self, cid):
         c = self.p.by_id(int(cid))
         if not c or self._busy():
             return self._state()

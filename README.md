@@ -49,21 +49,43 @@ Job name = the shoot date (today if the files don't say). Output = `<date>_SYNCE
 shoot folder (never inside a card or roll folder).
 
 ## Window (ui/)
-- Lanes like Tentacle Sync Studio: A CAM, B CAM... (all cards of one camera body on one lane; letters from the
-  camera's own naming, else by how much each shot), then each sound folder; multitrack lanes open into tracks.
+- Lanes like Tentacle Sync Studio: A CAM, B CAM... All cards of one camera body sit on one lane: grouped by the body
+  serial (Canon uuid box, Sony XML), else the letter, else the folder. Letters come from the card folder
+  (UDP_261106_C80_B_001 -> B), else the camera's clip names (A001C003, C_0001C002), else by how much each shot.
+  Click a camera's name on the timeline to change its letter; ⌘G puts the selected cards on one camera.
+  Then each sound folder; multitrack lanes open into tracks.
 - Colour: cameras by letter; sound by mic (boom gold, lav green, multitrack copper, mix grey). Overlays: orange =
   TC fixed, white = set by you, red stripes = needs you, grey hatching = slow motion (own timeline), dim = left out.
 - Playhead: click the ruler or the timeline; Space plays the sound there (selected clip, else the recorder's mix /
   boom, else the camera) through afplay; a still of the picture shows beside it.
-- Keys: Space play/stop, + / − zoom, ⌘O add, ⌘↩ sync, ↑↓ clips, Delete include, Esc.
+- Undo / redo (⌘Z / ⇧⌘Z, and the ↶ ↷ buttons) for every edit: use / leave out, timecode typed or picked, slow-motion
+  marks, camera letters and grouping, frame rate, reference mic, sync-to, job name, files added, removed or cleared.
+  Each step stores only what that edit changed, so undoing never reverses what a sync run did since.
+- Keys (⌘/ shows them all): ⌘A select all, ⌘1 cameras, ⌘2 sound, ⌘-click / ⇧-click to pick several, ⌫ leave out or
+  use, ⌘⌫ remove from the list, ⌘G one camera, ⌘C copy timecode, Space / L / K / J play stop back, ← → a frame,
+  ⇧← ⇧→ a second, ⌥← ⌥→ clip edges, Home / End, ↑ ↓ clips, ⌘I info, T type a timecode, ⌘F find by waveform,
+  + − zoom, ⇧Z or \ fit, ⌘O add, ⌘↩ sync, ⌘, settings, Esc.
+- Zoom slider with a percentage under the timeline (100% = the whole day); big timecode over the picture.
+- Settings sheet (⌘,): synchronisation, sound out, export, transcript. The panel keeps Sync to / Frame rate / Output /
+  a one-line-per-step summary.
+- Clip rows carry the facts Tentacle shows: card, camera, codec, size, rate, audio, where the timecode came from.
 - Frame rate block with the evidence; "Sync to" Auto / Camera mic / Audio only; preflight checks; one list of
   what needs attention; clip list grouped by lane.
+
+## Camera formats worth knowing
+- Canon Cinema RAW Light (.CRM, card layout <card>/CRM/REEL_xxx/): ffmpeg can't open the picture, so it never sees
+  the timecode. media.qt_info reads the QuickTime boxes directly: tmcd (timescale/frameDuration/frames + the
+  4-byte frame number at the first chunk), the video track's stts for rate and frame count, and Canon's uuid box
+  (85c0b687-820f-11e0-8111-f4ce462b6a48, EXIF-style CMT1-CMT4) for model and body serial. Checked against the real
+  C500 Mark II and C80 files of 2026-11-06.
 
 ## Dev
 - Test days: tests/make_day.py (camera day), make_extras.py (mixed formats), make_mixer_day.py (audio only),
   test_slowmo.py builds /home/claude/slowday, test_refpick.py builds /home/claude/hopday.
 - Suites: run_pipeline, run_extras, run_mixer_day, run_two_days, test_guard, test_framerate, test_slowmo,
-  test_refpick, test_camera_copy, test_transcript (PREP_FAKE_ASR stand-in), test_review; check_originals runs them
-  all around the fingerprint check.
+  test_refpick, test_camera_copy, test_transcript (PREP_FAKE_ASR stand-in), test_review, test_canon_raw (builds
+  /home/claude/canonday + canonday_plain), test_window_keys (the window driven by the keyboard against the real
+  Python side, via Playwright); check_originals runs them all around the fingerprint check.
+- `python -m midwigsync.cli <folders> --scan-only` prints lanes, serials, roles and frame-rate evidence, read-only.
 - packaging/build_app.sh builds "dist/Prep Station.app" and the zip; the launcher sets up a private Python with uv
   (requirements.txt; requirements-extra.txt is optional: OTIO, AAF, Word).
