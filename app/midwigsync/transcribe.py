@@ -192,7 +192,8 @@ def plan(clips, cam_ref=None):
     cl = sorted([c for c in clips if c['kind'] == 'audio' and c['include'] and c['start'] is not None
                  and not c.get('slowmo')], key=lambda c: c['start'])
     if not cl and cam_ref:
-        cams = sorted([c for c in clips if c['kind'] == 'video' and c['roll'] == cam_ref['roll'] and c['include']
+        cams = sorted([c for c in clips if c['kind'] == 'video' and c['roll'] in (cam_ref.get('rolls') or [cam_ref['roll']])
+                       and c['include']
                        and c['start'] is not None and not c.get('slowmo')], key=lambda c: c['start'])
         return [dict(a=c['start'], b=c['start'] + c['length'], members=[c], speakers=[], files=[c['name']],
                      scene='', take='', listen_what='camera mic',

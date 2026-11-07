@@ -3,9 +3,11 @@
 1. plan_timeline(): reference clips (FX6 CH1 WAVs) on A1, every ISO cut into the pieces that sit under a
    reference clip on A2..An, all at their timecode.  (Same layout that worked by hand on 2026-11-03.)
 2. ResolveBridge.build(): creates that project + timeline through Resolve's scripting API.
-3. open_aap_and_render(): opens Workspace > Workflow Integrations > Auto-Align Post and presses Render
-   through macOS Accessibility. If that fails the app asks the user for that one click.
-4. RenderWatcher: waits for Auto-Align's renders (<source>_si0ch0off<N>-AtAlgn-<hash>.wav).
+3. open_aap_panel() + press_render(): opens Workspace > Workflow Integrations > Auto-Align Post, then (aap_panel.py)
+   picks REF as the reference, ticks the source tracks and presses Render through macOS Accessibility. The panel
+   is its own Electron app, not part of Resolve. If that fails the app asks the user for those clicks.
+4. RenderWatcher: waits for Auto-Align's renders (<source>[_si0ch0off<N>]-AtAlgn-<hash>.wav), in our render
+   folder, next to the sources, and wherever Resolve's "Aligned files for ..." bin says they are.
 """
 import glob
 import os
@@ -17,7 +19,9 @@ from fractions import Fraction
 
 from . import tc as TC
 
-RENDER_RE = re.compile(r'^(?P<src>.+?)_si(?P<si>\d+)ch(?P<ch>\d+)off(?P<off>-?\d+)-AtAlgn', re.I)
+# Auto-Align Post renders: <src>_si0ch0off<N>-AtAlgn-<hash>.wav (render sample 0 = source sample N), and in AAP 2
+# under Resolve 21 also plain <src>-AtAlgn-<hash>.wav with no offset; those are placed from the timeline plan.
+RENDER_RE = re.compile(r'^(?P<src>.+?)(?:_si(?P<si>\d+)ch(?P<ch>\d+)off(?P<off>-?\d+))?-AtAlgn', re.I)
 
 RESOLVE_LIB_CANDIDATES = [
     '/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fusionscript.so',
@@ -167,14 +171,19 @@ class ResolveBridge:
             raise ResolveError('Could not create the timeline.')
         proj.SetCurrentTimeline(tl)
         tl.SetStartTimecode(TC.frames_to_tc(plan['timeline_start_frame'], TC.parse_rate(fps)))
-        # tracks: replace the default audio track(s) with mono/stereo tracks we name
-        for _ in range(int(tl.GetTrackCount('audio') or 0)):
-            if not tl.DeleteTrack('audio', 1):
-                break
+        # tracks: ours first, then remove Resolve's default empty track(s). Resolve won't delete a timeline's last
+        # audio track, so deleting before adding left an empty "Audio 1" above REF; Auto-Align then offered that
+        # empty track as the reference.
+        n_default = int(tl.GetTrackCount('audio') or 0)
         for t in plan['tracks']:
             tl.AddTrack('audio', 'mono' if t['channels'] == 1 else 'stereo')
+        for _ in range(n_default):
+            if not tl.DeleteTrack('audio', 1):
+                break
         n_audio = int(tl.GetTrackCount('audio') or 0)
         offset = n_audio - len(plan['tracks'])   # if a default track survived, ours start after it
+        if offset:
+            self.log(f'  Resolve kept {offset} empty audio track(s) above ours; REF is on A{1 + offset}')
         for t in plan['tracks']:
             tl.SetTrackName('audio', t['index'] + offset, t['name'])
         infos = []
@@ -203,7 +212,127 @@ class ResolveBridge:
         except Exception:  # noqa: BLE001
             pass
         return dict(project=name, timeline=f'{name}_AAP', placed=len(placed), wanted=len(infos),
-                    ref_track=1 + offset, source_tracks=[t['index'] + offset for t in plan['tracks'][1:]])
+                    ref_track=1 + offset, source_tracks=[t['index'] + offset for t in plan['tracks'][1:]],
+                    ref_name=plan['tracks'][0]['name'], source_names=[t['name'] for t in plan['tracks'][1:]])
+
+
+    def _ready_pm(self, wait_s=180):
+        r = self.resolve or self.connect()
+        t0 = time.time()
+        while time.time() - t0 < wait_s:
+            pm = r.GetProjectManager()
+            if pm is not None and pm.GetCurrentProject() is not None:
+                return pm
+            time.sleep(3)
+        raise ResolveError('Resolve is still starting (close any window it shows at start-up), then try again.')
+
+    def render_viewing_copies(self, items, out_dir, log=print, progress=None, cancel=None, width=960, height=540,
+                              fps='23.976', project='Prep Station viewing copies'):
+        """Small H.264 copies of camera clips Prep Station can't decode (Canon RAW), rendered by Resolve into
+        out_dir (the app's cache) so the viewer can show the picture anywhere in the clip.
+        items: [(clip path, output name)]. Resolve only reads the clips. -> {clip path: copy path}"""
+        progress = progress or (lambda *a: None)
+        cancel = cancel or (lambda: False)
+        os.makedirs(out_dir, exist_ok=True)
+        pm = self._ready_pm()
+        proj = pm.LoadProject(project)
+        if proj is None:
+            proj = pm.CreateProject(project)
+            if proj is None:
+                raise ResolveError(f'Resolve would not open or make the project "{project}".')
+            proj.SetSetting('timelineFrameRate', fps)
+            proj.SetSetting('timelineResolutionWidth', str(width))
+            proj.SetSetting('timelineResolutionHeight', str(height))
+        mp = proj.GetMediaPool()
+        mp.SetCurrentFolder(mp.GetRootFolder())
+        got = mp.ImportMedia([p for p, _ in items]) or []
+        by = {}
+        for it in got:
+            fp = it.GetClipProperty('File Path')
+            if fp:
+                by[os.path.realpath(fp)] = it
+        if len(by) < len(items):     # already in the pool from an earlier copy
+            for it in (mp.GetRootFolder().GetClipList() or []):
+                fp = it.GetClipProperty('File Path')
+                if fp and os.path.realpath(fp) not in by:
+                    by[os.path.realpath(fp)] = it
+        jobs = {}
+        for p, name in items:
+            it = by.get(os.path.realpath(p))
+            if it is None:
+                log(f'  Resolve could not open {os.path.basename(p)}')
+                continue
+            tl = mp.CreateTimelineFromClips(f'{name}_{int(time.time() * 1000) % 100000}', [it])
+            if tl is None:
+                log(f'  Resolve could not make a timeline for {os.path.basename(p)}')
+                continue
+            proj.SetCurrentTimeline(tl)
+            proj.SetCurrentRenderFormatAndCodec('mov', 'H264')
+            proj.SetRenderSettings({'SelectAllFrames': True, 'TargetDir': out_dir, 'CustomName': name,
+                                    'ExportVideo': True, 'ExportAudio': False,
+                                    'FormatWidth': width, 'FormatHeight': height})
+            jid = proj.AddRenderJob()
+            if jid:
+                jobs[jid] = (p, name)
+        if not jobs:
+            return {}
+        proj.StartRendering(list(jobs))
+        while proj.IsRenderingInProgress():
+            if cancel():
+                proj.StopRendering()
+                break
+            pct = []
+            for jid in jobs:
+                st = proj.GetRenderJobStatus(jid) or {}
+                pct.append(float(st.get('CompletionPercentage') or 0))
+            progress(sum(pct) / max(1, len(pct)) / 100.0)
+            time.sleep(1.0)
+        out = {}
+        for jid, (p, name) in jobs.items():
+            st = proj.GetRenderJobStatus(jid) or {}
+            hits = sorted(glob.glob(os.path.join(out_dir, glob.escape(name) + '*.mov')), key=os.path.getmtime)
+            if str(st.get('JobStatus', '')).lower() == 'complete' and hits:
+                out[p] = hits[-1]
+            else:
+                log(f"  {os.path.basename(p)}: Resolve render {st.get('JobStatus', 'did not finish')}")
+            try:
+                proj.DeleteRenderJob(jid)
+            except Exception:  # noqa: BLE001
+                pass
+        pm.SaveProject()
+        return out
+
+    def render_dirs(self, timeline_name):
+        """Folders holding the files in Resolve's "Aligned files for <timeline>" bin (where Auto-Align Post put its
+        renders). Read-only questions to Resolve; [] when it can't say."""
+        try:
+            r = self.resolve or self.connect(launch=False)
+            proj = r.GetProjectManager().GetCurrentProject()
+            root = proj.GetMediaPool().GetRootFolder()
+        except Exception:  # noqa: BLE001
+            return []
+        out, stack = set(), [root]
+        while stack:
+            fo = stack.pop()
+            try:
+                subs = fo.GetSubFolderList() or []
+            except Exception:  # noqa: BLE001
+                subs = []
+            stack.extend(subs)
+            try:
+                nm = str(fo.GetName() or '')
+            except Exception:  # noqa: BLE001
+                nm = ''
+            if 'aligned' not in nm.lower():      # "Aligned files for <timeline>"
+                continue
+            for it in (fo.GetClipList() or []):
+                try:
+                    fp = it.GetClipProperty('File Path')
+                except Exception:  # noqa: BLE001
+                    fp = None
+                if fp and 'atalgn' in os.path.basename(fp).lower():
+                    out.add(os.path.dirname(fp))
+        return sorted(out)
 
 
 # ------------------------------------------------------------------ Accessibility: open AAP + press Render
@@ -267,8 +396,19 @@ def _is_aap(bid, nm):
     return 'electron' in bid.lower() or 'auto-align' in nm.lower() or 'autoalign' in bid.lower().replace('-', '')
 
 
+def aap_window_open():
+    from . import aap_panel as AP
+    try:
+        return AP.Panel(AP.MacBackend()).find(wait_s=0)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def open_aap_panel(log=print):
-    """Workspace > Workflow Integrations > Auto-Align Post, via the Resolve menu bar."""
+    """Workspace > Workflow Integrations > Auto-Align Post, via the Resolve menu bar (skipped when the panel's
+    window is already open, so a second click can't close it)."""
+    if aap_window_open():
+        return True
     AS = _ax()
     app, ra = _app_el(AS, lambda b, n: 'davinci' in b.lower() or 'davinci resolve' in n.lower())
     if app is None:
@@ -300,34 +440,34 @@ def open_aap_panel(log=print):
 
 
 def dump_aap_tree(out_path):
-    AS = _ax()
-    app, _ = _app_el(AS, _is_aap)
-    if app is None:
+    """Write the Auto-Align Post panel's accessibility tree (for diagnosing a failed auto-press)."""
+    from . import aap_panel as AP
+    try:
+        p = AP.Panel(AP.MacBackend())
+        if not p.find(wait_s=2):
+            return False
+        with open(out_path, 'w') as f:
+            for n in p.nodes():
+                f.write(f"{n['role']} | {n['label']} | enabled={n['enabled']} | value={n['value']!r}\n")
+        return True
+    except Exception:  # noqa: BLE001
         return False
-    time.sleep(1.0)
-    with open(out_path, 'w') as f:
-        for el, d in _walk(AS, app, 0, 60):
-            f.write('  ' * d + f"{_attr(AS, el, 'AXRole')} | {_label(AS, el)}\n")
-    return True
 
 
-def press_render(log=print, wait_s=40):
-    """Find the Auto-Align Post panel and press its Render button."""
-    AS = _ax()
-    t0 = time.time()
-    while time.time() - t0 < wait_s:
-        app, _ = _app_el(AS, _is_aap)
-        if app is not None:
-            for el, _d in _walk(AS, app, 0, 60):
-                if _attr(AS, el, 'AXRole') != 'AXButton':
-                    continue
-                lab = _label(AS, el).strip().lower()
-                if re.match(r'^(render|align|process)\b', lab):
-                    if AS.AXUIElementPerformAction(el, 'AXPress') == 0:
-                        log(f'  pressed "{lab}" in Auto-Align Post')
-                        return True
-        time.sleep(2)
-    return False
+def press_render(log=print, wait_s=40, ref_name='REF', source_names=None, time_mode='Dynamic', phase_mode='Spectral'):
+    """Set the reference and source tracks in Auto-Align Post and press Render. Render stays greyed out until
+    both are chosen, which is why pressing it alone never worked. Returns True when rendering started."""
+    from . import aap_panel as AP
+    if not source_names:
+        log('  Auto-Align Post: no source track names to tick')
+        return False
+    try:
+        ok, msg = AP.drive(ref_name, source_names, log=log, wait_s=wait_s, time_mode=time_mode, phase_mode=phase_mode)
+    except Exception as e:  # noqa: BLE001
+        ok, msg = False, str(e)
+    if not ok:
+        log(f'  Auto-Align Post: {msg}')
+    return ok
 
 
 # ------------------------------------------------------------------ render pickup

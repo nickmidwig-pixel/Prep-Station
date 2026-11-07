@@ -128,9 +128,9 @@ def pick_camera_reference(project, log=print, cancel=None, max_clips=6, seconds=
     snd = [c for c in clips if c['kind'] == 'audio']
     if not cams:
         return None
-    rolls = {}
+    rolls = {}          # one entry per camera body (all its cards: the timeline lane), else per card
     for c in cams:
-        rolls.setdefault(c['roll'], []).append(c)
+        rolls.setdefault(c.get('lane') or c['roll'], []).append(c)
     from .scan import Project
     roles_of = lambda s: s.get('roles') or Project.clip_roles(s)
 
@@ -138,10 +138,17 @@ def pick_camera_reference(project, log=print, cancel=None, max_clips=6, seconds=
         return sum(_overlap(c['start'], c['start'] + c['length'], s['start'], s['start'] + s['length'])
                    for c in roll_clips for s in snd)
 
+    def rep(key):
+        """A card name of that camera (the one with the most sound under it); the job widens it to every card."""
+        by = {}
+        for c in rolls[key]:
+            by.setdefault(c['roll'], []).append(c)
+        return max(sorted(by), key=lambda r: cover(by[r]))
+
     order = sorted(rolls, key=lambda r: -cover(rolls[r]))
     if not snd:
         r = max(rolls, key=lambda r: sum(c['length'] for c in rolls[r]))
-        return dict(roll=r, channel=0, why='no sound files to compare with, so channel 1')
+        return dict(roll=rep(r), channel=0, why='no sound files to compare with, so channel 1')
     results = []
     for roll in order[:3]:
         rc = sorted([c for c in rolls[roll] if any(_overlap(c['start'], c['start'] + c['length'], s['start'],
@@ -227,12 +234,12 @@ def pick_camera_reference(project, log=print, cancel=None, max_clips=6, seconds=
             continue
         top = max(r['corr'] for r in mics)
         best = min((r for r in mics if r['corr'] >= top - 0.03), key=lambda r: r['ch'])   # near-tie: lower channel
-        results.append(dict(roll=roll, ch=best['ch'], corr=best['corr'], cover=cover(rolls[roll]), rows=rows))
-        log(f"  {roll}: " + ', '.join(f"ch{r['ch'] + 1} {r['what']} {r['corr']:.2f}" + (f" (feed {r['feed']:.2f})" if r['what'] == 'mixer feed' else '')
+        results.append(dict(roll=rep(roll), ch=best['ch'], corr=best['corr'], cover=cover(rolls[roll]), rows=rows))
+        log(f"  {rep(roll)}{' (+%d cards)' % (len({c['roll'] for c in rolls[roll]}) - 1) if len({c['roll'] for c in rolls[roll]}) > 1 else ''}: " + ', '.join(f"ch{r['ch'] + 1} {r['what']} {r['corr']:.2f}" + (f" (feed {r['feed']:.2f})" if r['what'] == 'mixer feed' else '')
                                        for r in rows))
     if not results:
         r = order[0]
-        return dict(roll=r, channel=0, why='no camera channel matched the sound clearly, so channel 1')
+        return dict(roll=rep(r), channel=0, why='no camera channel matched the sound clearly, so channel 1')
     tot = max(x['cover'] for x in results) or 1
     win = max(results, key=lambda x: (x['cover'] / tot) * max(x['corr'], 0.05))
     why = f"onboard mic that matches the recorder's mics best ({win['corr']:.2f})"

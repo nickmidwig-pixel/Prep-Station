@@ -30,8 +30,12 @@ and checks again; `tests/test_guard.py` tries 19 ways to damage an original.
 4. **Review stop** (`review_fixes`): the window shows every fix and waits: write / keep the files' own TC / stop.
 5. **Corrected sound** (`do_sound_set`): SOUND_TC_CORRECTED/ holds every sound file of the day in its original
    format; fixed files get the new TC, the rest are exact copies (APFS clones on the same drive).
-6. **Auto-Align Post** (refplan.py + resolve_aap.py): camera mode aligns to the picked onboard mic; audio-only
-   picks boom > plant > best lav per stretch. Mix / TC / empty tracks pass through untouched, never aligned to.
+6. **Auto-Align Post** (refplan.py + resolve_aap.py + aap_panel.py): camera mode aligns to the picked onboard mic
+   on every card of that camera body; audio-only picks boom > plant > best lav per stretch. Mix / TC / empty tracks
+   pass through untouched, never aligned to. The app builds the Resolve timeline (REF on A1), sets up the Auto-Align
+   Post panel (its own Electron app: Reference = REF, every source ticked) and presses Render; renders are picked
+   up from our folder or wherever Resolve's "Aligned files for ..." bin says, named with or without an offset. The
+   transcript runs alongside the render.
 7. **Aligned ISOs** (optional, ISO_ALIGNED/): each mic on its own, no mix.
 8. **Aligned polywavs** (POLY_ALIGNED/): per-take mixer polywavs come back aligned with the same names and track
    layout; ISO days become day polywavs of the largest whole TC minutes under 4 GB. Mix tracks included.

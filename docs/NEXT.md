@@ -111,6 +111,41 @@ Read AudioTC · Sync Map · Settings. One window, no panels to open.
 - **Still to speed up:** read several clips at once during the check; run the transcript while Resolve renders;
   later, Resolve stills at the playhead and small preview copies for scrubbing Canon RAW.
 
+## 1.6 (2026-11-07, overnight): what the first real run through Resolve taught us
+The 1.5.2 run of 261106 got to Auto-Align in ~5 min, then stopped at "Press Render" (0 of 32). Three separate
+problems, all fixed in 1.6:
+- **The reference was one camera card, not the camera.** Rolls are cards (UDP_261106_C80_B_001…006); since 1.4 the
+  window groups them into lanes, but the reference still meant the picked roll only: "Reference:
+  UDP_261106_C80_B_001 channel 1 → 8 WAV(s)". Only the Georgia takes (shot on B card 001) got reference pieces; Alex,
+  Conversat and Friends had nothing to align to. Now `Job.ref()` carries `rolls` = every card of that body (the
+  lane), used by the listening (wavesync `ref_rolls`), the reference WAVs, the transcript and refpick (which also
+  compares camera bodies, not cards). Log: "Reference: B CAM (6 cards) channel 1".
+- **Auto-press could never work.** The Auto-Align Post panel is its own Electron app (bundle com.github.Electron,
+  window "Auto-Align Post"), not part of Resolve's AX tree, and its Render button stays greyed out until a reference
+  is chosen and sources are ticked: Reference defaulted to the empty "Audio 1", no sources ticked. New
+  `aap_panel.py`: finds the Electron process by its window title, picks REF in "Reference Track", ticks every
+  source track (the list draws ~6 rows; Tab walks down to draw the rest), checks Time/Phase, checks "N selected",
+  presses Render, confirms "Rendering…". Tested against a fake panel that behaves like the real one
+  (tests/test_aap_panel.py). Resolve's empty default track is now deleted after our tracks are added (Resolve
+  refuses to delete a timeline's last track, which is why it survived before), so REF is A1.
+- **The renders were invisible to Prep Station.** By hand (overnight) the panel rendered all 32 pieces in ~4 min,
+  but (a) Auto-Align's destination was "Same as project", not _SYNC_WORK/AAP_RENDERS, and (b) AAP 2 under Resolve 21
+  names files `<src>-AtAlgn-<hash>.wav`, without `_si0ch0off<N>`. Now: the wait loop asks Resolve where the files in
+  its "Aligned files for <timeline>" bin live (`ResolveBridge.render_dirs`) and watches there too; RENDER_RE takes
+  both names; `Assembler.locate` places an offset-less render from the timeline plan (aap_plan.json): candidates =
+  each piece of that file with 0/1/2 s handles or the handle its length implies; length narrows, the waveform
+  confirms (|cc| ≥ 0.2 at a lag under 0.2 s); the offset is always a candidate's exact value, so Auto-Align's own
+  shift is kept. Tests: test_aap2_names.py (handles, cut-short render, two equal-length pieces, 0.5 s handles, an
+  unrelated render left out) and run_pipeline.py with AAP2=1 (all 12 renders placed to the sample).
+- **Speed:** the transcript starts as soon as the corrected sound is written and runs while Resolve renders (its own
+  % in the step list); listening reads 3 clips at a time (PREP_LISTEN_THREADS; results identical to one at a time).
+- **Canon RAW playback (first cut):** "Make playable" in the viewer (⌥-click: every RAW clip of the day) has Resolve
+  render a 960x540 H.264 viewing copy per clip into the app's cache (project "Prep Station viewing copies");
+  the viewer then shows the picture anywhere in the clip, and Play steps through it once a second. Not while a
+  sync runs. Untested against real Resolve yet: the render settings calls are the documented scripting API.
+- **Still open:** Auto-Align's destination could be set to our folder through the panel's settings (Custom /
+  Choose opens a file dialog; not automated). Mute/solo per lane, pale clip blocks, "fixed" ribbon.
+
 ## C. Order of work for the next model
 
 1. A1–A3 (CRM timecode, serial, letters) + a test using the small real clips (A005C004 370 MB, C_0001C002 1.3 GB):

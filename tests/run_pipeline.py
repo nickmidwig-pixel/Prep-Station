@@ -18,6 +18,7 @@ DAY = sys.argv[1] if len(sys.argv) > 1 else '/home/claude/testday'
 SR = 48000
 FPS = TC.parse_rate('23.976')
 T0 = TC.tc_to_samples('09:16:56:00', FPS)
+AAP2 = os.environ.get('AAP2') == '1'     # render names the way Auto-Align Post 2 writes them under Resolve 21
 
 
 def zax(t_abs):
@@ -51,6 +52,9 @@ def fake_aap(plan, render_dir):
         a = TC.frames_to_samples(it['abs_in'], FPS)
         b = TC.frames_to_samples(it['abs_out'], FPS)
         pre = int(rng.integers(0, 3000)) if k % 3 == 0 else 0     # some renders start before the piece
+        if AAP2:                     # Auto-Align Post 2 in Resolve 21: 1 s handles where the file has them
+            pre = min(SR, a - start)
+            b = b + min(SR, start + w.nframes - b)
         a2 = a - pre
         if k == 2:
             b = b - 20 * SR          # AAP bug: render cut short
@@ -58,7 +62,10 @@ def fake_aap(plan, render_dir):
         if k == 4:
             y = -y                   # spectral mode flipped polarity on this piece
         stem = os.path.splitext(os.path.basename(it['path']))[0]
-        out = os.path.join(render_dir, f'{stem}_si0ch0off{a2 - start}-AtAlgn-{k:04x}beef.wav')
+        if AAP2:                     # no offset in the name: Prep Station places it from the timeline plan
+            out = os.path.join(render_dir, f'{stem}-AtAlgn-{k:04x}beef.wav')
+        else:
+            out = os.path.join(render_dir, f'{stem}_si0ch0off{a2 - start}-AtAlgn-{k:04x}beef.wav')
         ww = WavWriter(out, len(y), 1, SR, 24)
         ww.write_float(y)
         ww.close()

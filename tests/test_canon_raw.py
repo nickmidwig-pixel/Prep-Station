@@ -84,9 +84,44 @@ api = Api(); api.p = p
 c0['raw_picture'] = True                     # as on real Canon RAW: ffmpeg can't decode the picture
 fr = api.frame(c0['start'] + 1000, c0['id'])
 check(fr['ok'] and fr.get('preview') and fr['img'].startswith('data:image/jpeg'), f"viewer shows the camera preview: {fr.get('label')}")
+check(fr.get('raw') and fr.get('cid') == c0['id'], 'viewer offers to make a RAW clip playable')
+# a viewing copy (stand-in for Resolve's render) -> the picture anywhere in the clip, from the copy
+from midwigsync.brand import CACHE
+from midwigsync.convert import ffmpeg_exe
+import subprocess
+vk = api._view_key(c0)
+vdir = os.path.join(CACHE, 'rawview')
+os.makedirs(vdir, exist_ok=True)
+vp = os.path.join(vdir, vk + '.mov')
+subprocess.run([ffmpeg_exe(), '-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=24000/1001',
+                '-t', '4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', vp], check=True)
+api.__dict__.pop('_frames', None)
+fr2 = api.frame(c0['start'] + 2 * 48000, c0['id'])
+check(fr2['ok'] and 'viewing copy' in fr2['label'] and not fr2.get('preview') and fr2['img'].startswith('data:image/jpeg'),
+      f"with a viewing copy: {fr2.get('label')}")
+r = api.raw_copies([c0['id']])
+check(r.get('ok') and r.get('n') == 0, 'no second copy of a clip that has one')
+os.remove(vp)
+api.__dict__.pop('_frames', None)
 th = api.thumbs([c['id'] for c in p.clips])
 check(len(th) == 4 and all(v and v.startswith('data:image/jpeg') for v in th.values()), f'{len(th)} thumbnails')
 c0['raw_picture'] = False
+
+print('reference camera = every card of that body')
+from midwigsync.pipeline import Job
+from midwigsync import refpick
+jb = Job(p, dict(job_name='REFBODY', out_dir='/home/claude/canonday_REFBODY_SYNCED', aap_mode='skip',
+                 reference=dict(roll='UDP_261106_C80_B_001', channel=0)), lambda k, d: None)
+rr = jb.ref()
+check(sorted(rr['rolls']) == ['UDP_261106_C80_B_001', 'UDP_261106_C80_B_002'],
+      f"B CAM card 1 picked -> reference reads {len(rr['rolls'])} cards: {jb.ref_label(rr)}")
+from midwigsync.wavesync import SyncAnalyzer
+an = SyncAnalyzer(jb.p, ref=rr)
+b2 = next(c for c in jb.p.clips if c['roll'] == 'UDP_261106_C80_B_002')
+a1 = next(c for c in jb.p.clips if c['roll'] == 'UDP_261106_C500_A_001')
+check(an._ch(b2) == 0 and an._ch(a1) == 0, 'the second card is listened to on the reference channel')
+pk = refpick.pick_camera_reference(jb.p, log=lambda m: None)
+check(pk and pk['roll'] in {c['roll'] for c in jb.p.clips}, f"automatic pick names a real card: {pk and pk['roll']}")
 
 real = os.environ.get('REAL_CANON')
 if real:

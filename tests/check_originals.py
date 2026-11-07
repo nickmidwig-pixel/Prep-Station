@@ -32,14 +32,17 @@ def walk():
 
 before = walk()
 print(f'{len(before)} original files fingerprinted')
-runs = [['run_pipeline.py'], ['run_extras.py'], ['run_mixer_day.py'], ['run_two_days.py'], ['test_guard.py'],
+runs = [['run_pipeline.py'], ['run_pipeline.py', {'AAP2': '1'}], ['run_extras.py'], ['run_mixer_day.py'], ['run_two_days.py'], ['test_guard.py'],
         ['test_framerate.py'], ['test_slowmo.py'], ['test_refpick.py'], ['test_camera_copy.py'], ['test_transcript.py'],
-        ['test_review.py'], ['test_canon_raw.py'], ['test_window_keys.py']]
+        ['test_review.py'], ['test_canon_raw.py'], ['test_window_keys.py'], ['test_aap_panel.py'],
+        ['test_aap2_names.py']]
 for r in runs:
     t = time.time()
-    p = subprocess.run([sys.executable, os.path.join(HERE, r[0])], capture_output=True, text=True)
+    env = dict(os.environ, **(r[1] if len(r) > 1 else {}))
+    p = subprocess.run([sys.executable, os.path.join(HERE, r[0])], capture_output=True, text=True, env=env)
     tail = (p.stdout.strip().splitlines() or [''])[-1]
-    print(f'  {r[0]:20s} exit {p.returncode}  {time.time() - t:5.0f}s  {tail[:90]}')
+    label = r[0] + (' ' + ' '.join(f'{k}={v}' for k, v in r[1].items()) if len(r) > 1 else '')
+    print(f'  {label:20s} exit {p.returncode}  {time.time() - t:5.0f}s  {tail[:90]}')
     if p.returncode:
         print(p.stdout[-3000:], p.stderr[-3000:])
 after = walk()

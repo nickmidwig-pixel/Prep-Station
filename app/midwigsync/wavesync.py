@@ -99,6 +99,11 @@ def item_envelope(item, channel=0, max_seconds=None, cache_dir=None, sink=None):
     return env, off
 
 
+def ref_rolls(ref):
+    """Every card (roll) of the reference camera body; older settings only name one."""
+    return ref.get('rolls') or [ref['roll']]
+
+
 # ---------------------------------------------------------------- beds
 class Bed:
     """A roll's envelopes laid out on the day timeline."""
@@ -283,22 +288,26 @@ class SyncAnalyzer:
     def _ch(self, c):
         """Channel to listen to: the reference channel on the reference roll, else the first channel that
         isn't timecode-as-audio (LTC). None = nothing usable."""
-        if self.ref and c['kind'] == 'video' and c['roll'] == self.ref['roll']:
+        if self.ref and c['kind'] == 'video' and c['roll'] in ref_rolls(self.ref):
             return self.ref['channel']
         if c.get('ltc'):
             return c.get('listen_ch')
         return 0
 
-    def envelopes(self):
+    def envelopes(self, workers=None):
+        """Listen to every clip. Several at once (reading one file while another is being worked out); each clip's
+        result is the same as listening one by one. PREP_LISTEN_THREADS=1 listens one at a time."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         todo = [c for c in self.p.clips if c['include'] and media.total_audio_channels(c) > 0]
-        for i, c in enumerate(todo):
+        workers = workers or int(os.environ.get('PREP_LISTEN_THREADS', '0') or 0) or min(3, os.cpu_count() or 2)
+
+        def one(c):
             if self.cancel():
-                raise KeyboardInterrupt
-            self.progress(i, len(todo), f"Listening: {c['name']}")
-            is_ref = self.ref and c['kind'] == 'video' and c['roll'] == self.ref['roll']
+                return c, None
+            is_ref = self.ref and c['kind'] == 'video' and c['roll'] in ref_rolls(self.ref)
             ch = self._ch(c)
             if ch is None:
-                continue
+                return c, None
             sink = self.ref_sink_factory(c) if (is_ref and self.ref_sink_factory) else None
             maxs = None
             if c['kind'] == 'video' and not is_ref:
@@ -311,8 +320,33 @@ class SyncAnalyzer:
                 self.log(f"  could not read audio of {c['name']}: {e}")
                 if sink:
                     sink.abort()
-                continue
-            self.env[c['id']] = (env, off)
+                return c, None
+            return c, (env, off)
+
+        self.progress(0, len(todo), 'Listening')
+        if workers <= 1:
+            for i, c in enumerate(todo):
+                if self.cancel():
+                    raise KeyboardInterrupt
+                self.progress(i, len(todo), f"Listening: {c['name']}")
+                c, r = one(c)
+                if r is not None:
+                    self.env[c['id']] = r
+        else:
+            ex = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='listen')
+            try:
+                futs = [ex.submit(one, c) for c in todo]
+                for k, f in enumerate(as_completed(futs)):
+                    c, r = f.result()
+                    if r is not None:
+                        self.env[c['id']] = r
+                    self.progress(k + 1, len(todo), f"Listening: {c['name']}")
+                    if self.cancel():
+                        raise KeyboardInterrupt
+            finally:
+                ex.shutdown(wait=True, cancel_futures=True)
+        if self.cancel():
+            raise KeyboardInterrupt
         self.progress(len(todo), len(todo), 'Listening done')
 
     def build_beds(self, trusted_rolls=None, corrected=None):
@@ -413,8 +447,8 @@ class SyncAnalyzer:
         all_rolls = sorted({c['roll'] for c in p.clips})
         agree = {a: [b for b in all_rolls if b != a and rel(a, b) is not None and abs(rel(a, b)) <= TOL_SAME * spf]
                  for a in all_rolls}
-        ref_roll = self.ref['roll'] if self.ref else None
-        anchor = max(all_rolls, key=lambda a: (len(agree[a]), a == ref_roll,
+        ref_set = set(ref_rolls(self.ref)) if self.ref else set()
+        anchor = max(all_rolls, key=lambda a: (len(agree[a]), a in ref_set,
                                                sum(1 for c in p.clips if c['roll'] == a))) if all_rolls else None
         cluster = ({anchor} | set(agree.get(anchor, []))) if anchor else set()
         shift = {}

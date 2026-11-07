@@ -455,7 +455,18 @@
     const img = $('frame');
     if (r && r.ok) { img.src = r.img; img.classList.add('on'); $('frameNote').textContent = r.label || ''; img.classList.toggle('pv', !!r.preview); }
     else { img.classList.remove('on'); $('frameNote').textContent = (r && r.why) || 'No picture here'; }
+    // Canon RAW with no viewing copy yet: offer to have Resolve make one
+    const rb = $('rawBtn');
+    rb.hidden = !(r && r.raw) || S.running;
+    rb.dataset.cid = r && r.cid != null ? r.cid : '';
   }
+  $('rawBtn').addEventListener('click', async (e) => {
+    const cid = $('rawBtn').dataset.cid;
+    const r = await call('raw_copies', cid ? [Number(cid)] : [], e.altKey);
+    if (!r || !r.ok) { $('phWhat').textContent = (r && r.why) || 'Could not start Resolve.'; return; }
+    if (!r.n) { $('phWhat').textContent = r.why || 'Already playable.'; showFrame(S.ph); return; }
+    $('rawBtn').disabled = true;
+  });
   async function togglePlay() {
     if (S.playing) { stopPlay(); return; }
     if (S.ph == null) { const sp = span(); if (!sp) return; S.ph = sp[0]; }
@@ -1131,7 +1142,7 @@
         $('aapContinue').textContent = 'Continue with what’s rendered';
       } else {
         $('aapTitle').textContent = 'Press Render in Auto-Align Post';
-        $('aapLead').textContent = `Resolve project ${d.project || ''} is ready. In Resolve, open Workspace › Workflow Integrations › Auto-Align Post, check these settings, then press Render. ${APP()} picks up the files as they appear.`;
+        $('aapLead').textContent = `Resolve project ${d.project || ''} is ready. In Auto-Align Post (Resolve: Workspace › Workflow Integrations), set Reference Track to REF, tick every source track, then press Render. ${APP()} picks up the files as they appear.`;
         $('aapContinue').textContent = 'Continue with what’s rendered';
       }
       handlers.aap_status({ done: 0, want: d.want || 0 });
@@ -1142,9 +1153,26 @@
     },
     aap_pressed: (d) => {
       $('aapLead').textContent = d.ok ? 'Render pressed. Auto-Align is working; files are picked up as they land.'
-        : 'Couldn’t find the Render button. Press it in the Auto-Align Post panel, files are picked up as they land.';
+        : 'Couldn’t set up the panel by itself (the log says why). In Auto-Align Post set Reference Track to REF, tick every source track and press Render; files are picked up as they land.';
     },
     aap_done: () => { $('aapCard').hidden = true; },
+    rawview: (d) => {
+      $('phWhat').textContent = d.msg || '';
+      if (d.state === 'done' || d.state === 'error') {
+        $('rawBtn').disabled = false;
+        if (S.ph != null) showFrame(S.ph);
+        if (d.state === 'done') toast(d.msg);
+      }
+    },
+    side_progress: (d) => {         // the transcript runs alongside Auto-Align: its own line in the step list
+      const li = document.querySelector('#steps li[data-key="transcribe"]');
+      if (!li) return;
+      const st = li.querySelector('.state');
+      if (d.frac >= 1) { st.textContent = 'done'; li.classList.add('done'); li.classList.remove('busy'); return; }
+      st.textContent = `${Math.round(100 * (d.frac || 0))}%`;
+      li.classList.add('busy');
+      li.title = d.msg || '';
+    },
     clip_progress: (d) => {
       $('iProgFill').style.width = `${Math.min(100, 100 * (d.frac || 0)).toFixed(1)}%`;
       if (d.msg) $('iProgText').textContent = d.msg;

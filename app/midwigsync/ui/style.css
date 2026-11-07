@@ -493,3 +493,6 @@ table.clips .th.aud { width: 64px; height: 34px; background:
 .steps .pick input:focus-visible + span { outline: 2px solid var(--cam); outline-offset: 1px; }
 .steps .pick:hover span { border-color: var(--muted); }
 body.running .steps .pick { pointer-events: none; opacity: .7; }
+
+/* a step running alongside another (the transcript while Auto-Align renders) */
+#steps li.busy .state { color: var(--fix); font-variant-numeric: tabular-nums; }

@@ -217,9 +217,30 @@ class Job:
         return 'camera' if self.p.default_reference() else 'audio'
 
     def ref(self):
+        """The camera mic everything aligns to: one channel of one camera body, on every card that camera shot
+        (until 1.6 only the clips of the one card that was picked counted, so takes shot on the camera's
+        other cards had nothing to align to)."""
         if self.mode() == 'audio':
             return None
-        return self.s.get('reference') or self.p.default_reference()
+        r = self.s.get('reference') or self.p.default_reference()
+        if r and r.get('roll'):
+            rolls = self.body_rolls(r['roll'])
+            if r.get('rolls') != rolls:
+                r = dict(r, rolls=rolls)
+        return r
+
+    def body_rolls(self, roll):
+        for l in self.lanes:
+            if l.get('kind') == 'camera' and roll in (l.get('rolls') or []):
+                return sorted(l['rolls'])
+        return [roll]
+
+    def ref_label(self, ref):
+        rolls = ref.get('rolls') or [ref['roll']]
+        if len(rolls) == 1:
+            return ref['roll']
+        lab = next((l['label'] for l in self.lanes if l.get('kind') == 'camera' and ref['roll'] in l['rolls']), ref['roll'])
+        return f'{lab} ({len(rolls)} cards)'
 
     def names_mode(self, sources):
         return 'suffix' if self.s.get('aligned_names') == 'suffix' else 'same'
@@ -270,6 +291,11 @@ class Job:
             self.review_fixes()
             self.step('Writing corrected sound')
             self.do_sound_set()
+            # the transcript only needs the sound and its timecode: start it now, it runs while Resolve renders
+            tr = None
+            if self.s.get('transcribe'):
+                tr = threading.Thread(target=self._transcript_bg, name='transcript', daemon=True)
+                tr.start()
             if self.s['aap_mode'] == 'resolve':
                 self.step('Auto-Align Post')
                 self.do_aap()
@@ -279,9 +305,13 @@ class Job:
             self.do_poly()
             self.step('XML')
             self.do_xml()
-            if self.s.get('transcribe'):
+            if tr is not None:
                 self.step('Transcript')
-                self.do_transcript()
+                if tr.is_alive():
+                    self.log('Finishing the transcript (started while Resolve rendered)…')
+                while tr.is_alive():
+                    tr.join(0.5)
+                    self.check()
             self.step('Report')
             self.do_report()
             self.emit('done', dict(out=self.out, report=self.report_path, camera_fixes=self.camera_fixes()))
@@ -338,7 +368,7 @@ class Job:
         else:
             # still need the reference WAVs
             for c in p.clips:
-                if ref and c['kind'] == 'video' and c['roll'] == ref['roll'] and c['include'] and c['start'] is not None:
+                if ref and c['kind'] == 'video' and c['roll'] in ref['rolls'] and c['include'] and c['start'] is not None:
                     s = sink_factory(c)
                     if s:
                         from .wavesync import item_envelope
@@ -365,7 +395,7 @@ class Job:
                 patch_time_reference(path, TC.wrap(start, fps), TC.samples_to_tc(start, fps, df))
                 self.refs.append(dict(path=path, name=os.path.basename(path), start=start,
                                       length=WavInfo(path).nframes, clip=c['name']))
-            self.log(f"Reference: {ref['roll']} channel {ref['channel'] + 1} → {len(self.refs)} WAV(s)")
+            self.log(f"Reference: {self.ref_label(ref)} channel {ref['channel'] + 1} → {len(self.refs)} WAV(s)")
         self.emit('project', p.to_json())
 
     def pick_reference(self):
@@ -373,7 +403,7 @@ class Job:
         against the sound and pick the one that matches best (never the mixer's feed, LTC or a silent channel)."""
         r = self.s.get('reference')
         if r and not r.get('auto') and r.get('roll'):
-            self.log(f"Alignment track: {r['roll']} ch {r['channel'] + 1} (chosen by you)")
+            self.log(f"Alignment track: {self.ref_label(self.ref())} ch {r['channel'] + 1} (chosen by you)")
             return
         self.step('Choosing the alignment track')
         from . import refpick
@@ -382,7 +412,7 @@ class Job:
             self.s['reference'] = dict(roll=pick['roll'], channel=pick['channel'], auto=True, why=pick['why'])
             self.emit('ref_pick', self.s['reference'])
         r = self.ref()
-        self.log(f"Alignment track: {r['roll']} ch {r['channel'] + 1}" + (f" ({pick['why']})" if pick else ''))
+        self.log(f"Alignment track: {self.ref_label(r)} ch {r['channel'] + 1}" + (f" ({pick['why']})" if pick else ''))
 
     def fixes(self):
         """Clips whose position differs from their own file timecode (found by waveform or set by you)."""
@@ -558,6 +588,7 @@ class Job:
             self.aap_info['status'] = 'skipped: nothing to use as a reference'
             return
         plan = RA.plan_timeline(refs, sources, self.p.fps)
+        self._aap_plan = plan
         with open(os.path.join(self.mid, 'aap_plan.json'), 'w') as f:
             json.dump(plan, f, indent=1, default=str)
         n_items = sum(1 for i in plan['items'] if i['kind'] == 'source')
@@ -581,6 +612,7 @@ class Job:
             st = dict(files=sorted(old), done=sum(plan['expected'].values()), want=sum(plan['expected'].values()))
             self.aap_info.update(dict(renders='reused from an earlier run', render_dir=render_dir))
             return self._assemble(sources, st)
+        bridge = None
         if self.s.get('_fake_aap'):          # test hook
             self.s['_fake_aap'](plan, render_dir)
         else:
@@ -598,23 +630,38 @@ class Job:
                     if RA.ax_trusted(prompt=True):
                         RA.open_aap_panel(self.log)
                         time.sleep(4)
-                        RA.dump_aap_tree(os.path.join(self.mid, 'aap_panel_tree.txt'))
-                        pressed = RA.press_render(self.log)
+                        self._aap_names = (info.get('ref_name', 'REF'), info.get('source_names') or
+                                           [t['name'] for t in plan['tracks'][1:]])
+                        pressed = RA.press_render(self.log, ref_name=self._aap_names[0],
+                                                  source_names=self._aap_names[1])
+                        if not pressed:
+                            RA.dump_aap_tree(os.path.join(self.mid, 'aap_panel_tree.txt'))
                     else:
                         self.log(f'macOS has not given {APP_NAME} Accessibility access yet, so Render needs your click.')
                 except Exception as e:  # noqa: BLE001
                     self.log(f'Could not press Render automatically: {e}')
-            ask = dict(render_dir=render_dir, ref_track=f"Audio {info.get('ref_track', 1)}",
+            ask = dict(render_dir=render_dir, ref_track=f"REF (Audio {info.get('ref_track', 1)})",
                        sources=f"Audio {plan['tracks'][1]['index'] + (info.get('ref_track', 1) - 1)}–"
                                f"{plan['tracks'][-1]['index'] + (info.get('ref_track', 1) - 1)}" if len(plan['tracks']) > 1 else '',
                        project=info.get('project', ''), pressed=pressed, error=info.get('error'),
                        want=sum(plan['expected'].values()))
             self.emit('aap_wait', ask)
-        # wait for renders
+        # wait for renders. Auto-Align writes them where its own setting says ("Same as project" or a folder you
+        # chose), so besides our folder, ask Resolve where the files in its "Aligned files for ..." bin live.
         self.user_continue.clear()
         last = None
+        asked = 0.0
+        known = {d for d, _r in watcher.dirs}
         while True:
             self.check()
+            if bridge is not None and info.get('timeline') and time.time() - asked > 8:
+                asked = time.time()
+                for d in bridge.render_dirs(info['timeline']):
+                    if d not in known:
+                        known.add(d)
+                        watcher.dirs.append((d, False))
+                        self.log(f'  Auto-Align is writing to {d}')
+                        self.aap_info['render_dirs'] = sorted(known - {render_dir})
             st = watcher.status()
             if st != last:
                 self.emit('aap_status', dict(done=st['done'], want=st['want'], seen=st['seen']))
@@ -649,10 +696,12 @@ class Job:
                 d['out_path'] = os.path.join(split_dir, s['name'])
             srcs.append(d)
         ref = self.ref()
-        note = f"{ref['roll']} CH{ref['channel'] + 1}" if ref else 'chosen per stretch (audio only)'
+        note = f"{self.ref_label(ref)} CH{ref['channel'] + 1}" if ref else 'chosen per stretch (audio only)'
         iso_root = os.path.join(self.out, 'ISO_ALIGNED') if self.s.get('iso_folder', True) else os.path.join(self.mid, 'aligned_iso')
+        from .assemble import plan_hints
         asm = Assembler(srcs, st['files'], iso_root, log=self.log, progress=self.progress,
-                        note=note, cancel=self.cancelled, ref_windows=self._ref_windows)
+                        note=note, cancel=self.cancelled, ref_windows=self._ref_windows,
+                        hints=plan_hints(getattr(self, '_aap_plan', None)))
         try:
             asm.plan_all()
             asm.save_plan(os.path.join(self.mid, 'assembly_plan.json'))
@@ -866,13 +915,28 @@ class Job:
             except Exception as e:  # noqa: BLE001
                 self.log(f'  could not write {fn}: {e}')
 
-    def do_transcript(self):
+    def _transcript_bg(self):
+        t0 = time.time()
+        try:
+            self.do_transcript(progress=self._side_progress)
+        except Cancelled:
+            pass
+        except Exception as e:  # noqa: BLE001
+            self.log(f'Transcript failed: {e}')
+        if getattr(self, 'transcripts', None):
+            self.log(f'Transcript done in {time.time() - t0:.0f} s (ran alongside the other steps)')
+        self.emit('side_progress', dict(what='transcript', frac=1.0, msg='Transcript finished'))
+
+    def _side_progress(self, i, n, msg=''):
+        self.emit('side_progress', dict(what='transcript', frac=(i / n) if n else 0, msg=msg))
+
+    def do_transcript(self, progress=None):
         """Transcript of the day from the sound files (local speech model; never fatal to the job)."""
         from . import transcribe as TR
         try:
             paths = TR.transcribe_day(self.p, os.path.join(self.out, 'TRANSCRIPTS'), self.s['job_name'], self.p.fps,
                                       self.p.df, language=self.s.get('transcribe_language', 'en'), log=self.log,
-                                      progress=self.progress, cancel=self.cancelled,
+                                      progress=progress or self.progress, cancel=self.cancelled,
                                       cam_ref=self.ref() if self.mode() == 'camera' else None)
             for x in paths:
                 self.log(f'  wrote {os.path.relpath(x, self.out)}')
