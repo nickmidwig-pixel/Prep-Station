@@ -30,7 +30,7 @@ _installed = False
 
 # card structures: never write inside these, whatever the output folder says
 CARD_DIRS = {'CONTENTS', 'PRIVATE', 'DCIM', 'XDROOT', 'M4ROOT', 'CLIPS001', 'AVCHD', 'BPAV', 'CANONMSC',
-             'BRAW', 'MISC', 'CLIP', 'XDCAM'}
+             'BRAW', 'MISC', 'CLIP', 'XDCAM', 'CRM'}       # CRM/REEL_005: Canon Cinema RAW Light cards
 
 
 def _rp(p):

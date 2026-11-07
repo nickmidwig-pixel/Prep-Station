@@ -32,7 +32,7 @@ def gopro_chapter(name):
 def card_roll(path):
     """Camera roll name = the card/folder that holds the camera's folder structure."""
     parts = os.path.normpath(path).split(os.sep)
-    for marker in ('XDROOT', 'PRIVATE', 'CONTENTS', 'DCIM', 'CLIPS001', 'M4ROOT', 'CLIPS002', 'BRAW', 'NIKON'):
+    for marker in ('XDROOT', 'PRIVATE', 'CONTENTS', 'DCIM', 'CLIPS001', 'M4ROOT', 'CLIPS002', 'BRAW', 'NIKON', 'CRM'):
         if marker in parts:
             i = parts.index(marker)
             if i >= 1 and parts[i - 1] not in ('', 'Volumes'):

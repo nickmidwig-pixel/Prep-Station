@@ -3,7 +3,9 @@ Canon's uuid box, camera letters from the card folder (UDP_261106_C80_B_001) or 
 one lane per body across cards, and a lossless timecode copy. Originals untouched.
 
 Real clips: set REAL_CANON to a folder holding A005C004*.CRM and C_0001C002*.CRM (read-only) to check
-them too: 17:17:58:07 / 10:56:37:05 and serials 582022100067 / 012919000260."""
+them too: 17:17:58:07 / 10:56:37:05 and serials 582022100067 / 012919000260. Checked on the real drive on
+2026-11-06 with the same reader: both match (C500 Mark II firmware 1.1.3.1, C80 firmware 1.0.6.1; Canon's uuid
+box holds EXIF-style CMT1-CMT4 blocks, the body serial is in CMT2)."""
 import glob, hashlib, os, shutil, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'app'))
@@ -32,8 +34,8 @@ def sha(p):
 
 want = {'A001C001': ('10:49:02:08', '582022100067', 'C500 II'), 'A002C001': ('11:20:00:00', '582022100067', 'C500 II'),
         'C_0001C001': ('10:49:13:18', '012919000260', 'C80'), 'C_0002C002': ('10:56:37:05', '012919000260', 'C80')}
-files = sorted(glob.glob('/home/claude/canonday/*/CONTENTS/CLIPS001/*.CRM'))
-hashes = {f: sha(f) for f in files + glob.glob('/home/claude/canonday_plain/*/CONTENTS/CLIPS001/*.CRM')}
+files = sorted(glob.glob('/home/claude/canonday/*/CRM/*/*.CRM'))
+hashes = {f: sha(f) for f in files + glob.glob('/home/claude/canonday_plain/*/CRM/*/*.CRM')}
 print('probe')
 for f in files:
     i = media.probe(f)

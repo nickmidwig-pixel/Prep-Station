@@ -74,14 +74,15 @@ def build(root='/home/claude/canonday', plain='/home/claude/canonday_plain'):
     """Two cards per body, named like the real day (letter in the card folder), and the same clips again in
     folders with no letter at all (Card1..Card4), where only the body serial can group them."""
     c500, c80 = 'UDP_261106_C500_A_00%d', 'UDP_261106_C80_B_00%d'
-    spec = [(c500 % 1, 'Card1', 'A001C001_261106AB_CANON', '10:49:02:08', 'Canon EOS C500 Mark II', '582022100067'),
-            (c500 % 2, 'Card2', 'A002C001_261106AB_CANON', '11:20:00:00', 'Canon EOS C500 Mark II', '582022100067'),
-            (c80 % 1, 'Card3', 'C_0001C001X261106_CANON', '10:49:13:18', 'Canon EOS C80', '012919000260'),
-            (c80 % 2, 'Card4', 'C_0002C002X261106_CANON', '10:56:37:05', 'Canon EOS C80', '012919000260')]
+    # the real cards: <card>/CRM/REEL_005/A005C004_2611067E_CANON.CRM (C500 Mark II), .../CRM/REEL_0001/... (C80)
+    spec = [(c500 % 1, 'Card1', 'REEL_001', 'A001C001_2611067E_CANON', '10:49:02:08', 'Canon EOS C500 Mark II', '582022100067'),
+            (c500 % 2, 'Card2', 'REEL_002', 'A002C001_2611067E_CANON', '11:20:00:00', 'Canon EOS C500 Mark II', '582022100067'),
+            (c80 % 1, 'Card3', 'REEL_0001', 'C_0001C001X261106_104913IZ_CANON', '10:49:13:18', 'Canon EOS C80', '012919000260'),
+            (c80 % 2, 'Card4', 'REEL_0002', 'C_0002C002X261106_115657IZ_CANON', '10:56:37:05', 'Canon EOS C80', '012919000260')]
     out = []
-    for folder, card, name, tc, model, serial in spec:
+    for folder, card, reel, name, tc, model, serial in spec:
         for r, f in ((root, folder), (plain, card)):
-            d = os.path.join(r, f, 'CONTENTS', 'CLIPS001')
+            d = os.path.join(r, f, 'CRM', reel)
             if not os.path.exists(os.path.join(d, name + '.CRM')):
                 out.append(make(d, name, tc, model, serial))
     return out
