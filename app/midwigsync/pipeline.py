@@ -613,10 +613,15 @@ class Job:
             self.aap_info.update(dict(renders='reused from an earlier run', render_dir=render_dir))
             return self._assemble(sources, st)
         bridge = None
+        pressed = False
         if self.s.get('_fake_aap'):          # test hook
             self.s['_fake_aap'](plan, render_dir)
         else:
             bridge = RA.ResolveBridge(log=self.log)
+            ok, msg = RA.backend_check(self.log)
+            self.log('  ' + msg)
+            if not ok:
+                self.emit('toast', msg.split('\n')[0])
             try:
                 bridge.connect()
                 info = bridge.build(plan, f"{self.s['job_name']}_AAP", render_dir)
@@ -651,6 +656,8 @@ class Job:
         # chose), so besides our folder, ask Resolve where the files in its "Aligned files for ..." bin live.
         self.user_continue.clear()
         last = None
+        last_change = time.time()
+        warned_stall = False
         asked = 0.0
         known = {d for d, _r in watcher.dirs}
         while True:
@@ -667,6 +674,17 @@ class Job:
             if st != last:
                 self.emit('aap_status', dict(done=st['done'], want=st['want'], seen=st['seen']))
                 last = st
+                last_change = time.time()
+            # nothing landed for a while: Auto-Align sits at "Converting... 0/N" when its backend hangs
+            # (a hidden dialog, see RA.backend_check). Say so once, with what to do.
+            if pressed and st['done'] == 0 and not warned_stall and time.time() - last_change > 240:
+                warned_stall = True
+                ok, msg = RA.backend_check(self.log, timeout=10)
+                hint = (msg if not ok else
+                        'Auto-Align has not written a file in 4 minutes. If its panel still says "Converting... 0", '
+                        'press its X to cancel, then "Press Render again" here.')
+                self.log('  ' + hint)
+                self.emit('aap_hint', dict(text=hint))
             if st['complete'] and self.s.get('_fake_aap'):
                 break
             if st['complete']:

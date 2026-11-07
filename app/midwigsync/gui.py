@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import traceback
 
 from . import tc as TC
@@ -775,7 +776,14 @@ class Api:
                 if not RA.ax_trusted(prompt=True):
                     self.emit('log', f'Give {APP_NAME} Accessibility access in System Settings › Privacy & Security, then try again.')
                     return
+                ok, msg = RA.backend_check(lambda m: self.emit('log', m), timeout=10)
+                self.emit('log', '  ' + msg)
+                if not ok:
+                    self.emit('aap_hint', dict(text=msg))
+                    return dict(ok=False, why=msg.split('\n')[0])
+                RA.close_aap_panel()
                 RA.open_aap_panel(lambda m: self.emit('log', m))
+                time.sleep(4)
                 names = getattr(self.job, '_aap_names', None) if self.job else None
                 ref_name, src_names = names if names else ('REF', None)
                 if not src_names and self.job:

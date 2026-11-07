@@ -10,6 +10,7 @@
    folder, next to the sources, and wherever Resolve's "Aligned files for ..." bin says they are.
 """
 import glob
+import json
 import os
 import re
 import subprocess
@@ -339,6 +340,47 @@ class ResolveBridge:
 def _ax():
     import ApplicationServices as AS  # pyobjc-framework-ApplicationServices
     return AS
+
+
+# ------------------------------------------------------------------ Auto-Align's own backend
+AAP_BACKEND = '/Library/Application Support/Sound Radix/Auto-Align Post 2/AutoAlignPost.app/Contents/MacOS/AutoAlignPost'
+AAP_SAVED_STATE = os.path.expanduser('~/Library/Saved Application State/com.soundradix.AutoAlignPost.savedState')
+AAP_LOG = os.path.expanduser('~/Library/Logs/aap-davinci-resolve-log.txt')
+
+
+def backend_check(log=print, timeout=15):
+    """Auto-Align Post is a panel plus a separate backend program; the panel asks the backend a question before
+    every render and waits for the answer. On 2026-11-07 the backend had a stale macOS "reopen windows?" dialog
+    stuck behind it (left from being killed mid-run), so it never answered and the panel sat at
+    "Converting... 0/N" for ever. Clear that saved state, then ask the backend its version with a timeout.
+    Returns (ok, message)."""
+    if sys.platform != 'darwin':
+        return True, 'not a Mac'
+    if not os.path.exists(AAP_BACKEND):
+        return False, 'Auto-Align Post 2 is not installed (no backend at ' + AAP_BACKEND + ')'
+    if os.path.isdir(AAP_SAVED_STATE):
+        try:
+            import shutil
+            shutil.rmtree(AAP_SAVED_STATE)
+            log('  Auto-Align Post: cleared its saved window state (it can hold a hidden "reopen?" dialog)')
+        except Exception as e:  # noqa: BLE001
+            log(f'  Auto-Align Post: could not clear saved state: {e}')
+    try:
+        r = subprocess.run([AAP_BACKEND, '--version'], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False, (f'Auto-Align\'s backend did not answer in {timeout} s. It is probably waiting on a dialog '
+                       'nobody can see. In Terminal run:\n  "' + AAP_BACKEND + '" --version\nanswer any dialog '
+                       '"Don\'t Reopen", then press Render again.')
+    except Exception as e:  # noqa: BLE001
+        return False, f'could not start Auto-Align\'s backend: {e}'
+    out = (r.stdout or '').strip()
+    if r.returncode != 0 or 'version' not in out:
+        return False, f'Auto-Align\'s backend answered badly (exit {r.returncode}): {out or r.stderr}'
+    try:
+        ver = json.loads(out).get('version', '?')
+    except Exception:  # noqa: BLE001
+        ver = out
+    return True, f'Auto-Align Post backend {ver} answers'
 
 
 def ax_trusted(prompt=True):

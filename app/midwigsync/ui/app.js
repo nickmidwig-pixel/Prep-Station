@@ -1155,6 +1155,7 @@
       $('aapLead').textContent = d.ok ? 'Render pressed. Auto-Align is working; files are picked up as they land.'
         : 'Couldn’t set up the panel by itself (the log says why). In Auto-Align Post set Reference Track to REF, tick every source track and press Render; files are picked up as they land.';
     },
+    aap_hint: (d) => { const el = $('aapLead'); if (el) el.textContent = d.text; toast(d.text.split('\n')[0]); },
     aap_done: () => { $('aapCard').hidden = true; },
     rawview: (d) => {
       $('phWhat').textContent = d.msg || '';
