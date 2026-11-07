@@ -173,8 +173,17 @@ def _db(x):
 
 # ------------------------------------------------------------------ plan
 def speaker_name(name, roll):
-    n = (name or '').strip() or roll
-    return re.sub(r'\s+', ' ', n).upper()
+    """Who a lav belongs to, for the transcript: 'Lav1 Alex' / 'Lav 5 Clara' / 'Alex Lav' / '03LAV_ALEX' -> 'ALEX'.
+    A lav with no name ('LAV1', '02LAV') stays as it is ('LAV 1')."""
+    n = re.sub(r'[_]+', ' ', (name or '').strip() or roll)
+    who = re.sub(r'\b\d*\s*(lav(alier)?|rf|wl|wireless|radio|mic|iso|track|ch)\s*\d*\b', ' ', n, flags=re.I)
+    who = re.sub(r'^[\s\d:()\[\]#-]+|[\s\d:()\[\]#-]+$', '', who)
+    who = re.sub(r'\s+', ' ', who).strip()
+    if re.search(r'[A-Za-z]{2}', who):
+        return who.upper()
+    n = re.sub(r'^(\d+)\s*([A-Za-z])', r'\2', n)                       # 02LAV -> LAV
+    n = re.sub(r'([A-Za-z])(\d)', r'\1 \2', n)                         # LAV1 -> LAV 1
+    return re.sub(r'\s+', ' ', n).strip().upper()
 
 
 def plan(clips, cam_ref=None):

@@ -2,8 +2,10 @@
 packing the aligned tracks back, and (audio-only) choosing the reference mic for each stretch of the day.
 
 Roles come from track names (iXML / bext sTRK, or the recorder folder name like 02LAV, 06BOOM):
-  boom, plant, lav (also any person's name), mix (MIX, L/R, X1...), tc (LTC / timecode), empty (no signal).
-Only boom / plant / lav tracks are aligned; mix, timecode and empty tracks pass through untouched.
+  boom, plant, lav (also any person's name), mix (MIX, L/R, X1, "Ale Best Mic", a "Lavs" submix),
+  safety (a padded copy of another track: "BOOM -6db"), tc (LTC / timecode), empty (no signal).
+Boom / plant / lav / safety tracks are aligned (a safety is never the reference); mix, timecode and empty tracks
+pass through untouched.
 
 Reference choice (audio-only): for every stretch, the boom if one is rolling with signal (the louder of two),
 else a plant, else the lav that hears everyone best (highest envelope correlation with the other mics).
@@ -17,12 +19,13 @@ from . import tc as TC
 from .bwf import WavInfo, WavWriter, build_bext, build_ixml, wav_header
 
 SR = TC.SR
-ALIGNABLE = ('boom', 'plant', 'lav')
-PRIORITY = {'boom': 0, 'plant': 1, 'lav': 2}
+ALIGNABLE = ('boom', 'plant', 'lav', 'safety')
+PRIORITY = {'boom': 0, 'plant': 1, 'lav': 2}       # what can be the reference (never a safety copy)
 
 _PATTERNS = [
     ('tc', r'\b(ltc|smpte|t/?c|timecode|time ?code)\b'),
-    ('mix', r'\b(mix|mx|mixl|mixr|mix[ _-]?[lr]|x\d|stereo|main|pgm|program)\b'),
+    ('safety', r'(\b\d{1,2} ?db\b|\bsafe(ty)?\b|\bpad(ded)?\b)'),
+    ('mix', r'\b(mix|mx|mixl|mixr|mix[ _-]?[lr]|x\d|stereo|main|pgm|program|best ?mic|lavs|booms|mics|submix|sum)\b'),
     ('boom', r'(boom|\bbm\d*\b|shotgun|\bshot\b|\b416\b|\b8060\b|\b8050\b|cmit|schoeps|mkh|\bpole\b|overhead|\boh\b|\bcmc\b)'),
     ('plant', r'(plant|\bpzm\b|\bhide\b)'),
     ('lav', r'(lav|lavalier|\brf\d*\b|\bwl\d*\b|wireless|radio|\bcos\b|\bdpa\b|\bb6\b|\btram\b|sanken|countryman)'),
@@ -30,7 +33,10 @@ _PATTERNS = [
 
 
 def role_of(name):
-    n = re.sub(r'[_\-.]+', ' ', str(name or '')).strip().lower()
+    raw = str(name or '').strip()
+    if re.search(r'\s-\s?\d{1,2}\s*(db)?$', raw, re.I):        # "LAV -6", "BOOM -12dB": a padded safety copy
+        return 'safety'
+    n = re.sub(r'[_\-.]+', ' ', raw).strip().lower()
     n = re.sub(r'^\d+\s*', '', n) if re.match(r'^\d+\s*[a-z]', n) else n   # "02LAV" -> "lav"
     if n in ('l', 'r', 'lr', 'left', 'right', 'mix l', 'mix r'):
         return 'mix'
@@ -155,7 +161,7 @@ def _env(m, cache_dir):
 def plan_refs(monos, cache_dir=None, min_seg_s=2.0, log=print):
     """-> ref pieces [dict(path, name, start (piece start), length, file_start, track, role)] covering the day
     wherever at least one alignable mic is rolling, plus a human-readable summary."""
-    cands = [m for m in monos if m['role'] in ALIGNABLE and m.get('level_db', 0) > -55]
+    cands = [m for m in monos if m['role'] in PRIORITY and m.get('level_db', 0) > -55]
     if not cands:
         return [], []
     env = {}

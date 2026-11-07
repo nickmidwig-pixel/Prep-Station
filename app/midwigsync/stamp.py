@@ -94,56 +94,23 @@ def stamp_video(clip, out_path, start_48k, fps, df=False):
 
 
 # ------------------------------------------------------------------ camera copies, only the timecode changed
-QT_EXT = ('.mov', '.mp4', '.m4v', '.crm', '.braw', '.insv', '.3gp')
 MXF_TC_KEY = bytes.fromhex('060e2b34025301010d01010101011400')     # Timecode Component (local set)
-
-
-def _qt_atoms(f, start, end):
-    """(type, header_pos, payload_pos, end) for each atom between start and end."""
-    pos = start
-    while pos + 8 <= end:
-        f.seek(pos)
-        hdr = f.read(16)
-        size, typ = struct.unpack('>I', hdr[:4])[0], hdr[4:8]
-        hl = 8
-        if size == 1:
-            size, hl = struct.unpack('>Q', hdr[8:16])[0], 16
-        elif size == 0:
-            size = end - pos
-        if size < hl:
-            return
-        yield typ, pos, pos + hl, pos + size
-        pos += size
 
 
 def _qt_tmcd_offset(path):
     """File offset of the timecode sample (4-byte frame number) of a QuickTime/MP4 tmcd track, or None."""
+    from .media import qt_atoms, _qt_trak
     with open(path, 'rb') as f:
         f.seek(0, 2)
         n = f.tell()
-        for typ, _, pl, end in _qt_atoms(f, 0, n):
+        for typ, _, pl, end in qt_atoms(f, 0, n):
             if typ != b'moov':
                 continue
-            for t2, _, pl2, end2 in _qt_atoms(f, pl, end):
-                if t2 != b'trak':
-                    continue
-                handler, offs = None, None
-                stack = [(pl2, end2)]
-                while stack:
-                    a, b = stack.pop()
-                    for t3, _, pl3, end3 in _qt_atoms(f, a, b):
-                        if t3 in (b'mdia', b'minf', b'stbl'):
-                            stack.append((pl3, end3))
-                        elif t3 == b'hdlr' and handler is None:      # the media handler (mdia), not minf's data handler
-                            f.seek(pl3 + 8)
-                            handler = f.read(4)
-                        elif t3 in (b'stco', b'co64'):
-                            f.seek(pl3 + 4)
-                            cnt = struct.unpack('>I', f.read(4))[0]
-                            if cnt:
-                                offs = struct.unpack('>Q', f.read(8))[0] if t3 == b'co64' else struct.unpack('>I', f.read(4))[0]
-                if handler == b'tmcd' and offs is not None:
-                    return offs
+            for t2, _, pl2, end2 in qt_atoms(f, pl, end):
+                if t2 == b'trak':
+                    t = _qt_trak(f, pl2, end2)
+                    if t['handler'] == b'tmcd' and t['chunk'] is not None:
+                        return t['chunk']
     return None
 
 
@@ -190,16 +157,23 @@ def copy_with_tc(clip, out_dir, start_48k):
     timecode number rewritten (QuickTime/MP4/CRM/BRAW tmcd, MXF timecode components). If the format can't be patched
     that way, the streams are copied into a .mov (no re-encode, every frame bit-identical). Returns (path, how)."""
     from . import safety
-    from .media import probe_video
+    from .media import probe_video, QT_EXT
     src = clip['path']
     fps = clip.get('fps')
     df = bool(clip.get('df'))
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, os.path.basename(src))
-    old = TC.samples_to_frames(clip['orig_start'], fps) if clip.get('orig_start') is not None else None
-    new = TC.samples_to_frames(start_48k, fps)
-    ext = os.path.splitext(src)[1].lower()
-    tmp = os.path.join(out_dir, '.' + os.path.basename(src) + '.partial')
+    trate = fps
+    if clip.get('tc_rate'):                     # timecode counted at its own rate (slow motion, Canon tmcd)
+        try:
+            trate = TC.parse_rate(clip['tc_rate'])
+        except (ValueError, ZeroDivisionError):
+            pass
+    old = TC.samples_to_frames(clip['orig_start'], trate) if clip.get('orig_start') is not None else None
+    new = TC.samples_to_frames(start_48k, trate)
+    stem, ext0 = os.path.splitext(os.path.basename(src))
+    ext = ext0.lower()
+    tmp = os.path.join(out_dir, '.' + stem + '.partial' + ext0)     # keeps the extension so it can be read back
     try:
         if ext in QT_EXT or ext == '.mxf':
             safety.clone_or_copy(src, tmp)
@@ -215,7 +189,7 @@ def copy_with_tc(clip, out_dir, start_48k):
                 ok = _mxf_patch(tmp, old, new) > 0
             if ok:
                 got = probe_video(tmp)
-                if got.get('start') is not None and abs(got['start'] - TC.frames_to_samples(new, fps)) <= TC.samples_per_frame(fps):
+                if got.get('start') is not None and abs(got['start'] - TC.frames_to_samples(new, trate)) <= TC.samples_per_frame(trate):
                     os.replace(tmp, out)
                     return out, 'exact copy, only the timecode changed'
             os.remove(tmp)

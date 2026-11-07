@@ -131,7 +131,9 @@ class WavInfo:
         root = self.ixml()
         if root is not None:
             for t in root.iter('TRACK'):
-                idx = t.findtext('CHANNEL_INDEX') or t.findtext('INTERLEAVE_INDEX')
+                # INTERLEAVE_INDEX is the position in this file; CHANNEL_INDEX is the recorder input, which
+                # skips numbers when a track isn't recorded (633: inputs 1-5 + 7 in a 6-track file)
+                idx = t.findtext('INTERLEAVE_INDEX') or t.findtext('CHANNEL_INDEX')
                 nm = t.findtext('NAME')
                 if idx and nm:
                     try:

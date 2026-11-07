@@ -301,7 +301,7 @@ body.running .block:not(.steps-block) { display: none; }
 .trk { display: inline-block; font-size: 11px; padding: 0 5px; border-radius: 3px; margin-right: 3px; line-height: 16px;
   background: rgba(255,255,255,.05); color: var(--muted); }
 .trk.boom { color: var(--boom); } .trk.lav { color: var(--lav); } .trk.mix, .trk.tc { color: var(--mix); }
-.trk.plant { color: #8FC1A9; } .trk.cam { color: var(--cam); }
+.trk.plant { color: #8FC1A9; } .trk.safety { color: #B8A77A; } .trk.cam { color: var(--cam); }
 .chip.s { display: inline-block; font-size: 11px; line-height: 16px; padding: 0 6px; margin: 1px 4px 1px 0; border-radius: 8px;
   border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
 .chip.s.fix { color: var(--fix); border-color: rgba(226,162,59,.5); }

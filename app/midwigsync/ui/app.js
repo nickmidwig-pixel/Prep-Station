@@ -10,8 +10,8 @@
   };
   // cameras get their own hue each (reference first); sound is coloured by what the mic is
   const CAM_HUES = ['#6E9CC4', '#5FB3AE', '#9B8BD1', '#7FB0E8', '#C48BB8', '#8FA3B8', '#6FA88F', '#B39C7A'];
-  const ROLE_COL = { boom: '#D9B95B', lav: '#93B58A', plant: '#8FC1A9', multi: '#C99A6B', mix: '#9A938A', tc: '#6F7780', empty: '#5E666E' };
-  const ROLE_LABEL = { boom: 'boom', lav: 'lav', plant: 'plant', multi: 'multitrack', mix: 'mix', tc: 'timecode', cam: 'camera' };
+  const ROLE_COL = { boom: '#D9B95B', lav: '#93B58A', plant: '#8FC1A9', safety: '#B8A77A', multi: '#C99A6B', mix: '#9A938A', tc: '#6F7780', empty: '#5E666E' };
+  const ROLE_LABEL = { boom: 'boom', lav: 'lav', plant: 'plant', safety: 'safety copy', multi: 'multitrack', mix: 'mix', tc: 'timecode', cam: 'camera' };
   const STEP_MAP = { 'Building aligned ISOs': 'Auto-Align Post', 'Checking alignment': 'Auto-Align Post' };
 
   const S = { project: null, settings: {}, running: false, scanning: false, sel: null, view: null, done: null, day: null, checks: [],
@@ -125,6 +125,7 @@
       return { t: `${how}${c.manual.note ? ' · ' + c.manual.note : ''}`, k: 'fix', old: c.orig_tc };
     }
     if (f.has('short_silent')) return { t: 'Short accidental clip, left out', k: '' };
+    if (f.has('false_take')) return { t: c.include ? 'False take (recorder marked it), added back by you' : 'False take (recorder marked it), left out', k: '' };
     if (f.has('sync_failed')) return { t: 'Couldn’t be placed by waveform, so it’s left out. Check it by hand.', k: 'bad' };
     if (f.has('sample_rate')) return { t: 'Not 48 kHz, left out of alignment and polywav', k: 'bad' };
     if (f.has('sync_found')) return { t: `No timecode, placed by waveform (match ${s.score ?? '?'} against ${s.against || '?'})`, k: 'fix' };
@@ -487,6 +488,7 @@
     if (f.has('tc_overlap') && !moved(c)) out.push(['fix', 'TC jump']);
     if (f.has('duplicate')) out.push(['bad', `Duplicate`]);
     if (f.has('short_silent')) out.push(['', 'Accidental, left out']);
+    if (f.has('false_take')) out.push(['', 'False take']);
     if (c.ltc) out.push(['info', `LTC ch ${c.ltc.channel + 1}`]);
     if (f.has('raw')) out.push(['info', 'RAW']);
     if (c.converted) out.push(['info', c.converted.replace(' → 48 kHz WAV', '→WAV').replace(' → 48 kHz', '→48k')]);

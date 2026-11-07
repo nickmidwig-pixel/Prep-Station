@@ -1,6 +1,7 @@
 """Probe camera and audio files for timecode / format, and stream their audio."""
 import os
 import re
+import struct
 import glob
 import datetime as dt
 import xml.etree.ElementTree as ET
@@ -33,7 +34,7 @@ WHY = {
 
 CAMERA_NAMES = {'ILME-FX6': 'FX6', 'ILME-FX3': 'FX3', 'ILME-FX30': 'FX30', 'ILME-FX9': 'FX9', 'PXW-FX9': 'FX9',
                 'ILME-FX2': 'FX2', 'ILME-FR7': 'FR7', 'MPC-2610': 'VENICE', 'MPC-3610': 'VENICE 2', 'PXW-FX9': 'FX9',
-                'ILME-BURANO': 'BURANO', 'EOS C500 Mark II': 'C500 II', 'EOS C80': 'C80', 'EOS C70': 'C70',
+                'ILME-BURANO': 'BURANO', 'EOS C500 Mark II': 'C500 II', 'EOS C500 M': 'C500 II', 'EOS C80': 'C80', 'EOS C70': 'C70',
                 'EOS C300 Mark III': 'C300 III', 'EOS C400': 'C400', 'EOS R5 C': 'R5 C', 'EOS C50': 'C50',
                 'Blackmagic Pocket Cinema Camera 6K': 'BMPCC 6K', 'Blackmagic Pocket Cinema Camera 4K': 'BMPCC 4K',
                 'Blackmagic Cinema Camera 6K': 'BMCC 6K', 'Blackmagic PYXIS': 'PYXIS', 'URSA Cine': 'URSA Cine',
@@ -54,8 +55,9 @@ def _av():
 def short_camera(model):
     if not model:
         return ''
+    m = re.sub(r'^Canon\s+', '', model.strip(), flags=re.I)       # Canon's own box says "Canon EOS C80"
     for k, v in CAMERA_NAMES.items():
-        if model.upper().startswith(k.upper()):
+        if m.upper().startswith(k.upper()) and not (len(m) > len(k) and m[len(k)].isdigit() and k[-1].isdigit()):
             return v
     return model
 
@@ -91,6 +93,149 @@ def sony_sidecar(path):
                     out['duration_frames'] = el.get('value')
             return out
     return None
+
+
+# ------------------------------------------------------------------ QuickTime atoms (Canon RAW, BRAW, MOV)
+QT_EXT = ('.mov', '.mp4', '.m4v', '.crm', '.braw', '.insv', '.3gp')
+_CANON_UUID = bytes.fromhex('85c0b687820f11e08111f4ce462b6a48')
+
+
+def qt_atoms(f, start, end):
+    """(type, header_pos, payload_pos, end) for each atom between start and end. Reads headers only."""
+    pos = start
+    while pos + 8 <= end:
+        f.seek(pos)
+        hdr = f.read(16)
+        if len(hdr) < 8:
+            return
+        size, typ = struct.unpack('>I', hdr[:4])[0], hdr[4:8]
+        hl = 8
+        if size == 1:
+            if len(hdr) < 16:
+                return
+            size, hl = struct.unpack('>Q', hdr[8:16])[0], 16
+        elif size == 0:
+            size = end - pos
+        if size < hl or pos + size > end + 8:
+            return
+        yield typ, pos, pos + hl, min(pos + size, end)
+        pos += size
+
+
+def _qt_trak(f, a, b):
+    """What one trak says about itself: media handler, media timescale, first sample description,
+    time-to-sample table and the first chunk's file offset."""
+    t = dict(handler=None, timescale=None, stsd=None, stts=[], chunk=None)
+    stack = [(a, b)]
+    while stack:
+        x, y = stack.pop()
+        for typ, _, pl, end in qt_atoms(f, x, y):
+            if typ in (b'mdia', b'minf', b'stbl'):
+                stack.append((pl, end))
+            elif typ == b'hdlr' and t['handler'] is None:          # mdia's handler comes before minf's
+                f.seek(pl + 8)
+                t['handler'] = f.read(4)
+            elif typ == b'mdhd':
+                f.seek(pl)
+                v = f.read(1)
+                f.seek(pl + (20 if v == b'\x01' else 12))
+                t['timescale'] = struct.unpack('>I', f.read(4))[0]
+            elif typ == b'stsd':
+                f.seek(pl + 4)
+                if struct.unpack('>I', f.read(4))[0]:
+                    sz, fmt = struct.unpack('>I4s', f.read(8))
+                    t['stsd'] = (fmt, f.read(max(0, min(sz - 8, 512))))
+            elif typ == b'stts':
+                f.seek(pl + 4)
+                n = min(struct.unpack('>I', f.read(4))[0], 100000)
+                raw = f.read(8 * n)
+                t['stts'] = [struct.unpack('>II', raw[i:i + 8]) for i in range(0, len(raw) - 7, 8)]
+            elif typ in (b'stco', b'co64'):
+                f.seek(pl + 4)
+                if struct.unpack('>I', f.read(4))[0]:
+                    t['chunk'] = (struct.unpack('>Q', f.read(8))[0] if typ == b'co64'
+                                  else struct.unpack('>I', f.read(4))[0])
+    return t
+
+
+def _canon_uuid(data):
+    """Model and body serial from the Canon uuid atom in moov (Cinema RAW Light, XF-AVC MP4)."""
+    out = {}
+    runs = [r.decode('ascii', 'replace') for r in re.findall(rb'[\x20-\x7e]{4,}', data)]
+    for r in runs:
+        m = re.search(r'Canon\s+[ -~]{2,40}', r)
+        if m and 'model' not in out:
+            out['model'] = m.group(0).strip()
+    for r in runs:
+        for m in re.finditer(r'(?<!\d)(\d{9,14})(?!\d)', r):
+            s = m.group(1)
+            if set(s) == {'0'} or (len(s) in (12, 14) and re.match(r'20[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])', s)):
+                continue                                          # a date written as digits, not a serial
+            if r.strip() == s or len(r.strip()) - len(s) <= 4:   # standalone (or behind a 4-letter tag)
+                out['serial'] = s
+                break
+        if 'serial' in out:
+            break
+    return out
+
+
+def qt_info(path):
+    """Read a QuickTime-style file's own boxes (no decoder needed), for files whose picture ffmpeg can't open:
+    tmcd start (frame number at the timecode's own rate), video rate and frame count from the video track,
+    and Canon's model + body serial. -> dict (empty if it isn't a QuickTime file)."""
+    out = {}
+    try:
+        f = open(path, 'rb')
+    except OSError:
+        return out
+    with f:
+        f.seek(0, 2)
+        size = f.tell()
+        for typ, _, pl, end in qt_atoms(f, 0, size):
+            if typ != b'moov':
+                continue
+            for t2, _, pl2, end2 in qt_atoms(f, pl, end):
+                if t2 == b'trak':
+                    t = _qt_trak(f, pl2, end2)
+                    if t['handler'] == b'tmcd' and 'tc_frames' not in out and t['stsd'] and t['chunk'] is not None:
+                        fmt, p = t['stsd']
+                        if fmt == b'tmcd' and len(p) >= 25:
+                            flags, ts, fd = struct.unpack('>III', p[12:24])
+                            f.seek(t['chunk'])
+                            raw = f.read(4)
+                            if len(raw) == 4 and ts and fd and not flags & 8:     # bit 3: counter, not timecode
+                                out.update(tc_frames=struct.unpack('>I', raw)[0], tc_rate=Fraction(ts, fd),
+                                           tc_nf=p[24], tc_df=bool(flags & 1))
+                    elif t['handler'] == b'vide' and 'video_frames' not in out and t['stts'] and t['timescale']:
+                        out['video_frames'] = sum(n for n, _ in t['stts'])
+                        delta = max(t['stts'], key=lambda e: e[0])[1]
+                        if delta:
+                            out['video_rate'] = Fraction(t['timescale'], delta)
+                elif t2 == b'uuid' and end2 - pl2 > 16:
+                    f.seek(pl2)
+                    head = f.read(16)
+                    data = f.read(min(end2 - pl2 - 16, 1 << 20))
+                    got = _canon_uuid(data) if head == _CANON_UUID or b'Canon' in data[:65536] else {}
+                    for k, v in got.items():
+                        out.setdefault(k, v)
+            break
+    return out
+
+
+def qt_timecode(info):
+    """(tc string, fps, df) from qt_info's tmcd fields, or None."""
+    if 'tc_frames' not in info:
+        return None
+    try:
+        fps = TC.parse_rate(info['tc_rate'])
+    except (ValueError, ZeroDivisionError):
+        return None
+    if info.get('tc_nf') and TC.nominal(fps) != info['tc_nf']:
+        return None                                    # rate and frames-per-second disagree: don't guess
+    nb = TC.nominal(fps)
+    df = info['tc_df'] and nb in (30, 60)
+    day = nb * 86400 - ((2 if nb == 30 else 4) * (1440 - 144) if df else 0)
+    return TC.frames_to_tc(info['tc_frames'] % day, fps, df), fps, df
 
 
 # ------------------------------------------------------------------ probes
@@ -252,9 +397,38 @@ def probe_video(path, _audio_from=None):
         if side.get('tc') and not tcs:
             tcs, src = side['tc'], 'sony-xml'
             out['df'] = side.get('df', False)
+        if side.get('serial'):
+            out['serial'] = side['serial']
+    if os.path.splitext(path)[1].lower() in QT_EXT:
+        # Canon RAW / BRAW: ffmpeg can't open the picture, so it never sees the tmcd track. Read the boxes.
+        try:
+            qi = qt_info(path)
+        except (OSError, struct.error, ValueError):
+            qi = {}
+        if not out['fps'] and qi.get('video_rate'):
+            try:
+                out['fps'] = TC.parse_rate(qi['video_rate'])
+            except (ValueError, ZeroDivisionError):
+                pass
+        if qi.get('video_frames') and (not out['nframes'] or out.get('raw_picture')):
+            out['nframes'] = qi['video_frames']
+        if qi.get('model') and not out['model']:
+            out['model'] = qi['model']
+        if qi.get('serial') and not out.get('serial'):
+            out['serial'] = qi['serial']
+        q = None if tcs else qt_timecode(qi)
+        if q:
+            tcs, tfps, tdf = q
+            if not out['fps']:
+                out['fps'] = tfps
+            out['df'] = tdf
+            out['start'] = TC.tc_to_samples(tcs, tfps, tdf)     # at the timecode's own rate
+            out['tc_source'], out['tc_string'] = 'qt-tmcd', tcs
+            if TC.nominal(tfps) != TC.nominal(out['fps']):
+                out['tc_rate'] = TC.rate_label(tfps)
     if out['fps'] and out['nframes']:
         out['length'] = TC.frames_to_samples(out['nframes'], out['fps'])
-    if tcs and out['fps']:
+    if tcs and out['fps'] and out.get('tc_source') != 'qt-tmcd':
         try:
             out['df'] = out['df'] or (';' in tcs)
             out['start'] = TC.tc_to_samples(tcs, out['fps'], out['df'])
@@ -505,7 +679,8 @@ def find_media(paths, skip_dirs=()):
     """Walk dropped files/folders -> list of media paths (sorted), plus list of unsupported files."""
     found, unsupported = [], []
     skip_names = {'sub', 'thmbnl', 'take', 'general', 'proxy', 'proxies', '.spotlight-v100', '.fseventsd',
-                  '.trashes', '.ds_store', 'thumbnails', 'thumbnail'}
+                  '.trashes', '.ds_store', 'thumbnails', 'thumbnail',
+                  'trash', 'undo'}       # Sound Devices: deleted takes and undo copies are not part of the day
     out_markers = ('ISO_ALIGNED', 'POLY_ALIGNED', 'POLY_UNALIGNED', 'AAP_RENDERS', 'REF_', 'TC_FIXED', '_MIDWIG', '_SYNC_WORK', 'CONVERTED_48K', 'EDITORIAL', 'SPLIT_MONO')
     skip_dirs = [os.path.realpath(s) for s in skip_dirs]
 

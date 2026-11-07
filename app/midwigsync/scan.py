@@ -104,13 +104,31 @@ def track_number(roll):
     return int(m.group(1)) if m else None
 
 
-_LETTER_RES = (re.compile(r'^([A-Z])(\d{3})C\d{3}'), re.compile(r'^([A-Z])(\d{3})_C?\d{3}'),
+_LETTER_RES = (re.compile(r'^([A-Z])(\d{3})C\d{3}'),           # A001C003 (ARRI, Sony, Canon XF, RED)
+               re.compile(r'^([A-Z])_(\d{4})C\d{3}'),          # C_0001C002 (Canon C80 / C400 / R5 C)
+               re.compile(r'^([A-Z])(\d{3})_C?\d{3}'),         # A002_C001
                re.compile(r'(?:^|[_ -])([A-Z])(\d{3})(?:$|[_ -])'))
+_CARD_LETTER_RE = re.compile(r'[_ -]([A-Z])[_ -]\d{1,3}$')     # UDP_261106_C80_B_001: the letter you gave the card
 
 
 def camera_letter(c):
-    """Camera letter from the camera's own naming (A001C003, A002_C001, a card called FX6_A001), or None."""
-    for s in (c.get('name') or '', os.path.basename(os.path.dirname(c.get('source_path') or c['path'])), c.get('roll') or ''):
+    """Camera letter: first the one written into the card folder's name (UDP_261106_C80_B_001 -> B), since that's
+    the letter the camera had that day; then the camera's own clip naming (A001C003, C_0001C002, A002_C001, a card
+    called FX6_A001), or None."""
+    path = c.get('source_path') or c['path']
+    dirs = []
+    d = os.path.dirname(path)
+    for _ in range(4):                       # CONTENTS/CLIPS001, PRIVATE/M4ROOT/CLIP... sit under the card folder
+        b = os.path.basename(d)
+        if not b:
+            break
+        dirs.append(b)
+        d = os.path.dirname(d)
+    for s in dirs + [c.get('roll') or '']:
+        m = _CARD_LETTER_RE.search(s)
+        if m:
+            return m.group(1)
+    for s in [c.get('name') or ''] + dirs[:1] + [c.get('roll') or '']:
         s = os.path.splitext(s)[0]
         for rx in _LETTER_RES:
             m = rx.search(s)
@@ -195,6 +213,9 @@ class Project:
                 c['roll'] = card_roll(c['path'])
             c['flags'] = []
             c['include'] = True
+            if any(x.upper() == 'FALSETAKES' for x in os.path.normpath(c.get('source_path') or c['path']).split(os.sep)):
+                c['false_take'] = True     # the recorder's False Take folder: shown, left out unless you add it
+                c['include'] = False
             c['orig_start'] = c['start']
             c['sync'] = None   # waveform-sync result
             c['manual'] = None
@@ -495,7 +516,7 @@ class Project:
         self._ltc_follow_rate()
         for c in self.clips:
             keep_sync = [f for f in c['flags'] if f.startswith('sync')]
-            c['flags'] = keep_sync
+            c['flags'] = keep_sync + (['false_take'] if c.get('false_take') else [])
             if c.get('manual'):
                 c['start'] = c['manual']['start']
             if c['kind'] == 'audio' and not c.get('fps'):
