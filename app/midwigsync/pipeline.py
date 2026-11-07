@@ -12,6 +12,7 @@ from collections import Counter
 
 from . import tc as TC
 from . import media
+from . import safety as SAFE
 from .bwf import StreamWavWriter, build_bext, build_ixml, patch_time_reference, WavInfo
 from .scan import Project
 from .wavesync import SyncAnalyzer
@@ -19,7 +20,7 @@ from . import stamp as ST
 from . import resolve_aap as RA
 from .assemble import Assembler
 from .polywav import build_polywavs
-from .xmlexport import write_day_xml
+from .xmlexport import write_day_xml, write_slowmo_xml
 from .report import verify_against_ref, write_report
 from . import refplan as RP
 from . import exports as EX
@@ -28,17 +29,18 @@ SR = TC.SR
 from .brand import ENV_CACHE, APP_NAME, OUT_SUFFIX, WORK_DIR
 
 DEFAULTS = dict(
-    job_name='', out_dir='', reference=None,
-    waveform_check=True, stamp_no_tc=True, stamp_corrected_audio=True, stamp_corrected_video=False,
+    job_name='', out_dir='', reference=None,   # reference: dict(roll, channel, auto) - auto: picked by listening
+    waveform_check=True,
+    review_tc=False,               # pause after the timecode check so you can confirm the fixes (the window: on)
     aap_mode='resolve',            # 'resolve' | 'skip'
     aap_auto_press=True, render_dir='',
-    poly_aligned=True, poly_unaligned=False, chunk_mode='max',
-    xml_iso=True, xml_poly=True, short_clip_s=20,
+    iso_folder=True,               # aligned ISO files (each mic on its own, no mix) in ISO_ALIGNED/
+    chunk_mode='max',              # polywavs: largest whole TC minutes under 4 GB ('hour': whole hours)
+    short_clip_s=20,
     mode='auto',                   # 'auto' | 'camera' | 'audio'  (auto: audio-only when no camera has sound)
-    aligned_names='auto',          # 'auto' | 'same' | 'suffix'   (auto: same names for per-take deliveries)
-    poly_per_take=False,           # also make day-long polywavs from a sound mixer's per-take files
+    aligned_names='same',          # 'same' | 'suffix' (_ALN)
     export_otio=True, export_aaf=True, export_ale=True, export_csv=True,
-    synced_clips=False,            # camera clips re-wrapped with the aligned sound (copies the picture)
+    transcribe=False, transcribe_language='en',   # 'auto' detects the language
 )
 
 
@@ -76,21 +78,17 @@ class RefSink:
 
 
 def default_job_name(project, date=''):
-    ub = Counter(c.get('ubits') for c in project.clips if c.get('ubits'))
-    if ub and not date:
-        u = ub.most_common(1)[0][0]
+    """Just the date: the shoot day from the files (recording dates, user bits), today's date if they don't say."""
+    if not date:
+        days = Counter(c.get('day') for c in project.clips if c.get('day') and str(c.get('day'))[:4].isdigit())
+        if days:
+            date = days.most_common(1)[0][0].replace('-', '')
+    if not date:
+        ub = Counter(c.get('ubits') for c in project.clips if c.get('ubits'))
+        u = ub.most_common(1)[0][0] if ub else ''
         if len(u) >= 8 and u[:8].isdigit():
             date = u[:8]
-    if not date:
-        times = [c.get('created', '') for c in project.clips if c.get('created')]
-        date = (sorted(times)[0][:10].replace('-', '') if times else dt.date.today().strftime('%Y%m%d'))
-    # common parent of the audio folders
-    aud = [os.path.dirname(os.path.dirname(c.get('source_path') or c['path'])) for c in project.clips if c['kind'] == 'audio']
-    top = _job_folder(os.path.commonpath(aud)) if aud else ''
-    base = os.path.basename(top)
-    base = re.sub(r'(?i)^\d{8}_?', '', base)
-    base = re.sub(r'(?i)[_ -]*(audio|sound|snd|iso|isos)$', '', base)
-    return f'{date}_{base}'.strip('_') if base else date
+    return date or dt.date.today().strftime('%Y%m%d')
 
 
 _GENERIC = re.compile(r'(?i)^(audio|sound|snd|isos?|wavs?|recorder|mixer|sound[_ -]?rolls?|audio[_ -]?files)$')
@@ -103,7 +101,47 @@ def _job_folder(path):
     return path
 
 
+_MEDIA_EXT = None
+
+
+def _holds_media(d):
+    """A camera card or a roll folder: has media files right inside it, or a card structure."""
+    global _MEDIA_EXT
+    if _MEDIA_EXT is None:
+        _MEDIA_EXT = media.VIDEO_EXT | media.AUDIO_EXT | media.AUDIO_OTHER_EXT | set(getattr(media, 'RAW_TRY_EXT', ()))
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return False
+    if any(n.upper() in SAFE.CARD_DIRS for n in names) or os.path.basename(d).upper() in SAFE.CARD_DIRS:
+        return True
+    return any(os.path.splitext(n)[1].lower() in _MEDIA_EXT for n in names if not n.startswith('.'))
+
+
+def shoot_folder(project):
+    """The top of what you dropped: the folder the output goes in (on the same drive as the media). Climbs out of
+    camera cards, roll folders and folders just called SOUND/AUDIO; never above the drive or your home folder."""
+    roots = [r for r in getattr(project, 'dropped', []) if r]
+    if not roots:
+        return ''
+    dirs = [r if os.path.isdir(r) else os.path.dirname(r) for r in roots]
+    try:
+        base = os.path.commonpath(dirs)
+    except ValueError:
+        base = dirs[0]
+    stop = {'/', '/Volumes', os.path.dirname(os.path.expanduser('~')), '/Users'}
+    if base in stop or os.path.dirname(base) == '/Volumes' and len(dirs) > 1 and base != dirs[0]:
+        base = dirs[0] if dirs[0] not in stop else base
+    while (_holds_media(base) or _GENERIC.match(os.path.basename(base))) and os.path.dirname(base) not in stop \
+            and base not in stop and os.path.dirname(base) != base:
+        base = os.path.dirname(base)
+    return base
+
+
 def default_out_dir(project, job):
+    top = shoot_folder(project)
+    if top:
+        return os.path.join(top, f'{job}{OUT_SUFFIX}')
     aud = [os.path.dirname(os.path.dirname(c.get('source_path') or c['path'])) for c in project.clips
            if c['kind'] == 'audio' and not c.get('converted', '').startswith(('M4A', 'MP3', 'AAC'))]
     if not aud:
@@ -114,7 +152,14 @@ def default_out_dir(project, job):
 
 class Job:
     def __init__(self, project: Project, settings, emit=None):
-        self.p = project
+        self.full = project
+        # slow motion / other frame rates: never synced, never a reference, their sound never used; own timeline
+        self.slow = [c for c in project.clips if c.get('slowmo') and c['include']]
+        self.lanes = project.lanes()                 # A CAM, B CAM... (sets c['lane'])
+        lab = {l['key']: l['label'] for l in self.lanes}
+        for c in project.clips:
+            c['lane_label'] = lab.get(c.get('lane'), c['roll'])
+        self.p = project.sync_view()
         self.s = dict(DEFAULTS, **{k: v for k, v in settings.items() if v is not None})
         self.emit = emit or (lambda kind, data: print(kind, data))
         self._cancel = threading.Event()
@@ -124,6 +169,9 @@ class Job:
         self.state = dict(step='', done=[], error=None)
         self.out = self.s['out_dir']
         self.mid = os.path.join(self.out, WORK_DIR)
+        SAFE.install()
+        for c in project.clips:
+            SAFE.protect_clip(c)
         self.sync_report = None
         self.stamped = []
         self.refs = []
@@ -174,10 +222,7 @@ class Job:
         return self.s.get('reference') or self.p.default_reference()
 
     def names_mode(self, sources):
-        m = self.s.get('aligned_names') or 'auto'
-        if m in ('same', 'suffix'):
-            return m
-        return 'same' if (self.mode() == 'audio' and RP.delivery_style(sources) == 'per_take') else 'suffix'
+        return 'suffix' if self.s.get('aligned_names') == 'suffix' else 'same'
 
     def audio_sources(self, use_stamped=True):
         """Included audio clips with a position, in track order (numbered rolls first)."""
@@ -209,17 +254,22 @@ class Job:
     # ------------------------------------------------------------ steps
     def run(self):
         try:
+            bad = SAFE.output_problem(self.out)
+            if bad:
+                raise RuntimeError(bad)
+            SAFE.allow_output(self.out)
             os.makedirs(self.mid, exist_ok=True)
             self.log(f"Job {self.s['job_name']} → {self.out}")
+            self.log(f"Originals are read-only: {SAFE.summary()['originals']} files protected.")
             if self.mode() == 'audio':
-                self.log('Audio only: the reference mic is chosen for each stretch (boom when there is one).')
+                self.log('Audio only: the reference mic is chosen for each stretch by listening (never a mix).')
             else:
-                r = self.ref()
-                self.log(f"Camera reference: {r['roll']} ch {r['channel'] + 1}")
+                self.pick_reference()
             self.step('Checking timecode')
             self.do_sync()
-            self.step('Writing timecode to copies')
-            self.do_stamp()
+            self.review_fixes()
+            self.step('Writing corrected sound')
+            self.do_sound_set()
             if self.s['aap_mode'] == 'resolve':
                 self.step('Auto-Align Post')
                 self.do_aap()
@@ -229,9 +279,12 @@ class Job:
             self.do_poly()
             self.step('XML')
             self.do_xml()
+            if self.s.get('transcribe'):
+                self.step('Transcript')
+                self.do_transcript()
             self.step('Report')
             self.do_report()
-            self.emit('done', dict(out=self.out, report=self.report_path))
+            self.emit('done', dict(out=self.out, report=self.report_path, camera_fixes=self.camera_fixes()))
         except Cancelled:
             self.log('Stopped.')
             self.emit('stopped', {})
@@ -263,7 +316,7 @@ class Job:
         p.check_short_clips(self.s['short_clip_s'])
         ref = self.ref()
         fps, df = p.fps, p.df
-        ref_dir = os.path.join(self.out, f"REF_{ref['roll']}") if ref else None
+        ref_dir = os.path.join(self.mid, f"REF_{ref['roll']}") if ref else None     # working files
         sinks = {}
 
         def sink_factory(c):
@@ -315,56 +368,143 @@ class Job:
             self.log(f"Reference: {ref['roll']} channel {ref['channel'] + 1} → {len(self.refs)} WAV(s)")
         self.emit('project', p.to_json())
 
-    def do_stamp(self):
-        p = self.p
-        fps, df = p.fps, p.df
-        fixed = os.path.join(self.out, 'TC_FIXED')
-        for c in p.clips:
-            self.check()
+    def pick_reference(self):
+        """Camera mode: align to an onboard camera mic. Unless you chose one, listen to every camera channel
+        against the sound and pick the one that matches best (never the mixer's feed, LTC or a silent channel)."""
+        r = self.s.get('reference')
+        if r and not r.get('auto') and r.get('roll'):
+            self.log(f"Alignment track: {r['roll']} ch {r['channel'] + 1} (chosen by you)")
+            return
+        self.step('Choosing the alignment track')
+        from . import refpick
+        pick = refpick.pick_camera_reference(self.p, log=self.log, cancel=self.cancelled)
+        if pick:
+            self.s['reference'] = dict(roll=pick['roll'], channel=pick['channel'], auto=True, why=pick['why'])
+            self.emit('ref_pick', self.s['reference'])
+        r = self.ref()
+        self.log(f"Alignment track: {r['roll']} ch {r['channel'] + 1}" + (f" ({pick['why']})" if pick else ''))
+
+    def fixes(self):
+        """Clips whose position differs from their own file timecode (found by waveform or set by you)."""
+        out = []
+        for c in self.p.clips:
             if not c['include'] or c['start'] is None:
                 continue
-            moved = {'sync_corrected', 'sync_found'} & set(c['flags'])
+            moved = bool({'sync_corrected', 'sync_found'} & set(c['flags']))
             if c.get('manual') and c['manual']['start'] != c['orig_start']:
                 moved = True
-            if not moved and c['kind'] == 'audio' and c.get('converted'):
-                # converted (resampled / non-WAV) audio: put the 48 kHz copy with the job, not in a cache
-                out = os.path.join(self.out, 'CONVERTED_48K', c['roll'], c.get('out_name', c['name']))
-                path, st = ST.stamp_wav(c, out, c['start'], fps, df, note=f"{APP_NAME}: {c['converted']}") \
-                    if c['start'] is not None else (None, None)
-                if path:
-                    c['stamped_path'], c['stamped_start'] = path, st
-                    c['length'] = WavInfo(path).nframes
+            if moved:
+                out.append(c)
+        return out
+
+    def review_fixes(self):
+        """Stop and show the timecode fixes before anything is written (the window asks; headless: go on)."""
+        fx = self.fixes()
+        sr = self.sync_report or {}
+        if not self.s.get('review_tc') or not fx:
+            return
+        rows = []
+        for c in fx:
+            s = c.get('sync') or {}
+            rows.append(dict(id=c['id'], name=c['name'], roll=c['roll'], kind=c['kind'],
+                             old=TC.samples_to_tc(c['orig_start'], self.p.fps, self.p.df) if c['orig_start'] is not None else None,
+                             new=TC.samples_to_tc(c['start'], self.p.fps, self.p.df),
+                             shift_s=round((c['start'] - c['orig_start']) / SR, 3) if c['orig_start'] is not None else None,
+                             how='set by you' if c.get('manual') else (s.get('method') or 'waveform'),
+                             score=s.get('score'), against=s.get('against')))
+        self.decision = None
+        self.user_decide = threading.Event()
+        self.emit('review_tc', dict(fixes=rows, checked=sr.get('checked'), in_sync=sr.get('in_sync')))
+        self.log(f'Waiting for you to confirm {len(rows)} timecode fix(es)…')
+        while not self.user_decide.wait(0.5):
+            self.check()
+        if self.decision == 'stop':
+            raise Cancelled()
+        if self.decision == 'skip':
+            n = 0
+            for c in fx:
+                if not c.get('manual'):
+                    c['start'] = c['orig_start']
+                    c['flags'] = [f for f in c['flags'] if f not in ('sync_corrected', 'sync_found')]
+                    n += 1
+            self.log(f'Kept the files\' own timecode for {n} clip(s), as you chose.')
+        else:
+            self.log('Fixes confirmed.')
+
+    def decide(self, choice):
+        self.decision = choice
+        if getattr(self, 'user_decide', None):
+            self.user_decide.set()
+
+    def do_sound_set(self):
+        """A complete copy of the day's sound in SOUND_TC_CORRECTED/: every file in its original format (bit depth,
+        channels, track names, bext/iXML); files whose timecode was fixed carry the new timecode, the rest are exact
+        copies (instant clones on the same drive). Everything after this works from these copies. Skipped when no
+        sound file needed a fix (the originals are used, read-only)."""
+        p = self.p
+        fps, df = p.fps, p.df
+        aud = [c for c in p.clips if c['kind'] == 'audio' and c['include'] and c['start'] is not None]
+        fixed = {c['id'] for c in self.fixes() if c['kind'] == 'audio'}
+        conv = [c for c in aud if c.get('converted')]
+        if not fixed and not conv:
+            self.log('Sound timecode: nothing to fix, working from the originals (read-only).')
+            return
+        root = os.path.join(self.out, 'SOUND_TC_CORRECTED')
+        n_fix = n_copy = 0
+        for i, c in enumerate(aud):
+            self.check()
+            self.progress(i, len(aud), c['name'])
+            out = os.path.join(root, c['roll'], c.get('out_name', c['name']))
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            if c['id'] in fixed or c.get('converted'):
+                note = f"{APP_NAME}: {c['converted']}" if c.get('converted') and c['id'] not in fixed else None
+                path, st = ST.stamp_wav(c, out, c['start'], fps, df, note=note)
+                c['stamped_path'], c['stamped_start'] = path, st
+                c['length'] = WavInfo(path).nframes * SR // max(1, WavInfo(path).sr)
+                if c['id'] in fixed:
+                    n_fix += 1
                     self.stamped.append(dict(name=c['name'], out=os.path.relpath(path, self.out),
                                              tc=TC.samples_to_tc(st, fps, df)))
+            else:
+                SAFE.clone_or_copy(c['path'], out)
+                c['stamped_path'], c['stamped_start'] = out, c['start']
+                n_copy += 1
+        self.log(f'SOUND_TC_CORRECTED: {n_fix} file(s) with corrected timecode, {n_copy} copied as they were '
+                 f'(same format, names and metadata).')
+
+    def camera_fixes(self):
+        """Camera clips whose timecode was fixed: offered after the run as full-quality copies."""
+        return [dict(id=c['id'], name=c['name'], roll=c['roll'],
+                     new=TC.samples_to_tc(c['start'], c.get('fps') or self.p.fps, bool(c.get('df'))))
+                for c in self.fixes() if c['kind'] == 'video']
+
+    def rewrite_cameras(self, ids=None):
+        """After the run, when you ask: copies of the camera files whose timecode was fixed, with nothing changed
+        but the timecode (the picture and sound are the original bytes). Then the timelines point at the copies."""
+        todo = [c for c in self.fixes() if c['kind'] == 'video' and (ids is None or c['id'] in ids)]
+        root = os.path.join(self.out, 'CAMERA_TC_CORRECTED')
+        made = []
+        for i, c in enumerate(todo):
+            self.check()
+            self.progress(i, len(todo), c['name'])
+            try:
+                path, how = ST.copy_with_tc(c, os.path.join(root, c['roll']), c['start'])
+            except Exception as e:  # noqa: BLE001
+                self.log(f"  {c['name']}: could not write a corrected copy ({e})")
                 continue
-            if not moved:
-                continue
-            notc = c['orig_start'] is None
-            if c['kind'] == 'audio' and (self.s['stamp_corrected_audio'] or (notc and self.s['stamp_no_tc'])):
-                out = os.path.join(fixed, c['roll'], c.get('out_name', c['name']))
-                path, st = ST.stamp_wav(c, out, c['start'], fps, df)
-                c['stamped_path'], c['stamped_start'] = path, st
-                c['length'] = WavInfo(path).nframes
-                self.stamped.append(dict(name=c['name'], out=os.path.relpath(path, self.out),
-                                         tc=TC.samples_to_tc(st, fps, df)))
-            elif c['kind'] == 'video' and ((notc and self.s['stamp_no_tc']) or (not notc and self.s['stamp_corrected_video'])):
-                self.log(f"  re-wrapping {c['name']} with timecode")
-                out = os.path.join(fixed, c['roll'], c['name'])
-                try:
-                    path, frames = ST.stamp_video(c, out, c['start'], fps, df)
-                except RuntimeError as e:
-                    self.log(f"  could not re-wrap {c['name']}: {e}")
-                    continue
-                c['stamped_path'] = path
-                c['stamped_start'] = TC.frames_to_samples(frames, fps)
-                self.stamped.append(dict(name=c['name'], out=os.path.relpath(path, self.out),
-                                         tc=TC.frames_to_tc(frames, fps, df)))
-        self.log(f'{len(self.stamped)} file(s) written to TC_FIXED.')
+            c['stamped_path'] = path
+            c['stamped_start'] = c['start']
+            made.append(path)
+            self.log(f"  {c['name']} -> {os.path.relpath(path, self.out)} ({how})")
+        if made:
+            self.xmls = []
+            self.do_xml()
+        return made
 
     def _unique_sources(self, sources):
         """Auto-Align names its renders after the source file, so two recorders with the same file name
         (ZOOM0001.WAV on two Zooms, T001.WAV on two Sound Devices) would overwrite each other. Those get a
-        uniquely named link (or copy) for the Auto-Align pass; outputs keep the original names."""
+        uniquely named copy (an instant clone on APFS) for the Auto-Align pass; outputs keep the original names."""
         stems = Counter(os.path.splitext(s['name'])[0].lower() for s in sources)
         work = os.path.join(self.mid, 'aap_src')
         out_names, used = {}, set()
@@ -375,10 +515,7 @@ class Job:
                 dst = os.path.join(work, uniq)
                 os.makedirs(work, exist_ok=True)
                 if not os.path.exists(dst):
-                    try:
-                        os.link(s['path'], dst)
-                    except OSError:
-                        shutil.copyfile(s['path'], dst)
+                    SAFE.clone_or_copy(s['path'], dst)    # its own file, never a link to the original
                 s['path'], s['name'] = dst, uniq
             ustem = os.path.splitext(s['name'])[0]
             want = stem + '_ALN'
@@ -426,7 +563,7 @@ class Job:
         n_items = sum(1 for i in plan['items'] if i['kind'] == 'source')
         self.log(f"Resolve timeline: {len(refs)} reference piece(s) on A1, {n_items} piece(s) to align on "
                  f"A2–A{len(plan['tracks'])}")
-        render_dir = self.s.get('render_dir') or os.path.join(self.out, 'AAP_RENDERS')
+        render_dir = self.s.get('render_dir') or os.path.join(self.mid, 'AAP_RENDERS')
         os.makedirs(render_dir, exist_ok=True)
         since = time.time()
         watch_dirs = [(render_dir, True)] + [(d, False) for d in sorted({os.path.dirname(s['path']) for s in sources})]
@@ -513,7 +650,8 @@ class Job:
             srcs.append(d)
         ref = self.ref()
         note = f"{ref['roll']} CH{ref['channel'] + 1}" if ref else 'chosen per stretch (audio only)'
-        asm = Assembler(srcs, st['files'], os.path.join(self.out, 'ISO_ALIGNED'), log=self.log, progress=self.progress,
+        iso_root = os.path.join(self.out, 'ISO_ALIGNED') if self.s.get('iso_folder', True) else os.path.join(self.mid, 'aligned_iso')
+        asm = Assembler(srcs, st['files'], iso_root, log=self.log, progress=self.progress,
                         note=note, cancel=self.cancelled, ref_windows=self._ref_windows)
         try:
             asm.plan_all()
@@ -526,39 +664,84 @@ class Job:
                     by_mono[a['source']] = a['aligned']
             self.aligned = [a for a in done if a['source'] not in split_paths]
             if self._packs:
-                self.log('Packing aligned tracks back into their multichannel files:')
+                self.log('Packing aligned tracks back into their polywav files (mix and timecode tracks as recorded):')
 
                 def name_for(stem):
                     return stem if self._names == 'same' else stem + '_ALN'
-                self.aligned += RP.repack(self._packs, by_mono, os.path.join(self.out, 'ISO_ALIGNED'), name_for, note,
-                                          log=self.log, cancel=self.cancelled)
+                per_take = RP.delivery_style(self.audio_sources()) == 'per_take'
+                dest = os.path.join(self.out, 'POLY_ALIGNED') if per_take else os.path.join(self.mid, 'repacked')
+                packed = RP.repack(self._packs, by_mono, dest, name_for, note, log=self.log, cancel=self.cancelled)
+                for r in packed:
+                    r['repacked'] = per_take      # per-take polywavs stay as they are; on ISO days they join the day polywav
+                self.aligned += packed
+                if self.s.get('iso_folder', True):
+                    self._split_isos(by_mono)
             for s in self._passthru:      # mix / timecode / silent files: kept as recorded
                 self.aligned.append(dict(source=s['path'], aligned=s['path'], roll=s['roll'], start=s['start'],
                                          n=WavInfo(s['path']).nframes, sections=0, aligned_s=0.0,
                                          total_s=round(s['length'] / SR, 1), flags=[f"{s.get('role', 'mix')} track, not aligned"],
-                                         passthrough=True))
+                                         passthrough=True, role=s.get('role', 'mix')))
         except KeyboardInterrupt:
             raise Cancelled()
         self.log(f'{len(self.aligned)} aligned file(s) written.')
         self.step('Checking alignment')
         self.verify = verify_against_ref([a for a in self.aligned if not a.get('passthrough')], self.refs)
 
+    def _split_isos(self, by_mono):
+        """Each mic of a sound mixer's polywav as its own aligned file in ISO_ALIGNED/ (never the mix or timecode
+        tracks): <take>_<track name>.WAV, same timecode and metadata."""
+        import re as _re
+        n = 0
+        for src, aligned in by_mono.items():
+            m = _re.match(r'(.+)__(\d{2})_(.+)\.WAV$', os.path.basename(aligned), _re.I)
+            if not m or not os.path.exists(aligned):
+                continue
+            stem, track = m.group(1), m.group(3)
+            pack_roll = os.path.basename(os.path.dirname(src))
+            dst = os.path.join(self.out, 'ISO_ALIGNED', pack_roll, f'{stem}_{track}.WAV')
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(aligned, dst)
+            n += 1
+        if n:
+            self.log(f'ISO_ALIGNED: {n} mic track(s) as separate aligned files (mix tracks only in the polywavs).')
+
     def do_poly(self):
+        """Aligned polywavs, always under 4 GB. A sound mixer's per-take polywavs come back as aligned per-take
+        polywavs (same names and track layout, mix included). Long ISO days become polywavs of the largest whole
+        TC minutes under 4 GB, mix tracks included. Without Auto-Align, the same from the (corrected) sound."""
         p = self.p
-        if self.mode() == 'audio' and RP.delivery_style(self.audio_sources()) == 'per_take' and not self.s.get('poly_per_take'):
-            self.log('Per-take recorder files: the aligned takes are the polywavs (same names and track layout), '
-                     'so no day-long polywav. Turn on "Day-long polywavs" to make them anyway.')
-            return
+        packed = [a for a in self.aligned if a.get('repacked')]
+        for a in packed:
+            names = WavInfo(a['aligned']).track_names()
+            w = WavInfo(a['aligned'])
+            self.polys.append(dict(path=a['aligned'], start=a['start'], n=w.nframes, folder='POLY_ALIGNED',
+                                   tc=TC.samples_to_tc(a['start'], self.p.fps, self.p.df),
+                                   channels=[names.get(i + 1, f'{a["roll"]}_{i + 1}') for i in range(w.channels)],
+                                   size=os.path.getsize(a['aligned'])))
+        if packed:
+            big = [x for x in self.polys if x['size'] >= 4 * 1024 ** 3]
+            self.log(f'POLY_ALIGNED: {len(packed)} per-take polywav(s), aligned, same names and track layout'
+                     + (f' ({len(big)} over 4 GB as recorded)' if big else '') + '.')
         ub = Counter(c.get('ubits') for c in p.clips if c.get('ubits'))
         ubits = ub.most_common(1)[0][0] if ub else ''
         sets = []
-        if self.s['poly_aligned'] and self.aligned:
+        loose = [a for a in self.aligned if not a.get('repacked') and a.get('role') != 'empty']
+        if loose:
             srcs = [dict(path=a['aligned'], start=a['start'], roll=a['roll'],
-                         channels=WavInfo(a['aligned']).channels) for a in self.aligned]
-            sets.append(('POLY_ALIGNED', srcs, 'ALN', 'Auto-Align Post aligned ISOs'))
-        if self.s['poly_unaligned'] or (self.s['poly_aligned'] and not self.aligned):
+                         channels=WavInfo(a['aligned']).channels) for a in loose]
+            sets.append(('POLY_ALIGNED', srcs, 'ALN', 'Auto-Align Post aligned ISOs + mix'))
+        elif not self.aligned:
             srcs = [dict(path=s['path'], start=s['start'], roll=s['roll'], channels=s['channels'])
                     for s in self.audio_sources()]
+            if srcs and RP.delivery_style(self.audio_sources()) == 'per_take':
+                for s in srcs:
+                    w = WavInfo(s['path'])
+                    names = w.track_names()
+                    self.polys.append(dict(path=s['path'], start=s['start'], n=w.nframes, folder='POLY_UNALIGNED',
+                                           tc=TC.samples_to_tc(s['start'], self.p.fps, self.p.df),
+                                           channels=[names.get(i + 1, f'{s["roll"]}_{i + 1}') for i in range(w.channels)],
+                                           size=os.path.getsize(s['path'])))
+                srcs = []
             sets.append(('POLY_UNALIGNED', srcs, 'RAW', 'unaligned ISOs'))
         for folder, srcs, tag, note in sets:
             if not srcs:
@@ -580,9 +763,11 @@ class Job:
     def do_xml(self):
         p = self.p
         cams = []
-        for r in p.camera_rolls():
+        lane_rolls = [(l['label'], [r for r in p.camera_rolls() if r['name'] in l['rolls']])
+                      for l in self.lanes if l['kind'] == 'camera']
+        for label, rs in lane_rolls:
             clips = []
-            for c in r['clips']:
+            for c in [c for r in rs for c in r['clips']]:
                 if not c['include'] or c['start'] is None or 'sync_failed' in c['flags']:
                     continue
                 path = c.get('stamped_path') or c['path']
@@ -594,58 +779,65 @@ class Job:
                                   channels_streams=len(c.get('audio_streams') or []),
                                   media_start_frames=TC.samples_to_frames(media_start, cfps)))
             if clips:
-                label = f"{r['camera']} {r['name']}".strip() if r['camera'] and r['camera'] not in r['name'] else r['name']
                 cams.append(dict(label=label, clips=clips))
         xml_dir = os.path.join(self.out, 'EDITORIAL')
         job = self.s['job_name']
         tracks = []
-        if self.s['xml_iso']:
-            tracks = []
-            if self.aligned:
-                by = {}
-                for a in self.aligned:
-                    by.setdefault(a['roll'], []).append(a)
-                order = [r['name'] for r in p.audio_rolls_ordered()]
-                for roll in sorted(by, key=lambda r: order.index(r) if r in order else 999):
-                    w0 = WavInfo(by[roll][0]['aligned'])
-                    for ch in range(w0.channels):
-                        tracks.append(dict(label=roll if w0.channels == 1 else f'{roll}_{ch + 1}', clips=[
-                            dict(path=a['aligned'], start=a['start'], length=a['n'], kind='audio', channels=w0.channels,
-                                 src_track=ch + 1, reel=roll, media_start_frames=TC.samples_to_frames(a['start'], p.fps))
-                            for a in by[roll]]))
-            else:
-                by = {}
-                for s in self.audio_sources():
-                    by.setdefault(s['roll'], []).append(s)
-                for roll, ss in by.items():
-                    for ch in range(ss[0]['channels']):
-                        tracks.append(dict(label=roll if ss[0]['channels'] == 1 else f'{roll}_{ch + 1}', clips=[
-                            dict(path=s['path'], start=s['start'], length=s['length'], kind='audio', channels=s['channels'],
-                                 src_track=ch + 1, reel=roll, media_start_frames=TC.samples_to_frames(s['start'], p.fps))
-                            for s in ss]))
-            suffix = 'ISO_ALN' if self.aligned else 'ISO'
-            path = write_day_xml(os.path.join(xml_dir, f'{job}_SYNC_{suffix}.xml'), f'{job} SYNC {suffix}', p.fps, p.df,
-                                 cams, tracks)
-            self.xmls.append(os.path.relpath(path, self.out))
-        iso_tracks = tracks
-        if self.s['xml_poly'] and self.polys:
+        if self.polys:
             folder = 'POLY_ALIGNED' if any(x['folder'] == 'POLY_ALIGNED' for x in self.polys) else 'POLY_UNALIGNED'
             ps = [x for x in self.polys if x['folder'] == folder]
-            names = ps[0]['channels']
-            tracks = [dict(label=nm, clips=[dict(path=x['path'], start=x['start'], length=x['n'], kind='audio',
-                                                 channels=len(names), src_track=i + 1, reel=nm,
-                                                 media_start_frames=TC.samples_to_frames(x['start'], p.fps)) for x in ps])
-                      for i, nm in enumerate(names)]
-            path = write_day_xml(os.path.join(xml_dir, f'{job}_SYNC_{folder}.xml'), f'{job} SYNC {folder}', p.fps,
+            layouts = []
+            for x in ps:
+                if tuple(x['channels']) not in layouts:
+                    layouts.append(tuple(x['channels']))
+            seen = Counter()
+            for lay in layouts:
+                for i, nm in enumerate(lay):
+                    seen[nm] += 1
+                    lab = nm if seen[nm] == 1 else f'{nm} ({seen[nm]})'
+                    tracks.append(dict(label=lab, clips=[dict(path=x['path'], start=x['start'], length=x['n'], kind='audio',
+                                                             channels=len(lay), src_track=i + 1, reel=nm,
+                                                             media_start_frames=TC.samples_to_frames(x['start'], p.fps))
+                                                        for x in ps if tuple(x['channels']) == lay]))
+            tag = 'ALN' if folder == 'POLY_ALIGNED' else 'UNALIGNED'
+            path = write_day_xml(os.path.join(xml_dir, f'{job}_SYNC_{tag}.xml'), f'{job} SYNC {tag}', p.fps,
                                  p.df, cams, tracks)
             self.xmls.append(os.path.relpath(path, self.out))
+        elif cams:
+            path = write_day_xml(os.path.join(xml_dir, f'{job}_CAMERAS.xml'), f'{job} CAMERAS', p.fps, p.df, cams, [])
+            self.xmls.append(os.path.relpath(path, self.out))
+        if self.slow:
+            path = write_slowmo_xml(os.path.join(xml_dir, f'{job}_SLOW_MOTION.xml'),
+                                    f'{job} SLOW MOTION + OTHER RATES', p.fps, p.df, self.slow)
+            self.xmls.append(os.path.relpath(path, self.out))
+            self.log(f'{len(self.slow)} slow-motion / other-rate clip(s) kept off the sync timeline, in their own XML.')
         for x in self.xmls:
             self.log(f'  wrote {x}')
         self._cams = cams
-        self.do_exports(xml_dir, cams, iso_tracks if self.s['xml_iso'] else [])
+        self.do_exports(xml_dir, cams, tracks)
+
+    def _aaf_tracks(self):
+        """One track per mic from the aligned ISOs (Pro Tools sessions want ISOs), else None."""
+        iso = os.path.join(self.out, 'ISO_ALIGNED')
+        if not os.path.isdir(iso):
+            return None
+        by = {}
+        for d, _, fs in os.walk(iso):
+            for f in sorted(fs):
+                if not f.upper().endswith('.WAV'):
+                    continue
+                path = os.path.join(d, f)
+                w = WavInfo(path)
+                if w.time_reference is None:
+                    continue
+                st = int(round(w.time_reference * SR / w.sr))
+                lab = os.path.basename(d) if '_' not in f else f.rsplit('_', 1)[-1][:-4]
+                by.setdefault(lab, []).append(dict(path=path, start=st, length=w.nframes * SR // w.sr, kind='audio',
+                                                   channels=w.channels, src_track=1, reel=lab))
+        return [dict(label=k, clips=v) for k, v in by.items()] or None
 
     def do_exports(self, xml_dir, cams, tracks):
-        """OTIO / AAF / ALE / CSV / synced clips. A failure here is logged, never fatal."""
+        """OTIO / AAF / ALE / CSV. A failure here is logged, never fatal."""
         p, job = self.p, self.s['job_name']
         os.makedirs(xml_dir, exist_ok=True)
         by_src = {a['source']: a['aligned'] for a in self.aligned}
@@ -659,7 +851,7 @@ class Job:
         jobs = [('export_otio', f'{job}.otio', 'OpenTimelineIO timeline',
                  lambda path: EX.write_otio(path, job, p.fps, cams, tracks)),
                 ('export_aaf', f'{job}_AUDIO.aaf', 'AAF for Pro Tools / audio post (sound tracks, linked to the WAVs)',
-                 lambda path: EX.write_aaf(path, job, p.fps, p.df, tracks)),
+                 lambda path: EX.write_aaf(path, job, p.fps, p.df, self._aaf_tracks() or tracks)),
                 ('export_ale', f'{job}.ale', 'Avid Log Exchange', lambda path: EX.write_ale(path, p, by_src)),
                 ('export_csv', f'{job}_CLIPS.csv', 'clip list', lambda path: EX.write_csv(path, p, by_src))]
         for key, fn, what, write in jobs:
@@ -672,20 +864,27 @@ class Job:
                     self.log(f'  wrote {os.path.relpath(path, self.out)} ({what})')
             except Exception as e:  # noqa: BLE001
                 self.log(f'  could not write {fn}: {e}')
-        if self.s.get('synced_clips') and cams:
-            self.step('Synced camera clips')
-            try:
-                made = EX.synced_clips(os.path.join(self.out, 'SYNCED_CLIPS'), cams, tracks, p.fps, p.df, ST.ffmpeg_exe(),
-                                       log=self.log, progress=self.progress, cancel=self.cancelled)
-                self.log(f'  {len(made)} synced camera clip(s) in SYNCED_CLIPS/')
-            except KeyboardInterrupt:
-                raise Cancelled()
-            except Exception as e:  # noqa: BLE001
-                self.log(f'  synced clips failed: {e}')
+
+    def do_transcript(self):
+        """Transcript of the day from the sound files (local speech model; never fatal to the job)."""
+        from . import transcribe as TR
+        try:
+            paths = TR.transcribe_day(self.p, os.path.join(self.out, 'TRANSCRIPTS'), self.s['job_name'], self.p.fps,
+                                      self.p.df, language=self.s.get('transcribe_language', 'en'), log=self.log,
+                                      progress=self.progress, cancel=self.cancelled,
+                                      cam_ref=self.ref() if self.mode() == 'camera' else None)
+            for x in paths:
+                self.log(f'  wrote {os.path.relpath(x, self.out)}')
+            self.transcripts = [os.path.relpath(x, self.out) for x in paths]
+        except KeyboardInterrupt:
+            raise Cancelled()
+        except Exception as e:  # noqa: BLE001
+            self.log(f'Transcript failed: {e}')
 
     def do_report(self):
         self.report_path = os.path.join(self.out, f"{self.s['job_name']}_REPORT.txt")
-        st = dict(self.s, _mode=self.mode(), _ref=self.ref(), _ref_summary=self.ref_summary)
+        st = dict(self.s, _mode=self.mode(), _ref=self.ref(), _ref_summary=self.ref_summary, _slow=self.slow,
+                  _fps_info=self.full.fps_info)
         try:
             files = []
             for d in sorted(os.listdir(self.out)):

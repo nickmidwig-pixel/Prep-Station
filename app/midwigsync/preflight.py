@@ -50,13 +50,11 @@ def estimate_bytes(project, settings):
     clips = [c for c in project.clips if c['include']]
     audio = sum(_size(c['path']) for c in clips if c['kind'] == 'audio')
     multi = sum(_size(c['path']) for c in clips if c['kind'] == 'audio' and c.get('channels', 1) > 1)
-    need = audio                                    # aligned ISOs
+    need = audio                                    # corrected sound set (worst case: a different drive, no clones)
     need += audio if settings.get('aap_mode') == 'resolve' else 0     # Auto-Align renders
     need += 2 * multi                               # mono splits + their aligned versions
-    need += audio if settings.get('poly_aligned') else 0
-    need += audio if settings.get('poly_unaligned') else 0
-    if settings.get('synced_clips'):
-        need += sum(_size(c['path']) for c in clips if c['kind'] == 'video') * 1.1
+    need += audio if settings.get('iso_folder', True) else 0          # aligned ISOs
+    need += audio                                   # aligned polywavs
     return int(need * 1.1)
 
 
@@ -67,8 +65,14 @@ def run_checks(project, settings):
     def add(id_, label, status, detail=''):
         out.append(dict(id=id_, label=label, status=status, detail=detail))
 
-    # ---- disk space on the output drive
+    # ---- originals stay untouched: the output can't live inside a card or a folder of original media
     od = settings.get('out_dir') or ''
+    if od:
+        from . import safety
+        bad = safety.output_problem(od)
+        add('orig', 'Originals stay untouched', 'fail' if bad else 'ok',
+            bad or 'Original media is read-only. Everything new goes in the output folder.')
+    # ---- disk space on the output drive
     need = estimate_bytes(project, settings)
     free = _free(od) if od else None
     if free is None:

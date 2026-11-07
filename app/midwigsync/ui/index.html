@@ -65,8 +65,16 @@
         <span><i class="sw ov-fix"></i>Timecode fixed</span>
         <span><i class="sw ov-man"></i>Set by you</span>
         <span><i class="sw ov-bad"></i>Needs you</span>
+        <span><i class="sw ov-slow"></i>Slow motion (own timeline)</span>
         <span><i class="sw off"></i>Left out</span>
-        <span class="keys" title="Keyboard shortcuts">⌘O add · ⌘↩ sync · ↑↓ clips · ←→ nudge (⇧ 1 s) · Esc close</span>
+        <span class="keys" title="Keyboard shortcuts">Space play · + − zoom · ⌘O add · ⌘↩ sync · ↑↓ clips · Esc close</span>
+      </div>
+      <div class="viewer" id="viewer" hidden>
+        <div class="screen"><img id="frame" alt=""><span id="frameNote">Click the timeline to see the picture there</span></div>
+        <div class="transport">
+          <button class="btn small" id="playBtn" title="Play from the playhead (Space)">▶ Play</button>
+          <div class="ptc"><b id="phTc">--:--:--:--</b><span id="phWhat">Click the ruler or an empty spot to move the playhead.</span></div>
+        </div>
       </div>
       <details class="attn" id="attn" hidden><summary id="attnSum"></summary><ul id="attnList"></ul></details>
       <section class="insp" id="insp" hidden aria-label="Selected clip">
@@ -84,12 +92,10 @@
               <label class="sr" for="iTcIn">Timecode</label>
               <input id="iTcIn" class="tc-in" type="text" spellcheck="false" placeholder="HH:MM:SS:FF" autocomplete="off">
               <button class="btn small" id="iSet">Set</button>
-              <span class="nudge" role="group" aria-label="Nudge">
-                <button class="btn small ghosted" data-nudge="-sec" title="Back one second">−1 s</button>
-                <button class="btn small ghosted" data-nudge="-1" title="Back one frame">−1 fr</button>
-                <button class="btn small ghosted" data-nudge="1" title="Forward one frame">+1 fr</button>
-                <button class="btn small ghosted" data-nudge="sec" title="Forward one second">+1 s</button>
-              </span>
+            </div>
+            <div class="slowrow" id="iSlowRow">
+              <span id="iSlowText"></span>
+              <button class="btn small ghosted" id="iSlow"></button>
             </div>
             <div class="row">
               <button class="btn small ghosted" id="iReset">Use the file’s timecode</button>
@@ -111,7 +117,7 @@
       </section>
       <div class="table-wrap">
         <table class="clips">
-          <thead><tr><th class="c-inc" title="Include">Use</th><th>Roll</th><th>File</th><th>Tracks</th><th class="num">Start</th><th class="num">Length</th><th>Status</th></tr></thead>
+          <thead><tr><th class="c-inc" title="Include">Use</th><th>File</th><th class="num">Start</th><th class="num">Length</th><th>Tracks</th><th>Status</th></tr></thead>
           <tbody id="clipRows"></tbody>
         </table>
       </div>
@@ -120,6 +126,27 @@
   </section>
 
   <aside class="run" id="run">
+    <div class="review" id="review" hidden>
+      <h3>Timecode check: confirm the fixes</h3>
+      <p id="revLead"></p>
+      <ol class="revlist" id="revList"></ol>
+      <div class="row wrap">
+        <button class="btn small primary" id="revWrite">Write corrected sound and go on</button>
+        <button class="btn small" id="revSkip">Keep the files’ own timecode</button>
+        <button class="btn small ghosted" id="revStop">Stop</button>
+      </div>
+    </div>
+
+    <div class="review" id="camFix" hidden>
+      <h3>Camera timecode was fixed</h3>
+      <p id="camLead"></p>
+      <ol class="revlist" id="camList"></ol>
+      <div class="row wrap">
+        <button class="btn small primary" id="camWrite">Write corrected camera copies</button>
+        <button class="btn small ghosted" id="camNo">Not now</button>
+      </div>
+    </div>
+
     <div class="block">
       <h2>Sync to</h2>
       <div class="seg" role="radiogroup" aria-label="What to align to" id="modeSeg">
@@ -132,6 +159,20 @@
         <select id="refRoll" aria-label="Reference camera roll"></select>
         <select id="refCh" aria-label="Reference channel"></select>
       </div>
+      <p class="refnote" id="refNote"></p>
+    </div>
+
+    <div class="block" id="fpsBlock">
+      <h2>Frame rate</h2>
+      <div class="row fpsrow">
+        <select id="fpsSel" aria-label="Project frame rate"></select>
+        <span class="fps-state" id="fpsState"></span>
+      </div>
+      <div class="ask" id="fpsAsk" hidden>
+        <p id="fpsAskText"></p>
+        <div class="row"><button class="btn small primary" id="fpsUse"></button><button class="btn small" id="fpsKeep">Keep 23.976</button></div>
+      </div>
+      <details class="evidence" id="fpsEv"><summary id="fpsWhy"></summary><ul id="fpsList"></ul></details>
     </div>
 
     <div class="block">
@@ -142,32 +183,34 @@
     <div class="block steps-block">
       <h2>What happens</h2>
       <ol class="steps" id="steps">
-        <li data-step="Checking timecode"><label><input type="checkbox" data-set="waveform_check"> Check timecode by waveform</label><span class="detail">Places files with no timecode, catches missed jams.</span></li>
-        <li data-step="Writing timecode to copies"><span class="fixed">Write timecode to copies</span><span class="detail">Originals stay untouched.</span></li>
-        <li data-step="Auto-Align Post"><label><input type="checkbox" data-set="aap_mode" data-on="resolve" data-off="skip"> Auto-Align Post in Resolve</label><span class="detail">Builds the Resolve timeline and presses Render.</span></li>
-        <li data-step="Polywav"><label><input type="checkbox" data-set="poly_aligned"> Polywav files</label><span class="detail">Largest whole minutes under 4 GB.</span></li>
-        <li data-step="XML"><label><input type="checkbox" data-set="xml_iso"> Timelines for editorial</label><span class="detail">XML for Premiere and Resolve, plus:</span>
+        <li data-step="Checking timecode"><label><input type="checkbox" data-set="waveform_check"> Check timecode by waveform</label><span class="detail">Every camera and recorder compared across the day. Catches missed jams, files with no timecode, and timecode that looks right but isn’t in sync.</span></li>
+        <li data-step="Writing corrected sound"><span class="fixed">You confirm the fixes, then corrected sound</span><span class="detail">Stops to show you every fix. Then a full copy of the day’s sound with the right timecode, same format and track names. Originals never change.</span></li>
+        <li data-step="Auto-Align Post"><label><input type="checkbox" data-set="aap_mode" data-on="resolve" data-off="skip"> Auto-Align Post in Resolve</label><span class="detail" id="aapDetail">Aligns to the best onboard camera mic, picked by listening. Never to a mix. Presses Render for you.</span></li>
+        <li data-step="Polywav"><span class="fixed">Aligned polywavs</span><span class="detail">Always under 4 GB. Mix tracks included as recorded.</span>
+          <span class="subopts">
+            <label><input type="checkbox" data-set="iso_folder"> Aligned ISOs too (each mic on its own, no mix)</label>
+          </span></li>
+        <li data-step="XML"><span class="fixed">Timelines for editorial</span><span class="detail">XML with the cameras and aligned polywavs for Premiere and Resolve. Slow motion and other frame rates get their own. Plus:</span>
           <span class="subopts">
             <label><input type="checkbox" data-set="export_otio"> OTIO</label>
             <label><input type="checkbox" data-set="export_aaf"> AAF for Pro Tools</label>
             <label><input type="checkbox" data-set="export_ale"> ALE for Avid</label>
             <label><input type="checkbox" data-set="export_csv"> Clip list</label>
           </span></li>
-        <li data-step="Synced camera clips" class="opt"><label><input type="checkbox" data-set="synced_clips"> Synced camera clips</label><span class="detail">Camera files with the aligned sound inside. Copies the picture, so it needs space.</span></li>
+        <li data-step="Transcript" class="opt"><label><input type="checkbox" data-set="transcribe"> Transcript of the day</label><span class="detail" id="trDetail">Who said what, from the sound files, with timecode at every speaker change and every minute. Word file for producers, plus text and a spreadsheet. Runs on this Mac.</span></li>
         <li data-step="Report"><span class="fixed">Report</span><span class="detail">What moved, what was skipped, and the checks.</span></li>
       </ol>
       <details class="more">
         <summary>More options</summary>
-        <label><input type="checkbox" data-set="poly_unaligned"> Also make unaligned polywavs</label>
-        <label><input type="checkbox" data-set="xml_poly"> Also make an XML with the polywavs</label>
-        <label><input type="checkbox" data-set="stamp_corrected_video"> Rewrite camera files whose timecode was fixed (copies whole clips)</label>
         <label><input type="checkbox" data-set="aap_auto_press"> Press Render in Auto-Align for me</label>
         <label class="inline">Aligned file names
-          <select data-set="aligned_names"><option value="auto">Automatic</option><option value="same">Same as the originals</option><option value="suffix">Add _ALN</option></select>
+          <select data-set="aligned_names"><option value="same">Same as the originals</option><option value="suffix">Add _ALN</option></select>
         </label>
-        <label><input type="checkbox" data-set="poly_per_take"> Day-long polywavs from per-take recorder files</label>
+        <label class="inline">Transcript language
+          <select data-set="transcribe_language"><option value="en">English</option><option value="auto">Detect</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="it">Italian</option><option value="pt">Portuguese</option></select>
+        </label>
         <label class="inline">Polywav length
-          <select data-set="chunk_mode"><option value="max">As long as fits in 4 GB</option><option value="hour">Whole hours</option></select>
+          <select data-set="chunk_mode"><option value="max">As much as fits in 4 GB</option><option value="hour">Whole hours (under 4 GB)</option></select>
         </label>
       </details>
     </div>

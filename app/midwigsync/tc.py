@@ -14,6 +14,8 @@ KNOWN_RATES = {
     '29.97': Fraction(30000, 1001), '30': Fraction(30),
     '47.952': Fraction(48000, 1001), '48': Fraction(48),
     '50': Fraction(50), '59.94': Fraction(60000, 1001), '60': Fraction(60),
+    '100': Fraction(100), '119.88': Fraction(120000, 1001), '120': Fraction(120),
+    '200': Fraction(200), '239.76': Fraction(240000, 1001), '240': Fraction(240),
 }
 
 
@@ -54,7 +56,8 @@ def is_ntsc(fps):
 
 
 def rate_label(fps):
-    for k in ('23.976', '24', '25', '29.97', '30', '47.952', '48', '50', '59.94', '60'):
+    for k in ('23.976', '24', '25', '29.97', '30', '47.952', '48', '50', '59.94', '60', '100', '119.88', '120',
+              '200', '239.76', '240'):
         if KNOWN_RATES[k] == fps:
             return k
     return f'{float(fps):.3f}'

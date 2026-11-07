@@ -10,11 +10,12 @@ a.emit = lambda k, d=None: ev.append((k, d))
 a.p.add_paths(['/home/claude/testday', '/home/claude/mixerday/SOUND_ROLL_01'])
 a.p.check_short_clips(20)
 a._refresh_defaults()
-a.settings.update(aap_mode='skip', synced_clips=False)
+a.settings.update(aap_mode='skip', review_tc=False)
 st = a._state()
 print('days', [d['label'] for d in st['project']['days']])
 print('names', st['day_names'])
 for v in st['day_names'].values():
+    __import__('midwigsync.safety', fromlist=['x']).allow_output(v['out_dir'])
     shutil.rmtree(v['out_dir'], ignore_errors=True)
 assert a.run('all')
 a.job_thread.join(1200)
@@ -30,5 +31,5 @@ for d in done[0]['all']:
     print(os.path.basename(out), files)
     assert any(f.endswith('_REPORT.txt') for f in files) and 'READ ME.txt' in files and 'EDITORIAL' in files
 outs = [os.path.basename(d['out']) for d in done[0]['all']]
-assert outs == ['20261103_testday_SYNCED', '20261104_mixerday_SYNCED'], outs
+assert outs == ['20261103_SYNCED', '20261104_SYNCED'], outs
 print('TWO DAYS GOOD')

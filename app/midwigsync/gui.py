@@ -15,12 +15,15 @@ from .manual import ClipTools, parse_tc_input
 from . import preflight as PF
 
 UI = os.path.join(os.path.dirname(__file__), 'ui', 'index.html')
-from .brand import APP_NAME, APP_VERSION, SETTINGS_FILE, OUT_SUFFIX
+from . import safety as SAFE
+from . import media
+from .brand import CACHE, APP_NAME, APP_VERSION, SETTINGS_FILE, OUT_SUFFIX
 
 
-PREF_KEYS = ('poly_unaligned', 'stamp_corrected_video', 'chunk_mode', 'aap_auto_press', 'waveform_check', 'xml_iso',
-             'xml_poly', 'poly_aligned', 'aap_mode', 'mode', 'export_otio', 'export_aaf', 'export_ale', 'export_csv',
-             'synced_clips', 'aligned_names', 'poly_per_take')
+PREF_KEYS = ('chunk_mode', 'aap_auto_press', 'waveform_check', 'iso_folder', 'aap_mode', 'mode', 'export_otio',
+             'export_aaf', 'export_ale', 'export_csv', 'aligned_names', 'transcribe', 'transcribe_language')
+OLD_PREFS = ('poly_unaligned', 'stamp_corrected_video', 'xml_iso', 'xml_poly', 'poly_aligned', 'synced_clips',
+             'poly_per_take')
 
 
 def load_prefs():
@@ -49,6 +52,8 @@ class Api:
         for k in PREF_KEYS:
             if k in prefs:
                 self.settings[k] = prefs[k]
+        self.settings['review_tc'] = True      # the window always shows the timecode fixes before writing
+        self.jobs = []
         self.job = None
         self.lock = threading.Lock()
         self.scanning = False
@@ -118,7 +123,8 @@ class Api:
         ref = self.settings.get('reference')
         rolls = {r['name'] for r in self.p.camera_rolls()}
         if not ref or ref.get('roll') not in rolls:
-            self.settings['reference'] = self.p.default_reference()
+            dr = self.p.default_reference()
+            self.settings['reference'] = dict(dr, auto=True) if dr else None
 
     @staticmethod
     def _dlg(kind):
@@ -162,8 +168,129 @@ class Api:
             save_prefs(prefs)
         return self._state()
 
+    def set_fps(self, choice):
+        """Project frame rate: 'auto' lets the day decide (23.976 unless it clearly isn't); anything else is yours."""
+        if self._busy():
+            return self._state()
+        self.p.set_fps(choice)
+        return self._state()
+
+    def clip_slowmo(self, cid, value):
+        """Mark (True), unmark (False) or let the app decide (None) whether a clip is slow motion."""
+        c = self.p.by_id(int(cid))
+        if c and not self._busy():
+            c['slowmo_user'] = None if value is None else bool(value)
+            self.p.analyze()
+        return self._state()
+
+    # ------------------------------------------------------------ listening and looking (read-only previews)
+    def _covering(self, at, kinds=('audio', 'video')):
+        return [c for c in self.p.clips if c['kind'] in kinds and c['include'] and c['start'] is not None
+                and c['start'] <= at < c['start'] + c['length'] and media.total_audio_channels(c) + (c['kind'] == 'video') > 0]
+
+    def play(self, at, cid=None, seconds=180):
+        """Play from the playhead: the selected clip if it's under the playhead, else the recorder's mix (or boom)
+        there, else the reference camera's sound. A preview copy goes to the app's cache; afplay plays it."""
+        self.stop_play()
+        at = int(at)
+        c = self.p.by_id(int(cid)) if cid is not None else None
+        if c and not (c['start'] is not None and c['start'] <= at < c['start'] + c['length']):
+            c = None
+        if c is None:
+            snd = self._covering(at, ('audio',))
+            if snd:
+                def rank(x):
+                    roles = Project.clip_roles(x)
+                    return (0 if 'mix' in roles else 1 if 'boom' in roles else 2, x['roll'])
+                c = sorted(snd, key=rank)[0]
+            else:
+                cams = [x for x in self._covering(at, ('video',)) if media.total_audio_channels(x)]
+                ref = (self.settings.get('reference') or {}).get('roll')
+                c = sorted(cams, key=lambda x: x['roll'] != ref)[0] if cams else None
+        if c is None:
+            nxt = sorted([x for x in self.p.clips if x['include'] and x['start'] is not None and x['start'] > at
+                          and media.total_audio_channels(x)], key=lambda x: x['start'])
+            if not nxt:
+                return dict(ok=False, why='No sound at the playhead.')
+            c = nxt[0]
+            at = c['start']
+        if not media.total_audio_channels(c):
+            return dict(ok=False, why=f"{c['name']} has no sound.")
+        off = max(0, at - c['start']) / TC.SR
+        dur = min(seconds, max(0.5, (c['start'] + c['length'] - at) / TC.SR))
+        roles = Project.clip_roles(c) if c['kind'] == 'audio' else ['cam'] * media.total_audio_channels(c)
+        n = len(roles)
+        pick = [i for i, r in enumerate(roles) if r == 'mix'][:2] or [i for i, r in enumerate(roles) if r == 'boom'][:1] \
+            or [i for i, r in enumerate(roles) if r not in ('tc', 'empty')][:2] or [0]
+        if c['kind'] == 'video':
+            ltc = (c.get('ltc') or {}).get('channel')
+            pick = [i for i in range(min(n, 2)) if i != ltc] or [0]
+        pan = f"pan=stereo|c0=c{pick[0]}|c1=c{pick[-1]}"
+        src = c['path']
+        streams = c.get('audio_streams') or []
+        if c['kind'] == 'video' and streams and streams[0].get('path'):
+            src = streams[0]['path']
+        prev = os.path.join(CACHE, 'preview')
+        os.makedirs(prev, exist_ok=True)
+        out = os.path.join(prev, 'play.wav')
+        cmd = [media.ffmpeg_exe() if hasattr(media, 'ffmpeg_exe') else __import__('midwigsync.convert', fromlist=['x']).ffmpeg_exe(),
+               '-y', '-v', 'error', '-ss', f'{off:.3f}', '-t', f'{dur:.3f}', '-i', src, '-map', '0:a:0', '-af', pan,
+               '-ar', '48000', '-c:a', 'pcm_s16le', out]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0 or not os.path.exists(out):
+            return dict(ok=False, why='Could not read the sound there.')
+        if sys.platform != 'darwin':
+            return dict(ok=False, why='Playback works on the Mac.')
+        self._player = subprocess.Popen(['afplay', out])
+        names = c.get('track_names') or {}
+        what = ' + '.join(dict.fromkeys(str(names.get(i + 1) or names.get(str(i + 1)) or f'ch {i + 1}') for i in pick)) \
+            if c['kind'] == 'audio' else f"ch {pick[0] + 1}" + (f"–{pick[-1] + 1}" if len(pick) > 1 else '')
+        return dict(ok=True, from_=at, dur=dur, what=f"{c['roll']} · {c['name']} ({what})", **{'from': at})
+
+    def stop_play(self):
+        p = getattr(self, '_player', None)
+        if p and p.poll() is None:
+            p.terminate()
+        self._player = None
+        return True
+
+    def frame(self, at, cid=None):
+        """A still of the picture at the playhead (the selected camera clip, else A camera, else any camera)."""
+        at = int(at)
+        cams = [x for x in self.p.clips if x['kind'] == 'video' and x['include'] and x['start'] is not None
+                and x['start'] <= at < x['start'] + x['length']]
+        c = self.p.by_id(int(cid)) if cid is not None else None
+        if not (c and c in cams):
+            lanes = {l['key']: l for l in self.p.lanes()}
+            cams.sort(key=lambda x: (lanes.get(x.get('lane'), {}).get('letter') or 'Z', x['name']))
+            c = cams[0] if cams else None
+        if c is None:
+            return dict(ok=False, why='No camera rolling here.')
+        if c.get('raw_picture'):
+            return dict(ok=False, why=f"{c['name']}: RAW, no picture preview here.")
+        off = max(0, at - c['start']) / TC.SR
+        key = (c['path'], round(off, 1))
+        cache = self.__dict__.setdefault('_frames', {})
+        if key not in cache:
+            ff = __import__('midwigsync.convert', fromlist=['x']).ffmpeg_exe()
+            r = subprocess.run([ff, '-v', 'error', '-ss', f'{off:.3f}', '-i', c['path'], '-frames:v', '1',
+                                '-vf', 'scale=480:-2', '-q:v', '5', '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1'],
+                               capture_output=True)
+            if r.returncode != 0 or not r.stdout:
+                return dict(ok=False, why=f"{c['name']}: couldn't read the picture.")
+            if len(cache) > 200:
+                cache.clear()
+            import base64
+            cache[key] = 'data:image/jpeg;base64,' + base64.b64encode(r.stdout).decode()
+        lane = next((l for l in self.p.lanes() if l['key'] == c.get('lane')), None)
+        return dict(ok=True, img=cache[key], label=f"{lane['label'] if lane else c['roll']} · {c['name']}")
+
     def set_reference(self, roll, channel):
-        self.settings['reference'] = dict(roll=roll, channel=int(channel))
+        if roll in (None, '', 'auto'):
+            dr = self.p.default_reference()
+            self.settings['reference'] = dict(dr, auto=True) if dr else None
+        else:
+            self.settings['reference'] = dict(roll=roll, channel=int(channel), auto=False)
         return self._state()
 
     def set_include(self, cid, include):
@@ -201,6 +328,9 @@ class Api:
         days = [d for d in days if d in all_days]
         if not days:
             return False
+        if self.p.fps_info.get('status') == 'ask':
+            self.emit('notice', dict(ok=False, text=f"Confirm the frame rate first: {self.p.fps_info['reason']}"))
+            return False
         # a re-run starts from the files' own timecode again (positions set by hand are kept)
         for c in self.p.clips:
             c['start'] = c['orig_start']
@@ -218,8 +348,9 @@ class Api:
                 s.update(self._day_names(d, sub))
             ref = s.get('reference')
             if not ref or ref.get('roll') not in {r['name'] for r in sub.camera_rolls()}:
-                s['reference'] = sub.default_reference()
+                s['reference'] = dict(sub.default_reference() or {}, auto=True) if sub.default_reference() else None
             plans.append((d, sub, s))
+        self.jobs = []
         outs = []
 
         def work():
@@ -236,8 +367,11 @@ class Api:
                         data = dict(data, all=list(outs))
                     if kind == 'project':
                         data = self.p.to_json()
+                    if kind == 'review_tc':
+                        PF.notify(APP_NAME, f"Timecode check done: {len(data.get('fixes', []))} fix(es) to confirm.")
                     self.emit(kind, data)
                 self.job = Job(sub, s, emit)
+                self.jobs.append(self.job)
                 self.job.run()
                 if self.job.cancelled() or self.job.state.get('error'):
                     break
@@ -251,11 +385,41 @@ class Api:
         self.job_thread.start()
         return True
 
+    def review_tc(self, choice):
+        """Your answer to the timecode fixes: 'write' (corrected copies), 'skip' (files' own timecode), 'stop'."""
+        if self.job and choice in ('write', 'skip', 'stop'):
+            self.job.decide(choice)
+            return True
+        return False
+
+    def rewrite_cameras(self):
+        """After a run: full-quality copies of camera files whose timecode was fixed (only the timecode changes)."""
+        if self._busy() or not self.jobs:
+            return False
+        jobs = [j for j in self.jobs if j.camera_fixes()]
+
+        def work():
+            made = []
+            try:
+                for j in jobs:
+                    j.emit = lambda k, d: self.emit(k, self.p.to_json() if k == 'project' else d)
+                    j._cancel.clear()
+                    j.step('Writing corrected camera copies')
+                    made += j.rewrite_cameras()
+                self.emit('cameras_done', dict(made=made, out=jobs[0].out if jobs else ''))
+            except Exception as e:  # noqa: BLE001
+                self.emit('error', dict(message=f'Camera copies: {e}', trace=traceback.format_exc()[-1500:]))
+            self.emit('state', self._state())
+        self.job_thread = threading.Thread(target=work, daemon=True)
+        self.job_thread.start()
+        return True
+
     def _day_names(self, d, sub=None):
         """Job name and output folder one shoot day gets when several days are loaded together."""
         if sub is None:
             sub = Project()
             sub.clips = [c for c in self.p.clips if (c.get('day') or 'unknown') == d]
+            sub.dropped = self.p.dropped_for(sub.clips)
         date = d.replace('-', '') if d[:4].isdigit() else ''
         if self.user_named and self.settings.get('job_name'):
             base = re.sub(r'^\d{8}_?', '', self.settings['job_name'])
@@ -375,7 +539,11 @@ class Api:
         out = self.settings.get('out_dir')
         if not out:
             return self._with_msg('Choose an output folder first.', False)
+        bad = SAFE.output_problem(out)
+        if bad:
+            return self._with_msg(bad, False)
         try:
+            SAFE.allow_output(out)
             path = self._tools().stamp_now(c, out)
         except Exception as e:  # noqa: BLE001
             return self._with_msg(str(e), False)

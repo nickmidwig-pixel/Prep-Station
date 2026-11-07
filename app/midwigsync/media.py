@@ -84,6 +84,7 @@ def sony_sidecar(path):
                     out['serial'] = el.get('serialNo')
                 elif tag == 'VideoFrame':
                     out['fps'] = el.get('formatFps') or el.get('captureFps')
+                    out['capture_fps'] = el.get('captureFps')      # S&Q: shot at this, plays at formatFps
                 elif tag == 'CreationDate':
                     out['created'] = el.get('value')
                 elif tag == 'Duration':
@@ -157,6 +158,27 @@ def p2_audio_files(path):
     return out
 
 
+_CAPTURE_KEY = re.compile(r'(capture|sensor|shoot|off.?speed|recording|project).{0,12}(fps|frame.?rate|rate)', re.I)
+
+
+def capture_rate(md):
+    """The rate the camera actually shot at, when the file says so (ARRI sensor fps, Blackmagic sensor rate,
+    off-speed metadata). None if the file doesn't say."""
+    for k, v in md.items():
+        if 'project' in k:
+            continue
+        if _CAPTURE_KEY.search(k):
+            m = re.search(r'\d+(?:\.\d+)?', str(v))
+            if m:
+                try:
+                    f = float(m.group(0))
+                except ValueError:
+                    continue
+                if 1 <= f <= 2000:
+                    return TC.parse_rate(m.group(0))
+    return None
+
+
 def probe_video(path, _audio_from=None):
     av = _av()
     out = dict(kind='video', path=path, start=None, tc_source=None, df=False, audio_streams=[], fps=None,
@@ -189,6 +211,9 @@ def probe_video(path, _audio_from=None):
             out['nframes'] = nf
             vmd = {k.lower(): val for k, val in (v.metadata or {}).items()}
             out['reel'] = vmd.get('reel_name', '') or md.get('reel_name', '')
+            cap = capture_rate({**md, **vmd})
+            if cap:
+                out['capture_fps'] = cap
         out['audio_streams'] = _stream_info(c)
         model = md.get('product_name') or md.get('com.apple.quicktime.model') or md.get('model') or ''
         make = md.get('company_name') or md.get('com.apple.quicktime.make') or md.get('make') or ''
@@ -219,6 +244,11 @@ def probe_video(path, _audio_from=None):
             out['created_meta'] = True
         if not out['fps'] and side.get('fps'):
             out['fps'] = TC.parse_rate(side['fps'])
+        if side.get('capture_fps'):
+            try:
+                out['capture_fps'] = TC.parse_rate(re.sub(r'[^0-9.]', '', side['capture_fps']))
+            except (ValueError, ZeroDivisionError):
+                pass
         if side.get('tc') and not tcs:
             tcs, src = side['tc'], 'sony-xml'
             out['df'] = side.get('df', False)
@@ -346,7 +376,8 @@ def check_ltc(info, fps_hint=None, force=False):
         if r:
             off = info.get('_audio_offset', 0)
             info['ltc'] = dict(channel=k, tc=TC.samples_to_tc(r['start'], r['fps'], r['df']), fps=TC.rate_label(r['fps']),
-                               frames=r['frames'], agree=r['agree'], first_tc=r['first_tc'])
+                               frames=r['frames'], agree=r['agree'], first_tc=r['first_tc'], anchor=r.get('anchor'),
+                               rate_from='file' if info.get('fps') else 'guess')
             if info.get('start') is None or zero:
                 info['start'] = r['start'] - off
                 info['tc_source'] = f'LTC on ch {k + 1}'

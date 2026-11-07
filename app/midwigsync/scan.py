@@ -8,6 +8,8 @@ import numpy as np
 
 from . import tc as TC
 from . import media
+from . import safety as SAFE
+from . import framerate as FR
 from .bwf import WavInfo
 
 ZAX_TOKEN = re.compile(r'_(\d{1,2}[A-Za-z][A-Za-z0-9]*)_\d{2,4}$')
@@ -102,6 +104,21 @@ def track_number(roll):
     return int(m.group(1)) if m else None
 
 
+_LETTER_RES = (re.compile(r'^([A-Z])(\d{3})C\d{3}'), re.compile(r'^([A-Z])(\d{3})_C?\d{3}'),
+               re.compile(r'(?:^|[_ -])([A-Z])(\d{3})(?:$|[_ -])'))
+
+
+def camera_letter(c):
+    """Camera letter from the camera's own naming (A001C003, A002_C001, a card called FX6_A001), or None."""
+    for s in (c.get('name') or '', os.path.basename(os.path.dirname(c.get('source_path') or c['path'])), c.get('roll') or ''):
+        s = os.path.splitext(s)[0]
+        for rx in _LETTER_RES:
+            m = rx.search(s)
+            if m:
+                return m.group(1)
+    return None
+
+
 class Project:
     def __init__(self):
         self.clips = []
@@ -109,10 +126,30 @@ class Project:
         self.errors = []
         self.fps = TC.parse_rate('23.976')
         self.df = False
+        self.dropped = []          # what you dropped (folders/files), for where the output goes
+        self.fps_override = None   # '25', '29.97 DF'... when you set the project rate yourself
+        self.reports = []          # sound reports found next to the media (frame rate evidence)
+        self.fps_info = FR.assess(self)
 
     # ------------------------------------------------------------ scanning
     def add_paths(self, paths, progress=None):
+        SAFE.install()
+        for p in paths:
+            ap = os.path.abspath(p)
+            if ap not in self.dropped:
+                self.dropped.append(ap)
+            SAFE.protect_root(p)
+            if os.path.isfile(p):
+                SAFE.protect_root(os.path.dirname(os.path.abspath(p)))
         files, unsup = media.find_media(paths)
+        for f in files:
+            SAFE.protect_file(f)
+        have_rep = {r['path'] for r in self.reports}
+        for rp in FR.find_reports(paths):
+            if rp not in have_rep:
+                r = FR.read_report(rp)
+                if r:
+                    self.reports.append(r)
         known = {os.path.realpath(c.get('source_path') or c['path']) for c in self.clips}
         files = [f for f in files if os.path.realpath(f) not in known]
         have = {u['path'] for u in self.unsupported}
@@ -145,6 +182,7 @@ class Project:
             if not info:
                 continue
             c = dict(info)
+            SAFE.protect_clip(c)
             c['id'] = next_id
             next_id += 1
             c['name'] = os.path.basename(c.get('source_path') or c['path'])
@@ -265,11 +303,45 @@ class Project:
             out.append(dict(key=k, label=label, n=cnt[k]['n'], rolls=sorted(cnt[k]['rolls'])))
         return out
 
+    def _ltc_follow_rate(self):
+        """LTC can't tell 23.976 from 24 (or 29.97 from 30). Files that got their rate only from LTC follow the
+        project rate, so their start is right when the project is 24 or 30."""
+        from . import ltc as LTC
+        for c in self.clips:
+            l = c.get('ltc')
+            if not l or l.get('rate_from') != 'guess' or not l.get('anchor') or not str(c.get('tc_source', '')).startswith('LTC'):
+                continue
+            lf = TC.parse_rate(l['fps'])
+            if TC.nominal(lf) != TC.nominal(self.fps) or lf == self.fps:
+                continue
+            new = LTC.start_at_rate(l['anchor'], self.fps, bool(c.get('df'))) - c.get('_audio_offset', 0)
+            shift = new - c['orig_start'] if c.get('orig_start') is not None else 0
+            c['orig_start'] = new
+            if c.get('start') is not None and not c.get('manual'):
+                c['start'] += shift
+            c['fps'] = self.fps
+            l['fps'] = TC.rate_label(self.fps)
+
+    def set_fps(self, choice):
+        """'auto' (or None) = let the day decide; otherwise e.g. '25' or '29.97 DF'."""
+        self.fps_override = None if choice in (None, '', 'auto') else choice
+        self.analyze()
+
+    def dropped_for(self, clips):
+        """The dropped folders that hold these clips (so each shoot day's output sits with its own media)."""
+        def under(path, root):
+            return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+        paths = [os.path.abspath(c.get('source_path') or c['path']) for c in clips]
+        got = [r for r in self.dropped if any(under(x, r) for x in paths)]
+        return got or list(self.dropped)
+
     def subset(self, day):
         """A project holding only one day's clips (the clip dicts are shared, so results show in the window)."""
         p = Project()
         p.clips = [c for c in self.clips if (c.get('day') or 'unknown') == day]
         p.unsupported = self.unsupported
+        p.fps_override, p.reports = self.fps_override, self.reports
+        p.dropped = self.dropped_for(p.clips)
         p.analyze()
         return p
 
@@ -316,6 +388,91 @@ class Project:
             r['clips'].sort(key=lambda c: (c['start'] if c['start'] is not None else 1 << 62, c['name']))
         return out
 
+    def lanes(self):
+        """Timeline lanes like Tentacle Sync Studio: one lane per camera body (every card it shot: A CAM, B CAM...),
+        then one per sound track folder. Camera letters come from the clip / card names (A001C003 -> A) when they
+        have one, otherwise they're handed out by how much each camera shot (the reference camera first).
+        -> [dict(key, label, sub, kind, rolls, role, channels, letter)] and c['lane'] on every clip."""
+        rolls = self.rolls()
+        ref = (self.default_reference() or {}).get('roll')
+        bodies = {}
+        for r in rolls.values():
+            if r['kind'] != 'camera':
+                continue
+            letters = Counter(camera_letter(c) for c in r['clips'])
+            letters.pop(None, None)
+            letter = letters.most_common(1)[0][0] if letters else None
+            serial = Counter(c.get('serial') for c in r['clips'] if c.get('serial')).most_common(1)
+            model = r['camera'] or ''
+            if serial:
+                key = ('serial', model, serial[0][0])
+            elif letter:
+                key = ('letter', model, letter)
+            else:
+                key = ('folder', model, r['name'])
+            spans = [(c['start'], c['start'] + c['length']) for c in r['clips'] if c['start'] is not None]
+            k2, n = key, 1
+            while k2 in bodies and any(a0 < b1 - TC.SR and b0 < a1 - TC.SR for a0, a1 in spans for b0, b1 in bodies[k2]['spans']):
+                n += 1                         # one camera can't record two clips at once: another body
+                k2 = key + (n,)
+            key = k2
+            b = bodies.setdefault(key, dict(rolls=[], letter=letter, model=model, dur=0, ref=False, spans=[]))
+            b['spans'] += spans
+            b['rolls'].append(r['name'])
+            b['dur'] += sum(c['length'] for c in r['clips'] if c['include'])
+            b['ref'] = b['ref'] or r['name'] == ref
+            if letter and not b['letter']:
+                b['letter'] = letter
+        order = sorted(bodies.values(), key=lambda b: (not b['ref'], b['letter'] is None, b['letter'] or '', -b['dur']))
+        used, lanes = set(), []
+        for b in order:            # explicit letters first (unless taken by another body), then the rest in order
+            if b['letter'] and b['letter'] not in used:
+                used.add(b['letter'])
+            else:
+                b['letter'] = None
+        free = (ch for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' if ch not in used)
+        for b in order:
+            if not b['letter']:
+                b['letter'] = next(free, '?')
+                used.add(b['letter'])
+        for b in sorted(order, key=lambda b: b['letter']):
+            key = f"cam:{b['letter']}"
+            n = len(b['rolls'])
+            sub = b['model'] or b['rolls'][0]
+            lanes.append(dict(key=key, label=f"{b['letter']} CAM", sub=sub + (f' · {n} cards' if n > 1 else ''),
+                              kind='camera', rolls=sorted(b['rolls']), role='cam', channels=0, letter=b['letter']))
+            for rn in b['rolls']:
+                for c in rolls[rn]['clips']:
+                    c['lane'] = key
+        for r in self.audio_rolls_ordered():
+            role = self._roll_role(r)
+            names = Counter()
+            for c in r['clips']:
+                for k, v in (c.get('track_names') or {}).items():
+                    names[(int(k), v)] += 1
+            chans = []
+            for i in range(r['channels']):
+                nm = next((v for (k, v), _ in names.most_common() if k == i + 1), None)
+                chans.append(dict(name=nm or (r['name'] if r['channels'] == 1 else f"{r['name']} {i + 1}"),
+                                  role=role if r['channels'] == 1 else None))
+            if r['channels'] > 1:
+                rr = Counter()
+                for c in r['clips']:
+                    for i, x in enumerate(self.clip_roles(c)):
+                        rr[(i, x)] += 1
+                for i, ch in enumerate(chans):
+                    ch['role'] = next((x for (k, x), _ in rr.most_common() if k == i), 'lav')
+            label = chans[0]['name'] if r['channels'] == 1 and chans and chans[0]['name'] != r['name'] else r['name']
+            sub = {'multi': f"{r['channels']} tracks", 'mix': 'mix', 'tc': 'timecode'}.get(role, role)
+            if r['channels'] == 1 and label != r['name']:
+                sub = f"{role} · {r['name']}"
+            key = f"snd:{r['name']}"
+            lanes.append(dict(key=key, label=label, sub=sub, kind='audio', rolls=[r['name']], role=role,
+                              channels=r['channels'], tracks=chans))
+            for c in r['clips']:
+                c['lane'] = key
+        return lanes
+
     def _roll_role(self, r):
         if r['kind'] == 'camera':
             return 'cam'
@@ -333,14 +490,9 @@ class Project:
         return sorted([r for r in self.rolls().values() if r['kind'] == 'camera'], key=lambda r: r['name'])
 
     def analyze(self):
-        vids = [c for c in self.clips if c['kind'] == 'video' and c.get('fps')]
-        if vids:
-            self.fps = Counter(c['fps'] for c in vids).most_common(1)[0][0]
-            self.df = Counter(bool(c['df']) for c in vids).most_common(1)[0][0]
-        else:
-            rates = [c['fps'] for c in self.clips if c.get('fps')]
-            if rates:
-                self.fps = Counter(rates).most_common(1)[0][0]
+        self.fps_info = FR.assess(self, self.reports, self.fps_override)
+        self.fps, self.df = self.fps_info['fps'], self.fps_info['df']
+        self._ltc_follow_rate()
         for c in self.clips:
             keep_sync = [f for f in c['flags'] if f.startswith('sync')]
             c['flags'] = keep_sync
@@ -369,8 +521,6 @@ class Project:
                 f.append('sample_rate')
             if c['kind'] == 'video' and c.get('raw_picture'):
                 f.append('raw')
-            if c['kind'] == 'video' and c.get('fps') and c['fps'] != self.fps:
-                f.append('fps_mismatch')
             if c['kind'] == 'video' and not c.get('audio_streams'):
                 f.append('no_audio')
             if c.get('ltc'):
@@ -384,14 +534,71 @@ class Project:
             mu = main_ub.get(c.get('day'))
             if mu and c['kind'] == 'audio' and c.get('ubits') and c['ubits'] != mu:
                 f.append('ubits')
+        self._mark_slowmo()
         # overlaps within a roll (TC jump / reset), per shoot day
         for r in self.rolls().values():
             by_day = defaultdict(list)
             for c in r['clips']:
-                if c['start'] is not None and not c.get('duplicate_of'):
+                if c['start'] is not None and not c.get('duplicate_of') and not c.get('slowmo'):
                     by_day[c.get('day')].append(c)
             for cl in by_day.values():
                 self._overlaps(cl)
+
+    def _mark_slowmo(self):
+        """Slow motion and other frame rates never go on the sync timeline (their sound isn't used either);
+        they get their own timeline. c['slowmo'] = dict(kind, why, speed) or None.
+          timebase  : recorded at a higher rate than the project (C500 switched to 59.94): conform to slow down
+          rate      : a different, normal-speed rate (29.97 on a 23.976 day)
+          in_camera : the file says it was shot faster than it plays (Sony S&Q captureFps, sensor fps)
+          likely    : no sound, and its timecode runs on past the start of the next clip on the same card
+          marked    : you marked it"""
+        pf = float(self.fps)
+        for c in self.clips:
+            c['slowmo'] = None
+            if c['kind'] != 'video':
+                continue
+            user = c.get('slowmo_user')
+            if user is False:
+                continue
+            fps = c.get('fps')
+            cap = c.get('capture_fps')
+            if fps and TC.rate_label(fps) != TC.rate_label(self.fps):
+                ratio = float(fps) / pf
+                if ratio > 1.5:
+                    c['slowmo'] = dict(kind='timebase', speed=round(pf / float(fps), 3),
+                                       why=f'Shot at {TC.rate_label(fps)} fps. Interpret as {TC.rate_label(self.fps)} '
+                                           f'and it plays at {pf / float(fps) * 100:.0f}% speed.')
+                else:
+                    c['slowmo'] = dict(kind='rate', speed=1.0,
+                                       why=f'{TC.rate_label(fps)} fps on a {TC.rate_label(self.fps)} day.')
+            elif cap and fps and float(cap) > float(fps) * 1.2:
+                c['slowmo'] = dict(kind='in_camera', speed=round(float(fps) / float(cap), 3),
+                                   why=f'Shot at {TC.rate_label(cap)} fps, plays back slowed down in camera '
+                                       f'({float(fps) / float(cap) * 100:.0f}% speed).')
+            if user and not c['slowmo']:
+                c['slowmo'] = dict(kind='marked', speed=None, why='Marked as slow motion by you.')
+        # no metadata: a silent clip whose timecode runs into the next clip on the same card can't be real time
+        rolls = defaultdict(list)
+        for c in self.clips:
+            if c['kind'] == 'video' and c.get('orig_start') is not None and not c.get('duplicate_of'):
+                rolls[(c['roll'], c.get('day'))].append(c)
+        for cl in rolls.values():
+            cl.sort(key=lambda c: c['orig_start'])
+            for a, b in zip(cl, cl[1:]):
+                if a['slowmo'] or a.get('audio_streams') or a.get('slowmo_user') is False:
+                    continue
+                real = b['orig_start'] - a['orig_start']
+                if real > 0 and a['length'] > real + 2 * TC.SR:
+                    a['slowmo'] = dict(kind='likely', speed=round(real / a['length'], 2),
+                                       why='No sound, and its timecode runs into the next clip on this card, so it '
+                                           'plays longer than it took to shoot. Looks like slow motion.')
+
+    def sync_view(self):
+        """This project without slow motion / other frame rates (the clip dicts are shared)."""
+        p = Project()
+        p.__dict__.update(self.__dict__)
+        p.clips = [c for c in self.clips if not c.get('slowmo')]
+        return p
 
     @staticmethod
     def _overlaps(cl):
@@ -473,6 +680,7 @@ class Project:
 
     def to_json(self):
         rolls = self.rolls()
+        lanes = self.lanes()
         out_clips = []
         for c in self.clips:
             fps = c.get('fps') or self.fps
@@ -483,6 +691,9 @@ class Project:
                 tc=TC.samples_to_tc(c['start'], fps, c.get('df', False)) if c['start'] is not None else None,
                 orig_tc=TC.samples_to_tc(c['orig_start'], fps, c.get('df', False)) if c['orig_start'] is not None else None,
                 dur=TC.fmt_dur(c['length']), camera=c.get('camera', ''), channels=media.total_audio_channels(c),
+                lane=c.get('lane'),
+                slowmo=c.get('slowmo'), slowmo_user=c.get('slowmo_user'),
+                capture_fps=TC.rate_label(c['capture_fps']) if c.get('capture_fps') else '',
                 sync=c.get('sync'), fps=TC.rate_label(fps) if fps else '',
                 tc_source=c.get('tc_source'), ltc=c.get('ltc'), manual=c.get('manual'), converted=c.get('converted'),
                 codec=c.get('codec', ''), chapter=c.get('chapter') if c.get('chapter_of') else None,
@@ -495,9 +706,11 @@ class Project:
             ))
         return dict(
             fps=TC.rate_label(self.fps), df=self.df, clips=out_clips,
+            fps_info={k: v for k, v in self.fps_info.items() if k not in ('fps',)},
             rolls=[dict(name=r['name'], kind=r['kind'], camera=r['camera'], track_no=r['track_no'], n=len(r['clips']),
                         role=self._roll_role(r), channels=r.get('channels', 0))
                    for r in sorted(rolls.values(), key=lambda r: (r['kind'] != 'camera', r['track_no'] or 999, r['name']))],
+            lanes=lanes,
             span=self.day_span(False), unsupported=self.unsupported, errors=self.errors,
             reference=self.default_reference(), days=self.days(),
         )

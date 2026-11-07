@@ -66,8 +66,28 @@ def write_report(path, job, project, sync_report, stamped, aap_info, aligned, ve
     elif mode == 'camera':
         ref = settings.get('_ref') or {}
         w(f"Mode: camera reference {ref.get('roll', '?')} ch {ref.get('channel', 0) + 1}")
+    from . import safety
+    sm = safety.summary()
+    w(f"Originals: {sm['originals']} files read-only, untouched"
+      + (f"; {len(sm['blocked'])} change(s) refused" if sm['blocked'] else ''))
+    for act, pth in sm['blocked'][:20]:
+        w(f"   refused: {act} {pth}")
     w('=' * 78)
     w('')
+    fi = settings.get('_fps_info') or {}
+    if fi:
+        w(f"Frame rate: {fi.get('label')} ({'set by you' if fi.get('status') == 'set' else 'checked'}). {fi.get('reason', '')}")
+        for e in fi.get('evidence', []):
+            w(f"   {e['kind']:7s} {e['name']:24s} {e['label']:9s} {'' if e['votes'] else '(not counted) '}{e.get('note', '')}")
+        w('')
+    slow = settings.get('_slow') or []
+    if slow:
+        w(f'SLOW MOTION + OTHER FRAME RATES (not synced, sound not used): {len(slow)} clip(s) -> EDITORIAL/*_SLOW_MOTION.xml')
+        for c in sorted(slow, key=lambda c: (c['roll'], c.get('orig_start') or 0, c['name'])):
+            sm = c.get('slowmo') or {}
+            tcs = TC.samples_to_tc(c['orig_start'], c.get('fps') or fps) if c.get('orig_start') is not None else 'no TC'
+            w(f"   {c['roll']:14s} {c['name']:34s} {tcs}  {TC.rate_label(c['fps']) if c.get('fps') else '?':7s} {sm.get('why', '')}")
+        w('')
     w('INVENTORY')
     for r in sorted(project.rolls().values(), key=lambda r: (r['kind'] != 'camera', r['track_no'] or 999, r['name'])):
         clips = r['clips']
@@ -143,7 +163,9 @@ def write_report(path, job, project, sync_report, stamped, aap_info, aligned, ve
     w('')
     w('POLYWAV')
     for p in polys or []:
-        w(f"  {os.path.basename(p['path'])}  starts {p['tc']}  {p['n'] / SR / 3600:.2f} h  {p['bytes'] / 1e9:.2f} GB")
+        tcs = p.get('tc') or TC.samples_to_tc(p['start'], fps)
+        size = p.get('bytes') or p.get('size') or (os.path.getsize(p['path']) if os.path.exists(p['path']) else 0)
+        w(f"  {os.path.relpath(p['path'], os.path.dirname(path))}  starts {tcs}  {p['n'] / SR / 60:.1f} min  {size / 1e9:.2f} GB")
     if polys:
         w(f"  Channels: {', '.join(settings.get('poly_channels', []))}")
     w('')

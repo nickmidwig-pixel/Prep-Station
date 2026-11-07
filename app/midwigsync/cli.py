@@ -17,13 +17,21 @@ def main(argv=None):
     ap.add_argument('--ref-channel', type=int, default=1)
     ap.add_argument('--no-aap', action='store_true', help='skip Auto-Align (unaligned exports only)')
     ap.add_argument('--no-waveform', action='store_true')
-    ap.add_argument('--unaligned-poly', action='store_true')
+    ap.add_argument('--transcribe', action='store_true', help='also write a transcript of the day')
     ap.add_argument('--scan-only', action='store_true')
+    ap.add_argument('--fps', help="project frame rate, e.g. 23.976, 25, '29.97 DF' (default: the day decides, 23.976 unless clearly not)")
     a = ap.parse_args(argv)
     p = Project()
     p.add_paths(a.paths, progress=lambda i, n, nm: print(f'\rreading {i}/{n}', end='', file=sys.stderr))
     print(file=sys.stderr)
     p.check_short_clips()
+    if a.fps:
+        p.set_fps(a.fps)
+    fi = p.fps_info
+    print(f"Frame rate {fi['label']} ({fi['status']}): {fi['reason']}", file=sys.stderr)
+    if fi['status'] == 'ask' and not a.scan_only:
+        print(f"Not guessing. Run again with --fps {fi['suggest']!r} or --fps 23.976.", file=sys.stderr)
+        return 2
     if a.scan_only:
         for c in sorted(p.clips, key=lambda c: (c['roll'], c['name'])):
             tcs = TC.samples_to_tc(c['start'], p.fps) if c['start'] is not None else '--'
@@ -33,7 +41,7 @@ def main(argv=None):
     ref = dict(roll=a.ref_roll, channel=a.ref_channel - 1) if a.ref_roll else None
     s = dict(job_name=job, out_dir=a.out or default_out_dir(p, job), reference=ref,
              aap_mode='skip' if a.no_aap else 'resolve', waveform_check=not a.no_waveform,
-             poly_unaligned=a.unaligned_poly)
+             transcribe=a.transcribe)
 
     def emit(kind, data):
         if kind == 'log':

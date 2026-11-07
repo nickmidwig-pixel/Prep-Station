@@ -211,8 +211,26 @@ def start_from_ltc(x, sr, fps_hint=None, min_frames=8):
     if good.mean() < 0.6:
         return None
     start = float(np.median(est[good]))
+    # one good frame kept as an anchor, so the start can be worked out again if the project rate turns out to be
+    # the other of a 23.976/24 (or 29.97/30) pair, which LTC itself can't tell apart
+    gi = int(np.argmax(good))
+    fr_ok = [f for f in fr if _tc_ok(f['tc'], fps, df)]
+    anchor = dict(tc=fr_ok[gi]['tc'], pos=float(fr_ok[gi]['pos'] * TC.SR / sr)) if gi < len(fr_ok) else None
     return dict(start=int(round(start)), frames=int(good.sum()), agree=round(float(good.mean()), 2), fps=fps, df=df,
-                first_tc=fr[0]['tc'])
+                first_tc=fr[0]['tc'], anchor=anchor)
+
+
+def _tc_ok(tc, fps, df):
+    try:
+        TC.tc_to_samples(tc, fps, df)
+        return True
+    except ValueError:
+        return False
+
+
+def start_at_rate(anchor, fps, df=False):
+    """Start (48k samples since midnight of sample 0) from a stored LTC anchor, at a given frame rate."""
+    return int(round(TC.tc_to_samples(anchor['tc'], fps, df) - anchor['pos']))
 
 
 def looks_like_ltc(x, sr):

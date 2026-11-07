@@ -72,6 +72,7 @@ def main():
     job = default_job_name(p)
     out = default_out_dir(p, job)
     if os.path.exists(out):
+        __import__('midwigsync.safety', fromlist=['x']).allow_output(out)
         shutil.rmtree(out)
     events = []
 

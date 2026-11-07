@@ -421,6 +421,8 @@ class StreamWavWriter:
 
 def patch_time_reference(path, time_reference, tc_string=None):
     """Rewrite bext TimeReference (+ dTC in the description and the iXML timestamp) in place."""
+    from . import safety
+    safety.check(path, 'patch the header of')
     w = WavInfo(path)
     with open(path, 'r+b') as f:
         for cid, pos, sz in w.chunks:

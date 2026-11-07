@@ -14,7 +14,8 @@
   const ROLE_LABEL = { boom: 'boom', lav: 'lav', plant: 'plant', multi: 'multitrack', mix: 'mix', tc: 'timecode', cam: 'camera' };
   const STEP_MAP = { 'Building aligned ISOs': 'Auto-Align Post', 'Checking alignment': 'Auto-Align Post' };
 
-  const S = { project: null, settings: {}, running: false, scanning: false, sel: null, view: null, done: null, day: null, checks: [] };
+  const S = { project: null, settings: {}, running: false, scanning: false, sel: null, view: null, done: null, day: null, checks: [],
+    expanded: new Set(), collapsed: new Set(), ph: null, playing: null };
   const api = () => (window.pywebview && window.pywebview.api) || null;
   const APP = () => (S.app && S.app.name) || 'Prep Station';
   const call = async (name, ...args) => { const a = api(); if (!a || !a[name]) return null; try { return await a[name](...args); } catch (e) { console.error(e); return null; } };
@@ -58,6 +59,31 @@
     return rs;
   }
   const clipsOf = (roll) => dayClips().filter((c) => c.roll === roll);
+  // lanes: one per camera body (A CAM, B CAM...) and one per sound track folder; multitrack lanes open into tracks
+  const lanesAll = () => (S.project && S.project.lanes) || [];
+  const laneOf = (c) => lanesAll().find((l) => l.key === c.lane);
+  const laneClips = (key) => dayClips().filter((c) => c.lane === key);
+  function laneColor(ln) {
+    if (!ln) return COL.aud;
+    if (ln.kind === 'camera') return CAM_HUES[Math.max(0, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.indexOf(ln.letter)) % CAM_HUES.length];
+    return ROLE_COL[ln.role] || COL.aud;
+  }
+  function laneRows() {
+    const present = new Set(dayClips().map((c) => c.lane));
+    const out = [];
+    for (const ln of lanesAll()) {
+      if (!present.has(ln.key)) continue;
+      const multi = ln.kind === 'audio' && ln.channels > 1;
+      const open = multi && S.expanded.has(ln.key);
+      out.push({ type: 'lane', lane: ln, key: ln.key, multi, open });
+      if (open) (ln.tracks || []).forEach((t, i) => out.push({ type: 'track', lane: ln, key: `${ln.key}#${i}`, i, t }));
+    }
+    return out;
+  }
+  const refLane = () => {
+    const r = S.settings.reference && S.settings.reference.roll;
+    return r ? lanesAll().find((l) => l.rolls.includes(r)) : null;
+  };
   // what the run will align to: a camera mic, or (no usable camera sound) the recorder's own boom / lav
   const hasCamRef = () => !!(S.project && rolls().some((r) => r.kind === 'camera' && dayClips().some((c) => c.roll === r.name && c.has_audio)));
   function effMode() {
@@ -79,10 +105,11 @@
   const failed = (c) => c.flags.includes('sync_failed') || ['sample_rate'].some((f) => c.flags.includes(f));
   function clipColor(c) {
     if (!c.include) return COL.off;
-    return rollColor(c.roll);
+    return laneColor(laneOf(c));
   }
   function overlay(c) {
     if (!c.include) return null;
+    if (c.slowmo) return 'slow';
     if (failed(c)) return 'bad';
     if (c.flags.includes('sync_manual')) return 'man';
     if (moved(c)) return 'fix';
@@ -149,14 +176,17 @@
       cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const rs = rolls();
-    const rowH = Math.max(18, Math.min(34, (r.height - RULER_H - 6) / Math.max(rs.length, 1)));
-    const want = Math.round(RULER_H + 8 + rs.length * 34);
+    const rows = laneRows();
+    const base = rows.map((x) => (x.type === 'lane' ? 34 : 22));
+    const want = Math.round(RULER_H + 8 + base.reduce((a, b) => a + b, 0));
     const box = cv.parentElement;
-    const maxH = Math.round(window.innerHeight * 0.46);
+    const maxH = Math.round(window.innerHeight * 0.5);
     const h = Math.max(120, Math.min(want, maxH));
     if (Math.abs(box.getBoundingClientRect().height - h) > 1) { box.style.height = `${h}px`; return layout(); }
-    return { W: r.width, H: r.height, rs, rowH };
+    const k = Math.min(1, (r.height - RULER_H - 6) / Math.max(1, base.reduce((a, b) => a + b, 0)));
+    let y = RULER_H + 3;
+    for (let n = 0; n < rows.length; n++) { rows[n].y = y; rows[n].h = Math.max(14, base[n] * k); y += rows[n].h; }
+    return { W: r.width, H: r.height, rows };
   }
   const xOf = (s, L) => LABEL_W + (s - S.view[0]) / (S.view[1] - S.view[0]) * (L.W - LABEL_W);
   const sOf = (x, L) => S.view[0] + (x - LABEL_W) / (L.W - LABEL_W) * (S.view[1] - S.view[0]);
@@ -192,33 +222,41 @@
     }
     ctx.fillStyle = COL.line; ctx.fillRect(0, RULER_H - 1, L.W, 1);
     // rows
-    const ref = S.settings.reference && S.settings.reference.roll;
-    L.rs.forEach((r, i) => {
-      const y = RULER_H + 3 + i * L.rowH;
-      ctx.fillStyle = i % 2 ? COL.lane : 'rgba(27,31,35,0.55)';
-      ctx.fillRect(LABEL_W, y, L.W - LABEL_W, L.rowH - 2);
-      // label
-      ctx.fillStyle = COL.label; ctx.fillRect(0, y, LABEL_W - 1, L.rowH - 2);
-      ctx.fillStyle = rollColor(r.name); ctx.fillRect(0, y, 3, L.rowH - 2);
-      ctx.fillStyle = COL.paper; ctx.font = '600 12px Barlow, sans-serif';
-      const name = r.name.length > 17 ? r.name.slice(0, 16) + '…' : r.name;
-      const sub = r.name === ref && effMode() !== 'audio' ? 'reference' : (r.kind === 'camera' ? (r.camera || 'camera') : (ROLE_LABEL[r.role] || 'sound'));
-      if (L.rowH >= 28) {
-        ctx.fillText(name, 12, y + L.rowH / 2 - 7);
-        ctx.font = '400 11px Barlow, sans-serif'; ctx.fillStyle = r.name === ref ? COL.led : COL.muted;
-        ctx.fillText(sub, 12, y + L.rowH / 2 + 7);
+    const rl = refLane();
+    L.rows.forEach((row, n) => {
+      const { y, h: rh } = row;
+      const ln = row.lane;
+      const isTrack = row.type === 'track';
+      ctx.fillStyle = isTrack ? 'rgba(21,24,27,0.9)' : (n % 2 ? COL.lane : 'rgba(27,31,35,0.55)');
+      ctx.fillRect(LABEL_W, y, L.W - LABEL_W, rh - 2);
+      // label column
+      ctx.fillStyle = isTrack ? '#1A1E22' : COL.label; ctx.fillRect(0, y, LABEL_W - 1, rh - 2);
+      const col = isTrack ? (ROLE_COL[row.t.role] || COL.aud) : laneColor(ln);
+      ctx.fillStyle = col; ctx.fillRect(isTrack ? 14 : 0, y, 3, rh - 2);
+      const x0l = isTrack ? 24 : (row.multi ? 24 : 12);
+      if (row.multi) {
+        ctx.fillStyle = COL.muted; ctx.font = '600 10px Barlow, sans-serif';
+        ctx.fillText(row.open ? '▾' : '▸', 10, y + rh / 2 - (rh >= 28 ? 7 : 1));
+      }
+      const name0 = isTrack ? row.t.name : ln.label;
+      const name = name0.length > 17 ? name0.slice(0, 16) + '…' : name0;
+      const isRef = !isTrack && rl && rl.key === ln.key && effMode() !== 'audio';
+      const sub = isTrack ? (ROLE_LABEL[row.t.role] || row.t.role || '') : (isRef ? `reference · ${ln.sub}` : ln.sub);
+      ctx.fillStyle = COL.paper; ctx.font = isTrack ? '500 11px Barlow, sans-serif' : '600 12px Barlow, sans-serif';
+      if (rh >= 28) {
+        ctx.fillText(name, x0l, y + rh / 2 - 7);
+        ctx.font = '400 11px Barlow, sans-serif'; ctx.fillStyle = isRef ? COL.led : COL.muted;
+        ctx.fillText(sub.length > 24 ? sub.slice(0, 23) + '…' : sub, x0l, y + rh / 2 + 7);
       } else {
-        ctx.fillText(name, 12, y + L.rowH / 2 - 1);
-        if (r.name === ref) {
-          const tw = ctx.measureText(name).width;
-          ctx.fillStyle = COL.led; ctx.beginPath(); ctx.arc(12 + tw + 8, y + L.rowH / 2 - 1, 3, 0, Math.PI * 2); ctx.fill();
-        }
+        ctx.fillText(name, x0l, y + rh / 2 - 1);
+        if (isTrack && sub) { const tw = ctx.measureText(name).width; ctx.fillStyle = COL.muted; ctx.font = '400 10px Barlow, sans-serif'; ctx.fillText(sub, x0l + tw + 6, y + rh / 2 - 1); }
+        if (isRef) { const tw = ctx.measureText(name).width; ctx.fillStyle = COL.led; ctx.beginPath(); ctx.arc(x0l + tw + 8, y + rh / 2 - 1, 3, 0, Math.PI * 2); ctx.fill(); }
       }
       // clips
-      for (const c of clipsOf(r.name)) {
+      for (const c of laneClips(ln.key)) {
         if (c.start == null) continue;
-        const h = L.rowH - 10, yy = y + 4;
-        if (moved(c) && c.orig_start != null) {
+        const h = rh - (isTrack ? 6 : 10), yy = y + (isTrack ? 2 : 4);
+        if (!isTrack && moved(c) && c.orig_start != null) {
           const gx0 = xOf(c.orig_start, L), gx1 = xOf(c.orig_start + c.length, L);
           ctx.setLineDash([3, 3]); ctx.strokeStyle = 'rgba(226,162,59,0.55)'; ctx.lineWidth = 1;
           ctx.strokeRect(Math.max(gx0, LABEL_W) + 0.5, yy + 0.5, Math.max(1, gx1 - Math.max(gx0, LABEL_W)), h - 1);
@@ -227,50 +265,70 @@
         let x0 = xOf(c.start, L), x1 = xOf(c.start + c.length, L);
         if (x1 < LABEL_W || x0 > L.W) continue;
         x0 = Math.max(x0, LABEL_W);
-        ctx.fillStyle = clipColor(c);
-        ctx.globalAlpha = c.include ? 0.9 : 0.35;
+        const hasTrack = !isTrack || row.i < (c.channels || 1);
+        if (!hasTrack) continue;
+        ctx.fillStyle = isTrack ? (c.include ? (ROLE_COL[row.t.role] || COL.aud) : COL.off) : clipColor(c);
+        ctx.globalAlpha = c.include ? (isTrack ? 0.75 : 0.9) : 0.35;
         roundRect(x0, yy, Math.max(2, x1 - x0), h, 2); ctx.fill();
         ctx.globalAlpha = 1;
-        const ov = overlay(c);
+        const ov = isTrack ? null : overlay(c);
+        if (ov === 'slow') {
+          ctx.save(); roundRect(x0, yy, Math.max(2, x1 - x0), h, 2); ctx.clip();
+          ctx.fillStyle = 'rgba(21,24,27,.55)'; ctx.fillRect(x0, yy, x1 - x0, h);
+          ctx.strokeStyle = 'rgba(242,239,230,.45)'; ctx.lineWidth = 2;
+          for (let sx = x0 - h; sx < x1; sx += 6) { ctx.beginPath(); ctx.moveTo(sx, yy + h); ctx.lineTo(sx + h, yy); ctx.stroke(); }
+          ctx.restore();
+        }
         if (ov === 'bad') {
           ctx.save(); roundRect(x0, yy, Math.max(2, x1 - x0), h, 2); ctx.clip();
           ctx.strokeStyle = 'rgba(224,97,74,.85)'; ctx.lineWidth = 3;
           for (let sx = x0 - h; sx < x1; sx += 8) { ctx.beginPath(); ctx.moveTo(sx, yy + h); ctx.lineTo(sx + h, yy); ctx.stroke(); }
           ctx.restore();
         }
-        if (ov) {
+        if (ov && ov !== 'slow') {
           ctx.strokeStyle = ov === 'bad' ? COL.bad : ov === 'man' ? COL.man : COL.fix; ctx.lineWidth = 2;
           roundRect(x0 + 1, yy + 1, Math.max(2, x1 - x0) - 2, h - 2, 2); ctx.stroke();
         }
-        if (x1 - x0 > 60 && h >= 14) {
+        const label = isTrack ? row.t.name : c.name;
+        if (x1 - x0 > 60 && h >= 12) {
           ctx.save(); ctx.beginPath(); ctx.rect(x0 + 5, yy, x1 - x0 - 10, h); ctx.clip();
-          ctx.fillStyle = '#15181B'; ctx.font = '500 11px Barlow, sans-serif';
-          ctx.fillText(c.name, x0 + 6, yy + h / 2 + 0.5); ctx.restore();
+          ctx.fillStyle = '#15181B'; ctx.font = `500 ${isTrack ? 10 : 11}px Barlow, sans-serif`;
+          ctx.fillText(label, x0 + 6, yy + h / 2 + 0.5); ctx.restore();
         }
         if (S.sel === c.id) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; roundRect(x0 - 1, yy - 1, Math.max(2, x1 - x0) + 2, h + 2, 3); ctx.stroke(); }
       }
-      const unplaced = clipsOf(r.name).filter((c) => c.start == null).length;
-      if (unplaced) {
-        ctx.fillStyle = COL.fix; ctx.font = '500 11px Barlow, sans-serif';
-        ctx.fillText(`${unplaced} without timecode`, LABEL_W + 8, y + L.rowH / 2);
+      if (!isTrack) {
+        const unplaced = laneClips(ln.key).filter((c) => c.start == null).length;
+        if (unplaced) {
+          ctx.fillStyle = COL.fix; ctx.font = '500 11px Barlow, sans-serif';
+          ctx.fillText(`${unplaced} without timecode`, LABEL_W + 8, y + rh / 2);
+        }
       }
     });
-    // playhead
+    // hover line and playhead
     if (hoverX != null && hoverX > LABEL_W) {
-      ctx.fillStyle = COL.led; ctx.fillRect(Math.round(hoverX), 0, 1, L.H);
+      ctx.fillStyle = 'rgba(242,239,230,0.35)'; ctx.fillRect(Math.round(hoverX), RULER_H, 1, L.H - RULER_H);
+    }
+    if (S.ph != null) {
+      const px = xOf(S.ph, L);
+      if (px >= LABEL_W && px <= L.W) {
+        ctx.fillStyle = COL.led; ctx.fillRect(Math.round(px) - 0.5, 0, 2, L.H);
+        ctx.beginPath(); ctx.moveTo(px - 5, 0); ctx.lineTo(px + 6, 0); ctx.lineTo(px + 0.5, 7); ctx.closePath(); ctx.fill();
+      }
     }
   }
   function roundRect(x, y, w, h, r) {
     ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
     ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
   }
+  function rowAt(my, L) { return L.rows.find((r) => my >= r.y && my < r.y + r.h) || null; }
   function hit(mx, my) {
     const L = layout();
-    const i = Math.floor((my - RULER_H - 3) / L.rowH);
-    if (i < 0 || i >= L.rs.length || mx < LABEL_W) return null;
+    const row = rowAt(my, L);
+    if (!row || mx < LABEL_W) return null;
     const s = sOf(mx, L);
     const tol = (S.view[1] - S.view[0]) / (L.W - LABEL_W) * 3;
-    return clipsOf(L.rs[i].name).find((c) => c.start != null && s >= c.start - tol && s <= c.start + c.length + tol) || null;
+    return laneClips(row.lane.key).find((c) => c.start != null && s >= c.start - tol && s <= c.start + c.length + tol) || null;
   }
 
   cv.addEventListener('mousemove', (e) => {
@@ -295,8 +353,19 @@
   cv.addEventListener('mouseleave', () => { hoverX = null; $('tip').hidden = true; slateIdle(); draw(); });
   cv.addEventListener('click', (e) => {
     const r = cv.getBoundingClientRect();
-    const c = hit(e.clientX - r.left, e.clientY - r.top);
-    S.sel = c ? c.id : null;
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const L = layout();
+    if (mx < LABEL_W) {                       // lane labels: open / close a multitrack lane
+      const row = rowAt(my, L);
+      if (row && row.type === 'lane' && row.multi) {
+        if (S.expanded.has(row.key)) S.expanded.delete(row.key); else S.expanded.add(row.key);
+        draw();
+      }
+      return;
+    }
+    const c = my > RULER_H ? hit(mx, my) : null;
+    setPlayhead(sOf(mx, L));
+    if (my > RULER_H) S.sel = c ? c.id : null;
     renderTable(); renderInspector(); draw();
     if (c) { const row = document.querySelector(`tr[data-id="${c.id}"]`); if (row) row.scrollIntoView({ block: 'nearest' }); }
   });
@@ -324,6 +393,65 @@
     draw();
   }, { passive: false });
   window.addEventListener('resize', draw);
+  function zoom(k) {
+    if (!S.view) return;
+    const w = S.view[1] - S.view[0];
+    const at = S.ph != null && S.ph > S.view[0] && S.ph < S.view[1] ? S.ph : (S.view[0] + S.view[1]) / 2;
+    const nw = Math.min(Math.max(w * k, SR * 5), SR * 86400);
+    const f = (at - S.view[0]) / w;
+    S.view = [at - f * nw, at - f * nw + nw];
+    draw();
+  }
+
+  // ------------------------------------------------------------------ playhead, sound and picture
+  let frameT = null;
+  function setPlayhead(s) {
+    S.ph = s;
+    $('phTc').textContent = samplesToTc(s);
+    if (S.playing) stopPlay();
+    clearTimeout(frameT);
+    frameT = setTimeout(() => showFrame(s), 120);
+  }
+  async function showFrame(s) {
+    const r = await call('frame', Math.round(s), S.sel);
+    const img = $('frame');
+    if (r && r.ok) { img.src = r.img; img.classList.add('on'); $('frameNote').textContent = r.label || ''; }
+    else { img.classList.remove('on'); $('frameNote').textContent = (r && r.why) || 'No picture here'; }
+  }
+  async function togglePlay() {
+    if (S.playing) { stopPlay(); return; }
+    if (S.ph == null) { const sp = span(); if (!sp) return; S.ph = sp[0]; }
+    const r = await call('play', Math.round(S.ph), S.sel);
+    if (!r || !r.ok) { $('phWhat').textContent = (r && r.why) || 'Nothing to play here.'; return; }
+    S.ph = r.from;
+    S.playing = { t0: performance.now(), from: r.from, dur: r.dur, lastFrame: 0 };
+    $('playBtn').textContent = '■ Stop'; $('playBtn').classList.add('playing');
+    $('phWhat').textContent = `Playing ${r.what}`;
+    requestAnimationFrame(tick);
+  }
+  function tick(now) {
+    const p = S.playing;
+    if (!p) return;
+    const el = (performance.now() - p.t0) / 1000;
+    if (el >= p.dur) { stopPlay(true); return; }
+    S.ph = p.from + el * SR;
+    $('phTc').textContent = samplesToTc(S.ph);
+    if (S.view && S.ph > S.view[1] - (S.view[1] - S.view[0]) * 0.05) {      // page along
+      const w = S.view[1] - S.view[0]; S.view = [S.ph - w * 0.1, S.ph + w * 0.9];
+    }
+    if (el - p.lastFrame >= 1) { p.lastFrame = el; showFrame(S.ph); }
+    draw();
+    requestAnimationFrame(tick);
+  }
+  function stopPlay(ended) {
+    if (!S.playing) return;
+    S.playing = null;
+    if (!ended) call('stop_play');
+    $('playBtn').textContent = '▶ Play'; $('playBtn').classList.remove('playing');
+    $('phWhat').textContent = ended ? 'End of the preview.' : 'Stopped.';
+    showFrame(S.ph); draw();
+  }
+  $('playBtn').addEventListener('click', togglePlay);
 
   function slateIdle() {
     const sp = S.project && span();
@@ -336,9 +464,19 @@
 
   // ------------------------------------------------------------------ table
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+  const SLOW_LABEL = (c) => {
+    const k = c.slowmo && c.slowmo.kind;
+    return k === 'timebase' ? `Slow motion · ${c.fps} fps` : k === 'in_camera' ? `Slow motion · shot ${c.capture_fps}` :
+      k === 'likely' ? 'Slow motion?' : k === 'rate' ? `${c.fps} fps · own timeline` : 'Slow motion (you)';
+  };
   function chips(c) {
     const f = new Set(c.flags), out = [];
     const s = c.sync || {};
+    if (c.slowmo) {
+      out.push(['slow', SLOW_LABEL(c)]);
+      if (f.has('raw')) out.push(['info', 'RAW']);
+      return out;
+    }
     if (f.has('sync_failed')) out.push(['bad', 'Not placed']);
     if (f.has('sync_manual')) out.push(['man', c.manual && c.manual.how === 'waveform' ? 'Picked by you' : 'Set by you']);
     else if (f.has('sync_corrected')) out.push(['fix', `Fixed ${((c.start - c.orig_start) / SR >= 0 ? '+' : '−')}${Math.abs((c.start - c.orig_start) / SR).toFixed(3)} s`]);
@@ -355,7 +493,6 @@
     if (c.chapter_of && c.chapter) out.push(['info', `Chapter ${c.chapter}`]);
     if (c.after_midnight) out.push(['info', 'After midnight']);
     if (c.opatom) out.push(['info', 'P2']);
-    if (f.has('fps_mismatch')) out.push(['info', `${c.fps} fps`]);
     if (f.has('no_audio')) out.push(['', 'No audio']);
     if (f.has('ubits')) out.push(['', 'Other user bits']);
     if (s.note && s.offset != null && !moved(c)) out.push(['', `${(s.offset / 48).toFixed(0)} ms off, Auto-Align fixes it`]);
@@ -370,28 +507,41 @@
   function renderTable() {
     const tb = $('clipRows');
     if (!S.project) { tb.innerHTML = ''; return; }
-    const order = rolls().map((r) => r.name);
-    const cl = tableOrder();
-    tb.innerHTML = cl.map((c) => {
-      const st = status(c);
-      const cls = [c.include ? '' : 'off', S.sel === c.id ? 'sel' : ''].join(' ');
-      const dot = rollColor(c.roll);
-      const tc = c.tc ? (st.old && st.old !== c.tc ? `<span class="old">${st.old}</span>${c.tc}` : c.tc) : '—';
-      const ch = chips(c);
-      const chipHtml = ch.map(([k, t]) => `<span class="chip s ${k}">${esc(t)}</span>`).join('');
-      return `<tr class="${cls}" data-id="${c.id}">
-        <td class="c-inc"><input type="checkbox" ${c.include ? 'checked' : ''} data-inc="${c.id}" aria-label="Use ${esc(c.name)}"></td>
-        <td><span class="roll-dot" style="background:${dot}"></span>${esc(c.roll)}</td>
-        <td class="file" title="${esc(c.path)}">${esc(c.name)}</td>
-        <td class="tracks">${tracksCell(c)}</td>
-        <td class="num">${tc}</td><td class="num">${c.dur}</td>
-        <td class="status">${chipHtml || `<span class="txt">${esc(st.t)}</span>`}</td></tr>`;
-    }).join('');
-    void order;
+    const html = [];
+    const byStart = (a, b) => (a.start ?? 1e18) - (b.start ?? 1e18) || a.name.localeCompare(b.name);
+    for (const ln of lanesAll()) {
+      const cl = laneClips(ln.key).sort(byStart);
+      if (!cl.length) continue;
+      const closed = S.collapsed.has(ln.key);
+      const inc = cl.filter((c) => c.include).length;
+      html.push(`<tr class="grp" data-grp="${esc(ln.key)}"><td colspan="6"><span class="tw">${closed ? '▸' : '▾'}</span>`
+        + `<i class="sw" style="background:${laneColor(ln)}"></i><b>${esc(ln.label)}</b>${esc(ln.sub || '')}`
+        + `<span class="cnt">${inc === cl.length ? `${cl.length} clip${cl.length === 1 ? '' : 's'}` : `${inc} of ${cl.length} used`}</span></td></tr>`);
+      if (closed) continue;
+      for (const c of cl) {
+        const st = status(c);
+        const cls = [c.include ? '' : 'off', S.sel === c.id ? 'sel' : ''].join(' ');
+        const tc = c.tc ? (st.old && st.old !== c.tc ? `<span class="old">${st.old}</span>${c.tc}` : c.tc) : '—';
+        const ch = chips(c);
+        const chipHtml = ch.map(([kk, t]) => `<span class="chip s ${kk}">${esc(t)}</span>`).join('');
+        const sub2 = ln.kind === 'camera' && ln.rolls.length > 1 ? `<span class="sub2">${esc(c.roll)}</span>` : '';
+        html.push(`<tr class="${cls}" data-id="${c.id}">
+          <td class="c-inc"><input type="checkbox" ${c.include ? 'checked' : ''} data-inc="${c.id}" aria-label="Use ${esc(c.name)}"></td>
+          <td class="file" title="${esc(c.path)}">${esc(c.name)}${sub2}</td>
+          <td class="num">${tc}</td><td class="num">${c.dur}</td>
+          <td class="tracks">${tracksCell(c)}</td>
+          <td class="status">${chipHtml || `<span class="txt">${esc(st.t)}</span>`}</td></tr>`);
+      }
+    }
+    tb.innerHTML = html.join('');
   }
   function tableOrder() {
-    const order = rolls().map((r) => r.name);
-    return dayClips().slice().sort((a, b) => (a.start ?? 1e18) - (b.start ?? 1e18) || order.indexOf(a.roll) - order.indexOf(b.roll));
+    const out = [];
+    for (const ln of lanesAll()) {
+      if (S.collapsed.has(ln.key)) continue;
+      out.push(...laneClips(ln.key).sort((a, b) => (a.start ?? 1e18) - (b.start ?? 1e18) || a.name.localeCompare(b.name)));
+    }
+    return out;
   }
   $('clipRows').addEventListener('change', async (e) => {
     const id = e.target.dataset.inc;
@@ -402,6 +552,12 @@
   $('clipRows').addEventListener('click', (e) => {
     const tr = e.target.closest('tr');
     if (!tr || e.target.matches('input')) return;
+    if (tr.dataset.grp) {
+      const k = tr.dataset.grp;
+      if (S.collapsed.has(k)) S.collapsed.delete(k); else S.collapsed.add(k);
+      renderTable(); return;
+    }
+    { const c0 = S.project.clips.find((x) => x.id === +tr.dataset.id); if (c0 && c0.start != null) setPlayhead(c0.start); }
     S.sel = +tr.dataset.id; renderTable(); renderInspector(); slateIdle(); draw();
   });
 
@@ -444,10 +600,22 @@
     ['iSet', 'iReset', 'iStamp'].forEach((id) => { $(id).disabled = busy; });
     document.querySelectorAll('[data-nudge]').forEach((b) => { b.disabled = busy || c.start == null; });
     $('iReset').hidden = !c.manual;
+    const isVid = c.kind === 'video';
+    $('iSlowRow').hidden = !isVid;
+    $('iSlowRow').classList.toggle('on', !!c.slowmo);
+    if (isVid) {
+      $('iSlowText').textContent = c.slowmo ? `${c.slowmo.why} Kept off the sync timeline; its sound isn’t used.`
+        : 'On the sync timeline.';
+      $('iSlow').textContent = c.slowmo ? 'Not slow motion' : 'Mark as slow motion';
+      $('iSlow').disabled = busy;
+    }
+    if (c.slowmo) { $('iFind').disabled = true; $('iAgainst').disabled = true; }
     $('iStamp').disabled = busy || c.start == null || !S.settings.out_dir;
+    $('iStamp').hidden = c.kind === 'video';
     $('iProg').hidden = finding !== c.id;
     let note = '';
-    if (noAudio) note = 'This clip has no audio to match, so give it a timecode by hand.';
+    if (c.slowmo) note = 'Slow motion isn’t synced to sound, so there’s nothing to find.';
+    else if (noAudio) note = 'This clip has no audio to match, so give it a timecode by hand.';
     else if (!others.length) note = 'Add another camera or recorder to match it against.';
     else if (!FIND[c.id]) note = c.orig_start == null ? 'No timecode in the file: Find searches the whole day for where its sound matches.' :
       'Find checks the whole day, including near its own timecode, and shows how sure each match is.';
@@ -527,6 +695,10 @@
     const out = [];
     for (const c of dayClips()) {
       const f = new Set(c.flags);
+      if (c.slowmo) {
+        if (c.include && c.slowmo.kind === 'likely') out.push(['warn', c, 'looks like slow motion: no sound, and its timecode runs into the next clip. It goes on the slow-motion timeline. If it isn’t, select it and click “Not slow motion”.']);
+        continue;
+      }
       if (f.has('sync_failed')) out.push(['bad', c, 'couldn’t be placed by waveform. Type its timecode or use Find.']);
       else if (c.start == null && c.include) {
         if (S.settings.waveform_check) out.push(['warn', c, 'has no timecode. The waveform check places it when you sync, or select it and use Find now.']);
@@ -592,6 +764,7 @@
     }
     $('modeHint').textContent = hint;
     $('refRow').hidden = eff !== 'camera';
+    $('refNote').hidden = eff !== 'camera';
   }
   document.querySelectorAll('#modeSeg [data-mode]').forEach((b) => b.addEventListener('click', async () => {
     if (b.disabled) return;
@@ -618,6 +791,33 @@
       `<li><i class="${esc(c.status)}"></i><b>${esc(c.label)}</b>${c.detail ? `<span>${esc(c.detail)}</span>` : ''}</li>`).join('');
   }
 
+  function renderFps() {
+    const P = S.project, fi = P && P.fps_info;
+    $('fpsBlock').hidden = !P || !P.clips.length;
+    if (!fi) return;
+    const auto = fi.status !== 'set';
+    $('fpsSel').innerHTML = [`<option value="auto" ${auto ? 'selected' : ''}>Auto (${esc(auto ? fi.label : '23.976')})</option>`]
+      .concat(fi.choices.map((c) => `<option value="${esc(c)}" ${!auto && c === fi.label ? 'selected' : ''}>${esc(c)} fps</option>`)).join('');
+    $('fpsSel').disabled = S.running;
+    const stEl = $('fpsState');
+    stEl.className = 'fps-state st-' + fi.status;
+    stEl.textContent = fi.status === 'ask' ? 'Check this' : fi.status === 'set' ? 'Set by you' : 'Checked';
+    $('fpsAsk').hidden = fi.status !== 'ask';
+    if (fi.status === 'ask') {
+      $('fpsAskText').innerHTML = `<b>This day might not be 23.976.</b> ${esc(fi.reason)} Which is it?`;
+      $('fpsUse').textContent = `Use ${fi.suggest}`;
+    }
+    $('fpsWhy').textContent = fi.status === 'ask' ? 'What the files say' : fi.reason;
+    const kinds = { camera: 'Camera', sound: 'Sound', report: 'Sound report' };
+    $('fpsList').innerHTML = fi.evidence.length ? fi.evidence.map((e) =>
+      `<li class="${e.votes ? '' : 'no'}">${kinds[e.kind]} ${esc(e.name)}: <span class="r">${esc(e.label)}</span>${e.note ? ` <span class="n">(${esc(e.note)})</span>` : ''}</li>`).join('')
+      : '<li>No frame rate in any file. Using 23.976.</li>';
+  }
+  $('fpsSel').addEventListener('change', async (e) => applyState(await call('set_fps', e.target.value)));
+  $('fpsUse').addEventListener('click', async () => S.project && applyState(await call('set_fps', S.project.fps_info.suggest)));
+  $('fpsKeep').addEventListener('click', async () => applyState(await call('set_fps', '23.976')));
+  const fpsAsk = () => !!(S.project && S.project.fps_info && S.project.fps_info.status === 'ask');
+
   function renderPanel() {
     const P = S.project, st = S.settings;
     const has = P && P.clips.length;
@@ -631,13 +831,19 @@
     // reference
     const cams = P ? rolls().filter((r) => r.kind === 'camera') : [];
     const ref = st.reference || {};
-    $('refRoll').innerHTML = cams.length ? cams.map((r) => `<option value="${esc(r.name)}" ${r.name === ref.roll ? 'selected' : ''}>${esc(r.name)}${r.camera ? ' (' + esc(r.camera) + ')' : ''}</option>`).join('')
+    const auto = !ref.roll || ref.auto;
+    $('refRoll').innerHTML = cams.length ? `<option value="auto" ${auto ? 'selected' : ''}>Best onboard mic (listen)</option>` + cams.map((r) => `<option value="${esc(r.name)}" ${!auto && r.name === ref.roll ? 'selected' : ''}>${esc(r.name)}${r.camera ? ' (' + esc(r.camera) + ')' : ''}</option>`).join('')
       : '<option>No camera yet</option>';
     $('refRoll').disabled = !cams.length;
     const nch = P ? Math.max(1, ...P.clips.filter((c) => c.roll === ref.roll).map((c) => c.channels || 1)) : 1;
     $('refCh').innerHTML = Array.from({ length: Math.max(nch, 1) }, (_, i) => `<option value="${i}" ${i === (ref.channel || 0) ? 'selected' : ''}>Ch ${i + 1}</option>`).join('');
     $('refCh').disabled = !cams.length;
+    $('refCh').hidden = auto;
+    $('refNote').textContent = auto ? (S.refPick ? `Picked ${S.refPick.roll} ch ${S.refPick.channel + 1}: ${S.refPick.why}.`
+      : 'When you sync, every camera channel is compared with the recorder’s mics. The onboard mic that matches best wins. A channel that’s the mixer’s feed, timecode or silence is never used.')
+      : 'Chosen by you.';
     renderMode();
+    renderFps();
     // toggles
     document.querySelectorAll('[data-set]').forEach((el) => {
       const k = el.dataset.set; const v = st[k];
@@ -647,7 +853,7 @@
       if (li && el.type === 'checkbox' && li.querySelector('input') === el) li.classList.toggle('off', !el.checked);
     });
     const subs = document.querySelector('.steps .subopts');
-    if (subs) subs.classList.toggle('dim', !st.xml_iso);
+    if (subs) subs.classList.toggle('dim', st.aap_mode !== 'resolve');     // aligned ISOs need Auto-Align
     // summary line
     if (has) {
       const cl = dayClips();
@@ -661,19 +867,23 @@
       if (sp) notes.push(`${samplesToTc(sp[0], false)} to ${samplesToTc(sp[1], false)}`);
       const fixed = cl.filter(moved).length;
       if (fixed) notes.push(`${fixed} timecode${fixed === 1 ? '' : 's'} fixed`);
+      const slow = cl.filter((c) => c.slowmo && c.include).length;
+      if (slow) notes.push(`${slow} slow motion / other rate, on their own timeline`);
       $('sumSub').textContent = notes.join(' · ');
     }
     renderAttention();
+    $('viewer').hidden = !has;
+    document.querySelector('#viewer .screen').hidden = !lanesAll().some((l) => l.kind === 'camera');
     const gb = $('goBtn');
     const ds = days();
     const dayLabel = multiDay() && S.day ? (ds.find((d) => d.key === S.day) || {}).label : '';
-    gb.disabled = !has || S.scanning;
-    gb.textContent = S.running ? 'Stop' : (dayLabel ? `Sync ${dayLabel}` : (S.done ? 'Sync the day again' : 'Sync the day'));
+    gb.disabled = !has || S.scanning || (!S.running && fpsAsk());
+    gb.textContent = S.running ? 'Stop' : fpsAsk() ? 'Confirm the frame rate first' : (dayLabel ? `Sync ${dayLabel}` : (S.done ? 'Sync the day again' : 'Sync the day'));
     gb.classList.toggle('stop', S.running);
     const ga = $('goAll');
     ga.hidden = !multiDay() || S.running;
     ga.textContent = `Sync all ${ds.length} days, one folder each`;
-    ga.disabled = S.scanning;
+    ga.disabled = S.scanning || fpsAsk();
     document.body.classList.toggle('running', S.running);
     document.querySelectorAll('[data-set], #refRoll, #refCh, #jobName, #outDir, #addMore, #clearAll').forEach((el) => { el.disabled = S.running || (el.id === 'refRoll' && !cams.length); });
   }
@@ -698,7 +908,7 @@
     applyState(await call('set_setting', k, v));
   }));
   $('jobName').addEventListener('change', async (e) => applyState(await call('set_setting', 'job_name', e.target.value)));
-  $('refRoll').addEventListener('change', async (e) => applyState(await call('set_reference', e.target.value, 0)));
+  $('refRoll').addEventListener('change', async (e) => { S.refPick = null; applyState(await call('set_reference', e.target.value, 0)); });
   $('refCh').addEventListener('change', async (e) => applyState(await call('set_reference', $('refRoll').value, +e.target.value)));
   $('outDir').addEventListener('click', async () => applyState(await call('choose_output')));
   $('chooseFolders').addEventListener('click', () => call('choose_folders'));
@@ -734,6 +944,7 @@
   function resetSteps() { document.querySelectorAll('#steps li').forEach((li) => li.classList.remove('active', 'done')); }
   function resetRun() {
     resetSteps();
+    $('review').hidden = true; $('camFix').hidden = true;
     $('progFill').style.width = '0'; $('progText').textContent = '';
     $('doneRow').hidden = true; $('aapCard').hidden = true;
     $('msg').textContent = ''; $('msg').className = 'msg';
@@ -816,9 +1027,34 @@
       $('progFill').style.width = '100%'; $('progText').textContent = 'Finished';
       $('doneRow').hidden = false;
       const all = d.all || [d];
+      const cf = all.flatMap((x) => x.camera_fixes || []);
+      $('camFix').hidden = !cf.length;
+      if (cf.length) {
+        $('camLead').textContent = `The timelines already place ${cf.length === 1 ? 'this clip' : 'these clips'} at the fixed timecode. Want copies that carry it too? `
+          + 'Each copy is the original file byte for byte with only the timecode number changed: same codec, same log, no re-encode. The originals stay as they are.';
+        $('camList').innerHTML = cf.map((x) => `<li><b>${esc(x.roll)} · ${esc(x.name)}</b><span class="tc">${x.new}</span></li>`).join('');
+      }
       $('msg').className = 'msg ok';
       $('msg').textContent = all.length > 1 ? `${all.length} days synced, each in its own folder next to ${d.out.split('/').slice(-1)[0]}.` : `Everything is in ${d.out}`;
       renderPanel();
+    },
+    review_tc: (d) => {
+      const fx = d.fixes || [];
+      $('review').hidden = false;
+      $('revLead').textContent = `${fx.length} file${fx.length === 1 ? '' : 's'} ${fx.length === 1 ? 'is' : 'are'} off from ${fx.length === 1 ? 'its' : 'their'} own timecode. `
+        + 'Nothing has been written yet. Click any of them in the timeline to look closer.';
+      $('revList').innerHTML = fx.map((x) => `<li><b>${esc(x.roll)} · ${esc(x.name)}</b>
+          <span class="tc">${x.old ? `<s>${x.old}</s>` : '<s>no TC</s>'}${x.new}</span>
+          <span class="w">${x.shift_s != null ? signedSec(x.shift_s) + ' · ' : ''}${esc(x.how)}${x.against ? ' against ' + esc(x.against) : ''}${x.score != null ? ` (match ${x.score})` : ''}</span></li>`).join('');
+      $('progText').textContent = 'Waiting for you: confirm the timecode fixes';
+      $('review').scrollIntoView({ block: 'nearest' });
+    },
+    ref_pick: (d) => { S.refPick = d; renderPanel(); },
+    cameras_done: (d) => {
+      S.running = false; renderPanel();
+      $('camFix').hidden = true;
+      $('msg').className = 'msg ok';
+      $('msg').textContent = d.made && d.made.length ? `${d.made.length} corrected camera cop${d.made.length === 1 ? 'y' : 'ies'} in CAMERA_TC_CORRECTED. The XML now points at them.` : 'No camera copies written.';
     },
     day: (d) => { log(`══ Day ${d.i} of ${d.n}: ${d.label}`); $('progText').textContent = `Day ${d.i} of ${d.n}: ${d.label}`; resetSteps(); },
     notice: (d) => { $('msg').className = 'msg' + (d.ok === false ? ' err' : ''); $('msg').textContent = d.text || ''; },
@@ -826,6 +1062,19 @@
     error: (d) => { S.running = false; $('msg').className = 'msg err'; $('msg').textContent = d.message; renderPanel(); log(d.trace || ''); },
   };
 
+  async function decide(choice) { $('review').hidden = true; await call('review_tc', choice); }
+  $('revWrite').addEventListener('click', () => decide('write'));
+  $('revSkip').addEventListener('click', () => decide('skip'));
+  $('revStop').addEventListener('click', () => decide('stop'));
+  $('camWrite').addEventListener('click', async () => {
+    const ok = await call('rewrite_cameras');
+    if (ok) { $('camFix').hidden = true; S.running = true; renderPanel(); $('progress').hidden = false; }
+  });
+  $('camNo').addEventListener('click', () => { $('camFix').hidden = true; });
+  $('iSlow').addEventListener('click', async () => {
+    const c = selClip(); if (!c) return;
+    applyState(await call('clip_slowmo', c.id, !c.slowmo));
+  });
   window.MS = { event: (kind, data) => { const h = handlers[kind]; if (h) h(data); } };
 
   // ------------------------------------------------------------------ keyboard
@@ -835,8 +1084,11 @@
     if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); if (!S.running) call('choose_folders'); return; }
     if (mod && e.key === 'Enter') { e.preventDefault(); if (!S.running) go(multiDay() ? S.day : null); return; }
     if (typing) { if (e.key === 'Escape') e.target.blur(); return; }
-    if (e.key === 'Escape') { if (S.sel != null) { S.sel = null; renderTable(); renderInspector(); slateIdle(); draw(); } return; }
+    if (e.key === 'Escape') { if (S.playing) { stopPlay(); return; } if (S.sel != null) { S.sel = null; renderTable(); renderInspector(); slateIdle(); draw(); } return; }
     if (!S.project || !S.project.clips.length) return;
+    if (e.key === '+' || e.key === '=') { e.preventDefault(); zoom(0.5); return; }
+    if (e.key === '-' || e.key === '_') { e.preventDefault(); zoom(2); return; }
+    if (e.key === ' ') { e.preventDefault(); togglePlay(); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       const list = tableOrder();
@@ -848,14 +1100,7 @@
     }
     const c = selClip();
     if (!c || S.running) return;
-    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && c.start != null) {
-      e.preventDefault();
-      const dir = e.key === 'ArrowRight' ? 1 : -1;
-      const [n, d] = fpsPair();
-      applyState(await call('clip_nudge', c.id, dir * (e.shiftKey ? Math.round(n / d) : 1)));
-      return;
-    }
-    if (e.key === 'Backspace' || e.key === 'Delete' || e.key === ' ') {
+    if (e.key === 'Backspace' || e.key === 'Delete') {
       e.preventDefault();
       applyState(await call('set_include', c.id, !c.include));
     }

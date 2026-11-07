@@ -18,13 +18,14 @@ job = default_job_name(p)
 out = default_out_dir(p, job)
 print('job', job, 'out', out)
 if os.path.exists(out):
+    __import__('midwigsync.safety', fromlist=['x']).allow_output(out)
     shutil.rmtree(out)
 zoom = next(c for c in p.clips if c['name'] == 'ZOOM0001.WAV')
 typed = TC.samples_to_tc(truth['ZOOM0001.WAV']['true_start'], p.fps)
 ClipTools(p).set_tc(zoom, parse_tc_input(typed, p.fps), 'typed')
 print('ZOOM typed in as', typed)
 ev = []
-j = Job(p, dict(job_name=job, out_dir=out, _fake_aap=RP.fake_aap, poly_unaligned=True, synced_clips=True),
+j = Job(p, dict(job_name=job, out_dir=out, _fake_aap=RP.fake_aap),
         lambda k, d: (ev.append((k, d)), print(k, d if k != 'error' else d['trace'])) if k in ('error', 'done') else ev.append((k, d)))
 t = time.time(); j.run(); print(f'pipeline {time.time() - t:.1f}s')
 assert not any(k == 'error' for k, _ in ev), 'pipeline error'
@@ -40,5 +41,5 @@ print('\nSTAMPED', [s['out'] for s in j.stamped])
 print('ALIGNED', [os.path.basename(a['aligned']) for a in j.aligned])
 print('POLY', [(os.path.basename(x['path']), x['channels']) for x in j.polys])
 x = open(os.path.join(out, j.xmls[0])).read()
-for n in ('A002_C001.braw', 'A002_C002.braw', '0001AB.MXF', 'GX010042.MP4', 'GX020043.MP4', 'MIX_0001', 'Voice 001', 'ZOOM0001'):
+for n in ('A002_C001.braw', 'A002_C002.braw', '0001AB.MXF', 'GX010042.MP4', 'GX020043.MP4', 'POLY_ALN'):
     print('  XML has', n, n in x)

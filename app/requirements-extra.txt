@@ -1,3 +1,4 @@
 # optional: OTIO and AAF exports. If these fail to install the app still opens; those exports are skipped.
 opentimelineio>=0.17
 pyaaf2>=1.7
+python-docx>=1.1

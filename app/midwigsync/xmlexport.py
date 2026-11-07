@@ -112,9 +112,13 @@ class XmlBuilder:
             src = ''
             if mediatype == 'audio':
                 src = f'<sourcetrack><mediatype>audio</mediatype><trackindex>{c.get("src_track", 1)}</trackindex></sourcetrack>'
+            mk = ''
+            if c.get('note') and mediatype == 'video':
+                mk = (f'<marker><name>{escape(c.get("note_name", "Note"))}</name><comment>{escape(c["note"])}</comment>'
+                      f'<in>0</in><out>-1</out></marker>')
             return cid, (f'<clipitem id="{cid}"><name>{escape(os.path.basename(c["path"]))}</name><enabled>TRUE</enabled>'
                          f'<duration>{sdur}</duration>{_rate(cfps)}<start>{st}</start><end>{st + dur}</end>'
-                         f'<in>0</in><out>{sdur}</out>{f}{src}@@LINK:{c.get("link_key", "")}@@</clipitem>')
+                         f'<in>0</in><out>{sdur}</out>{f}{src}{mk}@@LINK:{c.get("link_key", "")}@@</clipitem>')
 
         vxml = []
         for i, (lab, clips) in enumerate(self._place(self.vtracks)):
@@ -168,6 +172,38 @@ def write_day_xml(path, name, fps, df, cameras, audio_tracks):
         for c in t['clips']:
             xb.audio(t['label'], c)
     xml = xb.build()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(xml)
+    return path
+
+
+def write_slowmo_xml(path, name, fps, df, clips):
+    """Slow motion and other frame rates, in the order they were shot, back to back from 01:00:00:00, one track
+    per camera, picture only, each clip at its own rate (100%) with a marker saying what it is. Interpret / conform
+    them to slow them down; nothing here is synced to sound."""
+    xb = XmlBuilder(name, fps, df)
+    spf = TC.samples_per_frame(fps)
+    hour = TC.frames_to_samples(TC.nominal(fps) * 3600, fps)
+    gap = int(round(float(spf) * TC.nominal(fps)))           # one second between clips
+    pos = hour
+
+    def order(c):
+        return (c.get('orig_start') is None, c.get('day') or '', c.get('orig_start') or 0, str(c.get('created') or ''), c['name'])
+    for c in sorted(clips, key=order):
+        cfps = c.get('fps') or fps
+        sm = c.get('slowmo') or {}
+        label = c.get('lane_label') or c['roll']
+        what = {'timebase': 'SLOW MO (time base)', 'in_camera': 'SLOW MO (in camera)', 'likely': 'SLOW MO?',
+                'rate': 'OTHER RATE', 'marked': 'SLOW MO'}.get(sm.get('kind'), 'SLOW MO')
+        tc = TC.samples_to_tc(c['orig_start'], cfps, bool(c.get('df'))) if c.get('orig_start') is not None else 'no TC'
+        xb.video(label, dict(path=c['path'], start=pos, length=c['length'], kind='video', channels=0,
+                             width=c.get('width', 0), height=c.get('height', 0), reel=c['roll'], fps=cfps,
+                             media_start_frames=TC.samples_to_frames(c['orig_start'], cfps) if c.get('orig_start') is not None else 0,
+                             note_name=what, note=f"{c['roll']} {c['name']} at {tc}. {sm.get('why', '')}"))
+        n = TC.samples_to_frames(c['length'], fps, 'ceil')
+        pos += TC.frames_to_samples(n, fps) + gap
+    xml = xb.build(seq_start_samples=hour)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         f.write(xml)
