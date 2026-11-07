@@ -39,7 +39,7 @@ DEFAULTS = dict(
     short_clip_s=20,
     mode='auto',                   # 'auto' | 'camera' | 'audio'  (auto: audio-only when no camera has sound)
     aligned_names='same',          # 'same' | 'suffix' (_ALN)
-    export_otio=True, export_aaf=True, export_ale=True, export_csv=True,
+    export_xml=True, export_otio=True, export_aaf=True, export_ale=True, export_csv=True,
     transcribe=False, transcribe_language='en',   # 'auto' detects the language
 )
 
@@ -800,13 +800,14 @@ class Job:
                                                              media_start_frames=TC.samples_to_frames(x['start'], p.fps))
                                                         for x in ps if tuple(x['channels']) == lay]))
             tag = 'ALN' if folder == 'POLY_ALIGNED' else 'UNALIGNED'
-            path = write_day_xml(os.path.join(xml_dir, f'{job}_SYNC_{tag}.xml'), f'{job} SYNC {tag}', p.fps,
-                                 p.df, cams, tracks)
-            self.xmls.append(os.path.relpath(path, self.out))
-        elif cams:
+            if self.s.get('export_xml', True):
+                path = write_day_xml(os.path.join(xml_dir, f'{job}_SYNC_{tag}.xml'), f'{job} SYNC {tag}', p.fps,
+                                     p.df, cams, tracks)
+                self.xmls.append(os.path.relpath(path, self.out))
+        elif cams and self.s.get('export_xml', True):
             path = write_day_xml(os.path.join(xml_dir, f'{job}_CAMERAS.xml'), f'{job} CAMERAS', p.fps, p.df, cams, [])
             self.xmls.append(os.path.relpath(path, self.out))
-        if self.slow:
+        if self.slow and self.s.get('export_xml', True):
             path = write_slowmo_xml(os.path.join(xml_dir, f'{job}_SLOW_MOTION.xml'),
                                     f'{job} SLOW MOTION + OTHER RATES', p.fps, p.df, self.slow)
             self.xmls.append(os.path.relpath(path, self.out))

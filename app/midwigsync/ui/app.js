@@ -961,7 +961,9 @@
     });
     $('isoOpt').classList.toggle('dim', st.aap_mode !== 'resolve');     // aligned ISOs need Auto-Align
     $('polyState').textContent = st.iso_folder && st.aap_mode === 'resolve' ? '+ ISOs' : 'always';
-    $('xmlState').textContent = ['XML'].concat(st.export_otio ? ['OTIO'] : [], st.export_aaf ? ['AAF'] : [], st.export_ale ? ['ALE'] : [], st.export_csv ? ['CSV'] : []).join(' · ');
+    { const n = ['export_xml', 'export_otio', 'export_aaf', 'export_ale', 'export_csv'].filter((k) => k === 'export_xml' ? st[k] !== false : st[k]).length;
+      $('xmlState').textContent = n ? `${n} of 5` : 'none';
+      document.querySelector('#steps li.tl-step').classList.toggle('off', !n); }
     // summary line
     if (has) {
       const cl = dayClips();

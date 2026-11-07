@@ -21,7 +21,7 @@ from . import media
 from .brand import CACHE, APP_NAME, APP_VERSION, SETTINGS_FILE, OUT_SUFFIX
 
 
-PREF_KEYS = ('chunk_mode', 'aap_auto_press', 'waveform_check', 'iso_folder', 'aap_mode', 'mode', 'export_otio',
+PREF_KEYS = ('chunk_mode', 'aap_auto_press', 'waveform_check', 'iso_folder', 'aap_mode', 'mode', 'export_xml', 'export_otio',
              'export_aaf', 'export_ale', 'export_csv', 'aligned_names', 'transcribe', 'transcribe_language')
 OLD_PREFS = ('poly_unaligned', 'stamp_corrected_video', 'xml_iso', 'xml_poly', 'poly_aligned', 'synced_clips',
              'poly_per_take')

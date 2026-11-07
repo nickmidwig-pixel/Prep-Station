@@ -481,3 +481,15 @@ table.clips .th.aud { width: 64px; height: 34px; background:
   repeating-linear-gradient(90deg, transparent 0 3px, rgba(147,181,138,.35) 3px 4px) center / 100% 60% no-repeat, #15181B; }
 .tip .tip-th { display: block; width: 192px; border-radius: 3px; margin-bottom: 6px; }
 .viewer .screen img.pv { filter: none; }
+
+/* ---------- timelines for editorial: pick them right in the step list */
+.steps li.tl-step .picks { grid-column: 2 / span 2; display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.steps .pick { display: inline-flex; align-items: center; cursor: pointer; }
+.steps .pick input { position: absolute; opacity: 0; pointer-events: none; }
+.steps .pick span { border: 1px solid var(--line); border-radius: 12px; padding: 3px 9px 3px 8px; font-size: 11.5px; color: var(--muted); }
+.steps .pick span::before { content: ''; display: inline-block; width: 9px; margin-right: 4px; }
+.steps .pick input:checked + span { border-color: var(--aud); color: var(--paper); background: rgba(147,181,138,.12); }
+.steps .pick input:checked + span::before { content: '✓'; color: var(--aud); }
+.steps .pick input:focus-visible + span { outline: 2px solid var(--cam); outline-offset: 1px; }
+.steps .pick:hover span { border-color: var(--muted); }
+body.running .steps .pick { pointer-events: none; opacity: .7; }
