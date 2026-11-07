@@ -482,20 +482,36 @@ class Project:
             for c in r['clips']:
                 for k, v in (c.get('track_names') or {}).items():
                     names[(int(k), v)] += 1
+            # one row per track position. A recorder's takes can have different layouts (633: 4, 6 and 8 tracks on
+            # one card), so each row lists the names used at that position, and its role is the role of the
+            # name most files use there (never a role counted separately from the name).
             chans = []
+            layouts = {tuple((c.get('track_names') or {}).get(k + 1) or (c.get('track_names') or {}).get(str(k + 1)) or ''
+                             for k in range(c.get('channels', 1))) for c in r['clips']}
             for i in range(r['channels']):
-                nm = next((v for (k, v), _ in names.most_common() if k == i + 1), None)
-                chans.append(dict(name=nm or (r['name'] if r['channels'] == 1 else f"{r['name']} {i + 1}"),
-                                  role=role if r['channels'] == 1 else None))
-            if r['channels'] > 1:
-                rr = Counter()
-                for c in r['clips']:
-                    for i, x in enumerate(self.clip_roles(c)):
-                        rr[(i, x)] += 1
-                for i, ch in enumerate(chans):
-                    ch['role'] = next((x for (k, x), _ in rr.most_common() if k == i), 'lav')
+                here = [(v, n) for (k, v), n in names.most_common() if k == i + 1]
+                nm = here[0][0] if here else None
+                shown = nm
+                if len(here) > 1:
+                    shown = ' / '.join(v for v, _ in here[:3]) + (' …' if len(here) > 3 else '')
+                ch = dict(name=shown or (r['name'] if r['channels'] == 1 else f"{r['name']} {i + 1}"),
+                          role=role if r['channels'] == 1 else None)
+                if r['channels'] > 1:
+                    pick = next((c for c in r['clips'] if ((c.get('track_names') or {}).get(i + 1)
+                                                            or (c.get('track_names') or {}).get(str(i + 1))) == nm), None)
+                    if pick is None:
+                        pick = next((c for c in r['clips'] if c.get('channels', 1) > i), None)
+                    roles_here = self.clip_roles(pick) if pick else []
+                    ch['role'] = roles_here[i] if i < len(roles_here) else 'lav'
+                    seen = {self.clip_roles(c)[i] for c in r['clips'] if c.get('channels', 1) > i}
+                    if len(seen) > 1:
+                        ch['role'] = 'varies'          # a boom in one take, a mix in another
+                chans.append(ch)
             label = chans[0]['name'] if r['channels'] == 1 and chans and chans[0]['name'] != r['name'] else r['name']
             sub = {'multi': f"{r['channels']} tracks", 'mix': 'mix', 'tc': 'timecode'}.get(role, role)
+            if role == 'multi' and len(layouts) > 1:
+                ns = sorted({len(l) for l in layouts})
+                sub = (f"{ns[0]}–{ns[-1]} tracks" if ns[0] != ns[-1] else f"{ns[0]} tracks") + f" · {len(layouts)} layouts"
             if r['channels'] == 1 and label != r['name']:
                 sub = f"{role} · {r['name']}"
             key = f"snd:{r['name']}"

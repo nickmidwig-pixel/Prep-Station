@@ -467,3 +467,7 @@ kbd { font: 500 12px/1 'SF Mono', Menlo, ui-monospace, monospace; background: va
 .popmenu .pm-letters button:hover { border-color: var(--muted); }
 .popmenu .pm-i { display: block; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid var(--line); color: var(--paper); padding: 8px 4px 2px; cursor: pointer; font: inherit; }
 .popmenu .pm-i:hover { color: #fff; }
+.steps li[data-key] { cursor: pointer; border-radius: 4px; }
+.steps li[data-key]:hover .t { color: #fff; }
+.steps li[data-key]:hover .state { text-decoration: underline; }
+body.running .steps li[data-key] { cursor: default; }

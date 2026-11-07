@@ -10,8 +10,8 @@
   };
   // cameras get their own hue each (reference first); sound is coloured by what the mic is
   const CAM_HUES = ['#6E9CC4', '#5FB3AE', '#9B8BD1', '#7FB0E8', '#C48BB8', '#8FA3B8', '#6FA88F', '#B39C7A'];
-  const ROLE_COL = { boom: '#D9B95B', lav: '#93B58A', plant: '#8FC1A9', safety: '#B8A77A', multi: '#C99A6B', mix: '#9A938A', tc: '#6F7780', empty: '#5E666E' };
-  const ROLE_LABEL = { boom: 'boom', lav: 'lav', plant: 'plant', safety: 'safety copy', multi: 'multitrack', mix: 'mix', tc: 'timecode', cam: 'camera' };
+  const ROLE_COL = { boom: '#D9B95B', lav: '#93B58A', plant: '#8FC1A9', safety: '#B8A77A', varies: '#A88F7A', multi: '#C99A6B', mix: '#9A938A', tc: '#6F7780', empty: '#5E666E' };
+  const ROLE_LABEL = { boom: 'boom', lav: 'lav', plant: 'plant', safety: 'safety copy', varies: 'varies by take', multi: 'multitrack', mix: 'mix', tc: 'timecode', cam: 'camera' };
   const STEP_MAP = { 'Building aligned ISOs': 'Auto-Align Post', 'Checking alignment': 'Auto-Align Post' };
 
   const S = { project: null, settings: {}, running: false, scanning: false, sel: null, view: null, done: null, day: null, checks: [],
@@ -928,6 +928,7 @@
       const v = st[li.dataset.key], on = li.dataset.on ? v === li.dataset.on : !!v;
       li.classList.toggle('off', !on);
       li.querySelector('.state').textContent = on ? 'on' : 'off';
+      li.title = `${on ? 'On' : 'Off'}: click to turn it ${on ? 'off' : 'on'}`;
     });
     $('isoOpt').classList.toggle('dim', st.aap_mode !== 'resolve');     // aligned ISOs need Auto-Align
     $('polyState').textContent = st.iso_folder && st.aap_mode === 'resolve' ? '+ ISOs' : 'always';
@@ -1004,6 +1005,13 @@
   $('redoBtn').addEventListener('click', () => doUndo(true));
   $('settingsBtn').addEventListener('click', () => openSheet('settingsSheet'));
   $('stepsSettings').addEventListener('click', () => openSheet('settingsSheet'));
+  $('steps').addEventListener('click', async (e) => {          // steps that can be on or off switch right here
+    const li = e.target.closest('li[data-key]'); if (!li || S.running) return;
+    const k = li.dataset.key, v = S.settings[k];
+    const on = li.dataset.on ? v === li.dataset.on : !!v;
+    const nv = li.dataset.on ? (on ? (k === 'aap_mode' ? 'skip' : '') : li.dataset.on) : !on;
+    applyState(await call('set_setting', k, nv));
+  });
   $('keysBtn').addEventListener('click', () => openSheet('keysSheet'));
   $('clearAll').addEventListener('click', async () => { S.done = null; resetRun(); applyState(await call('clear')); });
   async function go(which) {

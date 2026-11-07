@@ -31,7 +31,7 @@ one sound report CSV). Everything below was checked against those files unless m
    speaker name `Alex` (strip `Lav\s*\d+\s*`). Also: iXML TRACK_LIST is authoritative over bext `sTRKn` (the bext
    list in ConversatT01 skips index 6 and is mangled in ConversatT02; the iXML is clean). Transcript speaker names
    should come from the stripped name (`Alex`, `Ellie`, `Emma`, `Bailey`, `Clara`), not `LAV1 ALEX`.
-5. **Sound report Start TC ≠ file TC.** The 633 CSV says GeorgiaT01 starts 10:48:56:00; bext and iXML both say
+5. **(Resolved 1.4.1: there is no gap; see Progress.) Sound report Start TC ≠ file TC.** The 633 CSV says GeorgiaT01 starts 10:48:56:00; bext and iXML both say
    10:49:34:22. The gap grows through the day (39, 44, 54, 63 s). Treat the report as a frame-rate and track-name
    source only, never as a timecode source. **Verify** on the first real run: the waveform check must decide whether
    the bext TC is right (expected: cameras rolled ~30 s before sound) or 39 s off. Camera TCs: A001C001 10:49:02:08,
@@ -84,8 +84,15 @@ Read AudioTC · Sync Map · Settings. One window, no panels to open.
 - C5 mostly done: B5 settings sheet, B3 zoom slider, B4 big timecode over the picture, B1 facts line per clip, plus
   undo/redo and the full keyboard map (Nick asked for both). Still open: B2 mute/solo per lane, pale clip blocks,
   B6 "fixed" corner ribbon (the chips cover it for now).
-- C3/C4 next: the real-day scan and the TC check need the app on Nick's Mac (the Cowork VM can read the drive but
-  can't receive the code cheaply). Ask Nick to drop 261106 into 1.4: it only reads.
+- C3 done (1.4.1): the real day scanned read-only with the app's own code (Cowork VM, code delivered through a Desktop
+  folder Nick connected): A CAM C500 II 6 cards / 16 clips, B CAM C80 6 cards / 15 clips, 7 takes on one 633 card in
+  3 layouts (4, 6, 8 tracks), 23.976 checked against cameras, sound files and the report. Nick also loaded it in 1.4
+  on the Mac: same lanes. The 633's layouts showed the sound lane mislabelling track rows; fixed (rows list the names
+  used at each position, role 'varies' when the takes disagree).
+- **A5 is not a problem: the sound report and the files agree.** GeorgiaT01 bext = 10:48:56:00, same as the report.
+  The "39-63 s" gap came from my hand check converting bext samples at 24 fps real time instead of 23.976 (0.1% of
+  the time of day: 39 s at 10:49, 63 s at 17:31). The app converts correctly. Sound rolled ~6 s before A CAM.
+- C4 next: one run with Auto-Align off on the Mac to see the waveform check's verdict on the real day.
 
 ## C. Order of work for the next model
 

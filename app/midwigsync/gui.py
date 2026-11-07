@@ -253,7 +253,11 @@ class Api:
         res = self.window.create_file_dialog(self._dlg('FOLDER'), allow_multiple=False)
         if res:
             base = res[0] if isinstance(res, (list, tuple)) else res
-            self.settings['out_dir'] = os.path.join(base, f"{self.settings.get('job_name') or 'JOB'}{OUT_SUFFIX}")
+            job = self.settings.get('job_name') or (default_job_name(self.p) if self.p.clips else '')
+            if not job:
+                import datetime as _dt
+                job = _dt.date.today().strftime('%Y%m%d')
+            self.settings['out_dir'] = os.path.join(base, f"{job}{OUT_SUFFIX}")
             self.user_out = True
         return self._state()
 
