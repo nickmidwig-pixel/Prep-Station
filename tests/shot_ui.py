@@ -78,6 +78,23 @@ with sync_playwright() as pw:
     btn.click(); pg.wait_for_timeout(200)
     check(pg.locator('tr.trkrow').count() == 1, 'click opens the track list')
     pg.screenshot(path=f'{OUT}/3_tracks.png')
+    # 2.2: drag-select on the timeline, sortable columns, mute / solo boxes
+    box = pg.locator('#tl').bounding_box()
+    x0, y0 = box['x'] + 200, box['y'] + 60
+    pg.mouse.move(x0, y0); pg.mouse.down(); pg.mouse.move(x0 + 500, y0 + 120, steps=8); pg.mouse.up()
+    pg.wait_for_timeout(200)
+    sel = pg.inner_text('#selLine') if not pg.is_hidden('#selLine') else ''
+    print('  drag-select ->', sel.split('⌫')[0].strip())
+    check('clips selected' in sel, 'dragging a box on the timeline selects the clips it touches')
+    check('slow motion' in sel.lower(), 'the selection offers Mark as slow motion for the cameras in it')
+    pg.click('#clipTable th[data-sort="name"]'); pg.wait_for_timeout(150)
+    check('on' in (pg.get_attribute('#clipTable th[data-sort="name"]', 'class') or ''), 'clicking File sorts by name (arrow on)')
+    pg.click('#clipTable th[data-sort="name"]'); pg.wait_for_timeout(150)
+    check('desc' in (pg.get_attribute('#clipTable th[data-sort="name"]', 'class') or ''), 'second click flips the order')
+    pg.click('#clipTable th[data-sort="start"]'); pg.wait_for_timeout(150)
+    pg.mouse.click(box['x'] + 150, box['y'] + 47)       # the M box of the first lane
+    pg.wait_for_timeout(150)
+    pg.screenshot(path=f'{OUT}/4_controls.png')
     check(not errs, f'no page errors {errs[:2]}')
     b.close()
 print('UI SHOTS OK' if ok else 'UI SHOTS FAILED')

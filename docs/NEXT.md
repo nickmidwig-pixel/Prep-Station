@@ -291,3 +291,26 @@ Nick's notes after the 1.7 run, thinking as an editor opening the app and the fo
   through a test XML, and with four ways of writing the timecode element (24 ntsc, 30, none, no rate). Premiere
   behaviour, not ours; positions on the timeline are right. Workaround for editors: import POLY_ALIGNED first,
   then the XML.
+
+## 2.2 (2026-11-08, late afternoon): control and readability
+
+Nick's notes, all in:
+- "Hear the difference" removed (was a one-off for his ears, not a feature).
+- **Slow motion, best effort** (scan._mark_slowmo). Canon's manuals: S&F records no sound and forces timecode to
+  Rec Run. Two new tells for silent clips, no camera-specific metadata needed:
+  `clock` — the file's creation stamp and last-write time say how long the take really took; a clip that plays
+  >1.3× longer than that was shot faster than it plays. `recrun` — on a jam-synced card every clip's TC sits a
+  fixed distance from the camera clock; a silent clip more than 60 s off that line is S&F in Rec Run.
+  Existing tells stay (other time base, capture fps in the file, TC overrun into the next clip, marked by you).
+  Fixture: E_C500 card in tests/test_slowmo.py. Still wanted: Nick's two-clip C500 II test to see whether Canon
+  writes the shooting rate at all (would make it a sure thing).
+- **Timeline control**: drag a box on empty timeline to select everything it touches (⇧/⌘ add to the selection);
+  ⇧-click range and ⌘-click toggle as before. With several clips selected the selection line offers
+  "Mark as slow motion (n)" / "Not slow motion" for the cameras in it (`Api.clips_slowmo`).
+- **Mute / solo** boxes (M, S) on every lane label. When any is set, Play mixes every audible lane under the
+  playhead (its best channel: camera reference channel, mix else boom else first mic), 60 s at a time
+  (`Api._play_mix`); otherwise Play behaves as before. Changing M/S while playing restarts the preview.
+- **Clip list**: File / Start / Length headers sort (click again to flip), inside the camera/sound groups.
+- **Fit** and the zoom slider moved above the timeline, into the toolbar. "Left out" dropped from the legend.
+- **Readability**: base type 13 → 14.5 px and every small size up a step; muted grey brightened (#8E969E →
+  #A7AFB7); lane rows 34 → 38 px; lane names 13.5 px; roomier clip rows.

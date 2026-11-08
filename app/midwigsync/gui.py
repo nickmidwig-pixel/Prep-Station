@@ -304,16 +304,34 @@ class Api:
             self.p.analyze()
         return self._state()
 
+    def clips_slowmo(self, cids, value):
+        """Mark (True) or unmark (False) several clips as slow motion at once."""
+        return self._edit('slow motion', lambda: self._clips_slowmo_raw(cids, value))
+
+    def _clips_slowmo_raw(self, cids, value):
+        if self._busy():
+            return self._state()
+        for cid in cids or []:
+            c = self.p.by_id(int(cid))
+            if c and c['kind'] == 'video':
+                c['slowmo_user'] = None if value is None else bool(value)
+        self.p.analyze()
+        return self._state()
+
     # ------------------------------------------------------------ listening and looking (read-only previews)
     def _covering(self, at, kinds=('audio', 'video')):
         return [c for c in self.p.clips if c['kind'] in kinds and c['include'] and c['start'] is not None
                 and c['start'] <= at < c['start'] + c['length'] and media.total_audio_channels(c) + (c['kind'] == 'video') > 0]
 
-    def play(self, at, cid=None, seconds=180):
+    def play(self, at, cid=None, ms=None, seconds=180):
         """Play from the playhead: the selected clip if it's under the playhead, else the recorder's mix (or boom)
-        there, else the reference camera's sound. A preview copy goes to the app's cache; afplay plays it."""
+        there, else the reference camera's sound. A preview copy goes to the app's cache; afplay plays it.
+        With mute / solo set on lanes (ms = {mute: [lane keys], solo: [...]}) every audible lane under the playhead
+        is mixed instead (its best channel), 60 s at a time."""
         self.stop_play()
         at = int(at)
+        if ms and (ms.get('mute') or ms.get('solo')):
+            return self._play_mix(at, set(ms.get('mute') or []), set(ms.get('solo') or []))
         c = self.p.by_id(int(cid)) if cid is not None else None
         if c and not (c['start'] is not None and c['start'] <= at < c['start'] + c['length']):
             c = None
@@ -368,91 +386,60 @@ class Api:
             if c['kind'] == 'audio' else f"ch {pick[0] + 1}" + (f"–{pick[-1] + 1}" if len(pick) > 1 else '')
         return dict(ok=True, from_=at, dur=dur, what=f"{c['roll']} · {c['name']} ({what})", **{'from': at})
 
-    def ab_play(self, at, seconds=4.0):
-        """Hear the difference: at the playhead, the camera's reference mic summed with the boom, first from the
-        mixer's ORIGINAL file at its own timecode, then from the ALIGNED file - 4 s each, twice. A misaligned pair
-        sounds hollow and doubled (comb filter / slap); the aligned pair sounds like one mic. Audio-only days use
-        the reference boom against a lav instead. Reads only; the preview goes to the app's cache."""
+    def _play_mix(self, at, mute, solo, seconds=60):
         import numpy as np
         from .refpick import _read as rd
-        from .bwf import WavInfo, WavWriter
-        self.stop_play()
-        job = self.job
-        aligned = [a for a in (getattr(job, 'aligned', None) or []) if a.get('aligned') and not a.get('passthrough')]
-        if not aligned:
-            return dict(ok=False, why='Sync the day first - the comparison needs the aligned files.')
-        at = int(at)
-        n = int(seconds * TC.SR)
-        by_src = {a['source']: a for a in aligned}
-        # the sound file under the playhead that has an aligned twin (boom first)
-        snd = [c for c in self._covering(at, ('audio',)) if c['path'] in by_src or
-               (c.get('stamped_path') and c['stamped_path'] in by_src)]
-        if not snd:
-            nxt = sorted([c for c in self.p.clips if c['kind'] == 'audio' and c['include'] and c['start'] is not None
-                          and c['start'] > at and (c['path'] in by_src or (c.get('stamped_path') or '') in by_src)],
-                         key=lambda c: c['start'])
+        from .bwf import WavWriter
+        lanes = self.p.lanes()
+        audible = [l for l in lanes if l['key'] not in mute and (not solo or l['key'] in solo)]
+        if not audible:
+            return dict(ok=False, why='Every lane is muted.')
+        keys = {l['key'] for l in audible}
+        here = [c for c in self._covering(at) if (c.get('lane') or c['roll']) in keys]
+        if not here:
+            nxt = sorted([c for c in self.p.clips if c['include'] and c['start'] is not None and c['start'] > at
+                          and (c.get('lane') or c['roll']) in keys and media.total_audio_channels(c)], key=lambda c: c['start'])
             if not nxt:
-                return dict(ok=False, why='No aligned sound at or after the playhead.')
-            snd = [nxt[0]]
-            at = nxt[0]['start'] + TC.SR * 5
-        def rank(x):
-            roles = Project.clip_roles(x)
-            return (0 if 'boom' in roles else 1 if 'lav' in roles else 2, x['roll'])
-        c = sorted(snd, key=rank)[0]
-        roles = Project.clip_roles(c)
-        a = by_src.get(c['path']) or by_src.get(c.get('stamped_path'))
-        # the anchor: the camera's reference channel, else (audio only) the reference boom
-        ref = (self.settings.get('reference') or {})
-        cams = [x for x in self._covering(at, ('video',)) if media.total_audio_channels(x)]
-        anchor = None
-        if cams and self.settings.get('mode', 'auto') != 'audio':
-            cam = sorted(cams, key=lambda x: (x['roll'] not in (ref.get('rolls') or [ref.get('roll')]), x['roll']))[0]
-            anchor = rd(cam, int(ref.get('channel') or 0), at, n)
-            anchor_name = f"{cam['roll']} mic"
-            tgt_ch = next((i for i, r in enumerate(roles) if r == 'boom'), None)
-            if tgt_ch is None:
-                tgt_ch = next((i for i, r in enumerate(roles) if r in ('lav', 'plant')), 0)
-        else:
-            boom = next((i for i, r in enumerate(roles) if r == 'boom'), None)
-            lav = next((i for i, r in enumerate(roles) if r in ('lav', 'plant')), None)
-            if boom is None or lav is None:
-                return dict(ok=False, why='Needs a boom and a lav in the same file to compare on an audio-only day.')
-            anchor = rd(c, boom, at, n)
-            anchor_name = 'boom'
-            tgt_ch = lav
-        names = c.get('track_names') or {}
-        tgt_name = str(names.get(tgt_ch + 1) or names.get(str(tgt_ch + 1)) or f'track {tgt_ch + 1}')
-        before = rd(c, tgt_ch, at, n)
-        w = WavInfo(a['aligned'])
-        rel = at - int(a.get('start', c['start']))
-        after = np.zeros(n, np.float32)
-        lo, hi = max(0, rel), min(w.nframes, rel + n)
-        if hi > lo:
-            x = w.read(int(lo), int(hi - lo))
-            after[lo - rel:hi - rel] = x[:, tgt_ch] if x.ndim == 2 else x
-        def norm(x):
-            pk = float(np.abs(x).max()) or 1.0
-            return x / pk * 0.5
-        an, bf, af = norm(anchor), norm(before), norm(after)
-        if float(np.abs(bf).max()) < 1e-4 and float(np.abs(af).max()) < 1e-4:
-            return dict(ok=False, why='Silence there - move the playhead to where people talk.')
-        gap = np.zeros(int(0.4 * TC.SR), np.float32)
-        segA, segB = an + bf, an + af
-        seq = np.concatenate([segA, gap, segB, gap, segA, gap, segB]).astype(np.float32)
-        seq = seq / (float(np.abs(seq).max()) or 1.0) * 0.9
+                return dict(ok=False, why='No sound at the playhead on the lanes you have on.')
+            at = nxt[0]['start']
+            here = [c for c in self._covering(at) if (c.get('lane') or c['roll']) in keys]
+        end = max(c['start'] + c['length'] for c in here)
+        n = int(min(seconds * TC.SR, max(TC.SR // 2, end - at)))
+        mix = np.zeros(n, np.float32)
+        names = []
+        ref = self.settings.get('reference') or {}
+        for c in here:
+            if c['kind'] == 'video':
+                ch = int(ref.get('channel') or 0) if c['roll'] in (ref.get('rolls') or [ref.get('roll')]) else 0
+                ltc = (c.get('ltc') or {}).get('channel')
+                if ch == ltc:
+                    ch = 1 if media.total_audio_channels(c) > 1 else 0
+                picks = [ch]
+            else:
+                roles = Project.clip_roles(c)
+                picks = [i for i, r in enumerate(roles) if r == 'mix'][:1] or [i for i, r in enumerate(roles) if r == 'boom'][:1] \
+                    or [i for i, r in enumerate(roles) if r not in ('tc', 'empty')][:1] or [0]
+            try:
+                x = rd(c, picks[0], at, n)
+            except Exception:  # noqa: BLE001
+                continue
+            pk = float(np.abs(x).max())
+            if pk > 1e-5:
+                mix += x / pk * 0.5
+                names.append(c['roll'] if c['kind'] == 'video' else c['name'])
+        if not names:
+            return dict(ok=False, why='Silence there on the lanes you have on.')
+        mix = mix / (float(np.abs(mix).max()) or 1.0) * 0.9
         prev = os.path.join(CACHE, 'preview')
         os.makedirs(prev, exist_ok=True)
-        out = os.path.join(prev, 'ab.wav')
-        ww = WavWriter(out, len(seq), 2, TC.SR, 16)
-        ww.write_float(np.stack([seq, seq], 1))
+        out = os.path.join(prev, 'mix.wav')
+        ww = WavWriter(out, n, 1, TC.SR, 16)
+        ww.write_float(mix)
         ww.close()
         if sys.platform != 'darwin':
             return dict(ok=False, why='Playback works on the Mac.')
         self._player = subprocess.Popen(['afplay', out])
-        step = seconds + 0.4
-        sched = [(0, 'BEFORE'), (step, 'AFTER'), (2 * step, 'BEFORE'), (3 * step, 'AFTER')]
-        return dict(ok=True, **{'from': at}, dur=4 * seconds + 1.2, sched=sched,
-                    what=f"{anchor_name} + {tgt_name} from {c['name']}")
+        return dict(ok=True, dur=n / TC.SR, what=' + '.join(names), **{'from': at})
 
     def stop_play(self):
         p = getattr(self, '_player', None)

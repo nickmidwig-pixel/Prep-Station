@@ -40,7 +40,7 @@ print(f'{len(before)} original files fingerprinted')
 runs = [['run_pipeline.py'], ['run_pipeline.py', {'AAP2': '1'}], ['run_extras.py'], ['run_mixer_day.py'], ['run_two_days.py'], ['test_guard.py'],
         ['test_framerate.py'], ['test_slowmo.py'], ['test_refpick.py'], ['test_camera_copy.py'], ['test_transcript.py'],
         ['test_review.py'], ['test_canon_raw.py'], ['test_window_keys.py'], ['test_aap_panel.py'],
-        ['test_aap2_names.py'], ['test_layouts.py'], ['test_consensus.py'], ['shot_ui.py'], ['test_ab.py']]
+        ['test_aap2_names.py'], ['test_layouts.py'], ['test_consensus.py'], ['shot_ui.py']]
 for r in runs:
     t = time.time()
     env = dict(os.environ, **(r[1] if len(r) > 1 else {}))

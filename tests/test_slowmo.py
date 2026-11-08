@@ -9,14 +9,21 @@ from midwigsync import convert, safety, tc as TC
 
 D = '/home/claude/slowday'
 FF = convert.ffmpeg_exe()
-def mov(path, rate, secs, tc, audio=True):
+def mov(path, rate, secs, tc, audio=True, created=None, took=None):
+    """created: the camera clock at the start (ISO, UTC); took: seconds the take really lasted -> file mtime."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     cmd = [FF, '-y', '-v', 'error', '-f', 'lavfi', '-i', f'testsrc=size=160x90:rate={rate}']
     if audio:
         cmd += ['-f', 'lavfi', '-i', 'anoisesrc=sample_rate=48000:amplitude=0.1']
     cmd += ['-t', str(secs), '-timecode', tc, '-c:v', 'libx264', '-preset', 'ultrafast']
+    if created:
+        cmd += ['-metadata', f'creation_time={created}']
     cmd += (['-c:a', 'pcm_s24le'] if audio else ['-an']) + [path]
     subprocess.run(cmd, check=True)
+    if created and took is not None:
+        import datetime as dt
+        t0 = dt.datetime.fromisoformat(created.replace('Z', '+00:00')).timestamp()
+        os.utime(path, (t0 + took, t0 + took))
 
 if not os.path.exists(D + '/.made'):
     shutil.rmtree(D, ignore_errors=True)
@@ -31,12 +38,20 @@ if not os.path.exists(D + '/.made'):
     mov(f'{D}/C_FX3/C0003.MP4', '24000/1001', 6, '10:00:50:00', audio=False)   # ... but the next starts 10 s later
     mov(f'{D}/C_FX3/C0004.MP4', '24000/1001', 6, '10:02:00:00', audio=False)   # silent, real time: stays
     mov(f'{D}/D_GOPRO/GX010001.MP4', '30000/1001', 6, '10:00:20:00')           # 29.97 on a 23.976 day
+    # E: a Canon-style card. Clock stamps in the files; TC jam-synced to time of day (local = UTC-5 here is not
+    # needed: the tells compare clips on the same card with each other, and span against the file's own clock).
+    mov(f'{D}/E_C500/E001C001.MOV', '24000/1001', 8, '14:00:00:00', created='2026-11-08T14:00:00Z', took=8)
+    mov(f'{D}/E_C500/E001C002.MOV', '24000/1001', 25, '14:01:00:00', audio=False, created='2026-11-08T14:01:00Z', took=10)  # S&F: 25 s of picture in 10 s
+    mov(f'{D}/E_C500/E001C003.MOV', '24000/1001', 8, '14:05:00:00', created='2026-11-08T14:05:00Z', took=8)
+    mov(f'{D}/E_C500/E001C004.MOV', '24000/1001', 8, '03:12:40:00', audio=False, created='2026-11-08T14:06:00Z')  # S&F in Rec Run: TC nowhere near the clock
+    mov(f'{D}/E_C500/E001C005.MOV', '24000/1001', 8, '14:07:00:00', audio=False, created='2026-11-08T14:07:00Z', took=8)  # silent but real time: stays
     open(D + '/.made', 'w').write('1')
 
 p = Project(); p.add_paths([D]); p.analyze()
 want = {'A001C001.MOV': None, 'A001C002.MOV': None, 'B001C001.MOV': None, 'B001C002.MOV': 'timebase',
         'C0001.MP4': 'in_camera', 'C0002.MP4': 'likely', 'C0003.MP4': None, 'C0004.MP4': 'likely' if False else None,
-        'GX010001.MP4': 'rate'}
+        'GX010001.MP4': 'rate', 'E001C001.MOV': None, 'E001C002.MOV': 'clock', 'E001C003.MOV': None,
+        'E001C004.MOV': 'recrun', 'E001C005.MOV': None}
 ok = True
 print('frame rate:', p.fps_info['label'], p.fps_info['status'], '|', p.fps_info['reason'])
 ok &= p.fps_info['label'] == '23.976' and p.fps_info['status'] == 'ok'
@@ -62,15 +77,15 @@ j.run()
 ok &= not errs
 main = open(f'{out}/TIMELINES/SLOWDAY_SYNC_ISO.xml').read() if os.path.exists(f'{out}/TIMELINES/SLOWDAY_SYNC_ISO.xml') else ''
 slow = open(f'{out}/TIMELINES/SLOWDAY_SLOW_MOTION.xml').read()
-slow_names = ['B001C002.MOV', 'C0001.MP4', 'C0002.MP4', 'GX010001.MP4']
+slow_names = ['B001C002.MOV', 'C0001.MP4', 'C0002.MP4', 'GX010001.MP4', 'E001C002.MOV', 'E001C004.MOV']
 in_main = [n for n in slow_names if n in main]
 in_slow = [n for n in slow_names if n in slow]
 print('  sync XML has slow clips:', in_main or 'none', '| normal clips in sync XML:', all(n in main for n in ('A001C001.MOV', 'B001C001.MOV', 'C0003.MP4', 'C0004.MP4')))
 print('  slow-motion XML has:', in_slow, '| markers:', slow.count('<marker>'))
-ok &= not in_main and in_slow == slow_names and slow.count('<marker>') == 4
+ok &= not in_main and in_slow == slow_names and slow.count('<marker>') == 6
 import re
 starts = {m.group(1): int(m.group(2)) for m in re.finditer(r'<clipitem id="[^"]+"><name>([^<]+)</name>.*?<start>(\d+)</start>', slow)}
-order = [starts[n] for n in ['C0001.MP4', 'GX010001.MP4', 'B001C002.MOV', 'C0002.MP4']]
+order = [starts[n] for n in ['C0001.MP4', 'GX010001.MP4', 'B001C002.MOV', 'C0002.MP4', 'E001C002.MOV']]
 print('  shot order kept:', order == sorted(order))
 ok &= order == sorted(order)
 rep = open(j.report_path).read()

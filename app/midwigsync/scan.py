@@ -99,6 +99,30 @@ def shoot_day(c):
     return (d - dt.timedelta(hours=NIGHT_HOURS)).date().isoformat(), bool(c.get('created_meta'))
 
 
+def _clock_samples(c):
+    """The camera's clock at the start of the clip, as samples since midnight (local), or None."""
+    if not c.get('created_meta'):
+        return None
+    d = _local(c.get('created'))
+    if d is None or d.year < 2000:
+        return None
+    return int((d.hour * 3600 + d.minute * 60 + d.second) * TC.SR)
+
+
+def _recording_span(c):
+    """Seconds the take really took, from the clip's creation stamp to the file's last write; None when the copy
+    didn't keep the write time (end before start, or more than a day apart)."""
+    d = _local(c.get('created')) if c.get('created_meta') else None
+    if d is None:
+        return None
+    try:
+        end = dt.datetime.fromtimestamp(os.path.getmtime(c['path']))
+    except OSError:
+        return None
+    span = (end - d).total_seconds()
+    return span if 0 < span < 86400 else None
+
+
 def track_number(roll):
     m = re.match(r'^(\d{1,3})', roll)
     return int(m.group(1)) if m else None
@@ -625,6 +649,40 @@ class Project:
                                        f'({float(fps) / float(cap) * 100:.0f}% speed).')
             if user and not c['slowmo']:
                 c['slowmo'] = dict(kind='marked', speed=None, why='Marked as slow motion by you.')
+        # Slow & fast motion with playback at the project rate and no capture rate in the file (Canon S&F plays
+        # at 23.98 and, per Canon's manuals, records no sound and forces timecode to Rec Run). Two tells that need
+        # no camera-specific metadata, used only on silent clips:
+        #   clock : the file's own clock says how long the take really took (creation stamp -> last write);
+        #           a clip that plays much longer than that was shot faster than it plays
+        #   recrun: on a jam-synced day every clip's timecode sits a fixed distance from the camera's clock;
+        #           an S&F clip in Rec Run doesn't
+        by_roll = defaultdict(list)
+        for c in self.clips:
+            if c['kind'] == 'video' and not c.get('duplicate_of'):
+                by_roll[(c['roll'], c.get('day'))].append(c)
+        for cl in by_roll.values():
+            deltas = []
+            for c in cl:
+                c['_clock'] = _clock_samples(c)
+                if c['_clock'] is not None and c.get('orig_start') is not None and c.get('audio_streams') and not c['slowmo']:
+                    deltas.append(c['orig_start'] - c['_clock'])
+            d0 = float(np.median(deltas)) if deltas else None
+            for c in cl:
+                if c['slowmo'] or c.get('audio_streams') or c.get('slowmo_user') is False:
+                    continue
+                span = _recording_span(c)
+                if span is not None and span > 1.0 and c['length'] > (span * 1.3 + 2) * TC.SR:
+                    c['slowmo'] = dict(kind='clock', speed=round(span * TC.SR / c['length'], 2),
+                                       why=f'No sound, and the camera took {span:.0f} s to record it but it plays for '
+                                           f'{c["length"] / TC.SR:.0f} s. Shot faster than it plays.')
+                elif d0 is not None and c['_clock'] is not None and c.get('orig_start') is not None \
+                        and abs((c['orig_start'] - c['_clock']) - d0) > 60 * TC.SR:
+                    c['slowmo'] = dict(kind='recrun', speed=None,
+                                       why='No sound, and its timecode does not line up with the camera clock the way '
+                                           'the other clips on this card do (slow & fast motion switches Canon to Rec '
+                                           'Run). Looks like slow motion.')
+        for c in self.clips:
+            c.pop('_clock', None)
         # no metadata: a silent clip whose timecode runs into the next clip on the same card can't be real time
         rolls = defaultdict(list)
         for c in self.clips:
