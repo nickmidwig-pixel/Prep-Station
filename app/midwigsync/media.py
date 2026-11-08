@@ -845,7 +845,7 @@ def find_media(paths, skip_dirs=()):
     skip_names = {'sub', 'thmbnl', 'take', 'general', 'proxy', 'proxies', '.spotlight-v100', '.fseventsd',
                   '.trashes', '.ds_store', 'thumbnails', 'thumbnail',
                   'trash', 'undo'}       # Sound Devices: deleted takes and undo copies are not part of the day
-    out_markers = ('ISO_ALIGNED', 'POLY_ALIGNED', 'POLY_UNALIGNED', 'AAP_RENDERS', 'REF_', 'TC_FIXED', '_MIDWIG', '_SYNC_WORK', 'CONVERTED_48K', 'EDITORIAL', 'SPLIT_MONO')
+    out_markers = ('ISO_ALIGNED', 'POLY_ALIGNED', 'POLY_UNALIGNED', 'AAP_RENDERS', 'REF_', 'TC_FIXED', '_MIDWIG', 'WORK FILES (not for the edit)', '_SYNC_WORK', 'CONVERTED_48K', 'EDITORIAL', 'SPLIT_MONO')
     skip_dirs = [os.path.realpath(s) for s in skip_dirs]
 
     def consider(p):
@@ -876,7 +876,7 @@ def find_media(paths, skip_dirs=()):
                 dirs[:] = []
                 continue
             visited.add(rr)
-            if any(os.path.isdir(os.path.join(root, d)) for d in ('_SYNC_WORK', '_MIDWIG')):   # our own output
+            if any(os.path.isdir(os.path.join(root, d)) for d in ('_SYNC_WORK', '_MIDWIG', 'WORK FILES (not for the edit)')):   # our own output
                 dirs[:] = []
                 continue
             if any(rr == s or rr.startswith(s + os.sep) for s in skip_dirs):

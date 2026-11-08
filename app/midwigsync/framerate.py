@@ -21,7 +21,7 @@ DEFAULT = '23.976'
 CHOICES = ['23.976', '24', '25', '29.97', '29.97 DF', '30', '50', '59.94', '59.94 DF', '60']
 ZAX = re.compile(r'zaxcom|nomad|\bdeva\b|\bnova\b|\bmaxx\b|\boasis\b|\bzfr|zmt', re.I)
 REPORT_EXT = {'.csv', '.txt', '.pdf', '.tsv', '.xml', '.html', '.htm', '.rtf'}
-SKIP_DIRS = ('_SYNCED', '_SYNC_WORK', '_MIDWIG')
+SKIP_DIRS = ('_SYNCED', '_SYNC_WORK', '_MIDWIG', 'WORK FILES (not for the edit)')
 
 
 def label(fps, df=False):

@@ -86,7 +86,6 @@
           <div class="row">
             <button class="btn small" id="playBtn" title="Play from the playhead (Space or L; K stops)">▶ Play</button>
             <button class="btn small ghosted" id="backBtn" title="Back 5 seconds (J)">↺ 5 s</button>
-            <button class="btn small ghosted" id="rawBtn" hidden title="Canon RAW: Resolve renders a small copy of this clip into Prep Station's cache so you can see the picture anywhere in it. ⌥-click: every RAW clip of the day. The original is only read.">Make playable</button>
           </div>
           <div class="ptc"><span id="phWhat">Click the ruler or an empty spot to move the playhead. ← → move a frame, ⇧← ⇧→ a second.</span></div>
           <div class="selline" id="selLine" hidden></div>
@@ -167,17 +166,9 @@
 
     <div class="block">
       <h2>Sync to</h2>
-      <div class="seg" role="radiogroup" aria-label="What to align to" id="modeSeg">
-        <button data-mode="auto" role="radio">Auto</button>
-        <button data-mode="camera" role="radio">Camera mic</button>
-        <button data-mode="audio" role="radio">Audio only</button>
-      </div>
-      <p class="hint" id="modeHint"></p>
-      <div class="row" id="refRow">
-        <select id="refRoll" aria-label="Reference camera roll"></select>
-        <select id="refCh" aria-label="Reference channel"></select>
-      </div>
-      <p class="refnote" id="refNote"></p>
+      <p class="syncline"><span id="syncText">Drop a shoot day to see what it syncs to.</span> <button class="linkbtn" id="syncChange" hidden>Change</button></p>
+      <div class="chooser" id="syncChooser" hidden role="radiogroup" aria-label="What to sync to"></div>
+      <p class="refnote" id="refNote" hidden></p>
     </div>
 
     <div class="block" id="fpsBlock">
@@ -251,7 +242,6 @@
       <div class="row done-row" id="doneRow" hidden>
         <button class="btn small" id="showOut">Show in Finder</button>
         <button class="btn small ghosted" id="openReport">Open report</button>
-        <button class="btn small ghosted" id="openReadme">Read me</button>
       </div>
       <p class="msg" id="msg"></p>
     </div>

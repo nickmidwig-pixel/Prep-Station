@@ -84,7 +84,7 @@ def write_report(path, job, project, sync_report, stamped, aap_info, aligned, ve
         w('')
     slow = settings.get('_slow') or []
     if slow:
-        w(f'SLOW MOTION + OTHER FRAME RATES (not synced, sound not used): {len(slow)} clip(s) -> EDITORIAL/*_SLOW_MOTION.xml')
+        w(f'SLOW MOTION + OTHER FRAME RATES (not synced, sound not used): {len(slow)} clip(s) -> TIMELINES/*_SLOW_MOTION.xml')
         for c in sorted(slow, key=lambda c: (c['roll'], c.get('orig_start') or 0, c['name'])):
             sm = c.get('slowmo') or {}
             tcs = TC.samples_to_tc(c['orig_start'], c.get('fps') or fps) if c.get('orig_start') is not None else 'no TC'

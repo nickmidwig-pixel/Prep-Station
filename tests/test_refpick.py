@@ -15,7 +15,7 @@ SRC, D = '/home/claude/testday', '/home/claude/hopday'
 FF = convert.ffmpeg_exe()
 if not os.path.exists(D + '/.made'):
     shutil.rmtree(D, ignore_errors=True)
-    shutil.copytree(SRC, D, ignore=shutil.ignore_patterns('*_SYNCED', '_SYNC_WORK', 'truth*.json'))
+    shutil.copytree(SRC, D, ignore=shutil.ignore_patterns('*_SYNCED', '_SYNC_WORK', 'WORK FILES (not for the edit)', 'truth*.json'))
     p = Project(); p.add_paths([D + '/SOUND'])
     snd = [c for c in p.clips if c['kind'] == 'audio' and c['start'] is not None]
     cams = [os.path.join(dp, f) for dp, _, fs in os.walk(D) for f in fs if f.endswith('.MXF') and 'FX6' in dp]

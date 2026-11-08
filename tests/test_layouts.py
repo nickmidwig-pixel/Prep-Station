@@ -151,7 +151,7 @@ def main():
     assert sets['C'] == {('Boom', 'Lavs', 'BOOM', 'Lav1 Alex', 'Lav2 Ellie', 'Lav3 Emma')}, sets['C']
     n = check_audio(polys)
     print(f'  {n} track checks: right tone on the right named track, silence elsewhere')
-    xml = open(glob.glob(os.path.join(OUT, 'EDITORIAL', '*_SYNC_ALN.xml'))[0]).read()
+    xml = open(glob.glob(os.path.join(OUT, 'TIMELINES', '*_SYNC_ALN.xml'))[0]).read()
     for nm in ['BOOM', 'LAV -6db', 'MIX (2)', 'BOOM1', 'Lav3 Emma']:
         assert f'<name>{nm}</name>' in xml, nm
     print('  XML carries the track names')

@@ -55,7 +55,7 @@ def lag(a, b, maxlag=4800):
 
 
 def main():
-    job = json.load(open('_SYNC_WORK/job.json'))
+    job = json.load(open('WORK FILES (not for the edit)/job.json'))
     ref = job.get('settings', {}).get('_ref') or {}
     rolls = set(ref.get('rolls') or [ref.get('roll')])
     refch = int(ref.get('channel', 0))

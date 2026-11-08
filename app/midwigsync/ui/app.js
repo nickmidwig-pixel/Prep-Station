@@ -15,7 +15,7 @@
   const STEP_MAP = { 'Building aligned ISOs': 'Auto-Align Post', 'Checking alignment': 'Auto-Align Post' };
 
   const S = { project: null, settings: {}, running: false, scanning: false, sel: null, view: null, done: null, day: null, checks: [],
-    expanded: new Set(), collapsed: new Set(), ph: null, playing: null, picked: new Set(), undo: null, redo: null,
+    expanded: new Set(), collapsed: new Set(), openTracks: new Set(), ph: null, playing: null, picked: new Set(), undo: null, redo: null,
     thumbs: {}, thumbAsked: new Set() };
   const api = () => (window.pywebview && window.pywebview.api) || null;
   const APP = () => (S.app && S.app.name) || 'Prep Station';
@@ -455,18 +455,7 @@
     const img = $('frame');
     if (r && r.ok) { img.src = r.img; img.classList.add('on'); $('frameNote').textContent = r.label || ''; img.classList.toggle('pv', !!r.preview); if (r.why) $('phWhat').textContent = r.why; }
     else { img.classList.remove('on'); $('frameNote').textContent = (r && r.why) || 'No picture here'; }
-    // Canon RAW with no viewing copy yet: offer to have Resolve make one
-    const rb = $('rawBtn');
-    rb.hidden = !(r && r.raw) || S.running;
-    rb.dataset.cid = r && r.cid != null ? r.cid : '';
   }
-  $('rawBtn').addEventListener('click', async (e) => {
-    const cid = $('rawBtn').dataset.cid;
-    const r = await call('raw_copies', cid ? [Number(cid)] : [], e.altKey);
-    if (!r || !r.ok) { $('phWhat').textContent = (r && r.why) || 'Could not start Resolve.'; return; }
-    if (!r.n) { $('phWhat').textContent = r.why || 'Already playable.'; showFrame(S.ph); return; }
-    $('rawBtn').disabled = true;
-  });
   async function togglePlay() {
     if (S.playing) { stopPlay(); return; }
     if (S.ph == null) { const sp = span(); if (!sp) return; S.ph = sp[0]; }
@@ -556,11 +545,26 @@
     if (s.note && s.offset != null && !moved(c)) out.push(['', `${(s.offset / 48).toFixed(0)} ms off, Auto-Align fixes it`]);
     return out;
   }
+  // Tracks (2.0): one quiet summary per sound file - "4 tracks · boom, lav + 2 safety copies" - that opens (▸)
+  // into the track list. Editors see what the file is; the detail is one click away.
+  function trackSummary(roles) {
+    const n = {}; roles.forEach((r) => { n[r] = (n[r] || 0) + 1; });
+    const word = { boom: ['boom', 'booms'], lav: ['lav', 'lavs'], plant: ['plant', 'plants'], mix: ['mix', 'mixes'], tc: ['timecode', 'timecode'], multi: ['track', 'tracks'] };
+    const main = ['boom', 'plant', 'lav', 'mix', 'tc', 'multi'].filter((r) => n[r]).map((r) => n[r] > 1 ? `${n[r]} ${word[r][1]}` : word[r][0]);
+    const safe = n.safety ? `+ ${n.safety} safety ${n.safety > 1 ? 'copies' : 'copy'}` : '';
+    return [main.join(', '), safe].filter(Boolean).join(' ');
+  }
   function tracksCell(c) {
     if (c.kind === 'video') return c.channels ? `<span class="trk cam">${c.channels} ch</span>` : '<span class="trk">no audio</span>';
     const roles = c.roles || [];
-    const names = c.track_names || {};
-    return roles.map((r, i) => `<span class="trk ${r}" title="${esc(r)}">${esc(names[i + 1] || names[String(i + 1)] || (roles.length === 1 ? r : 'ch' + (i + 1)))}</span>`).join('');
+    if (roles.length <= 1) return `<span class="trk ${roles[0] || ''}">${esc(ROLE_LABEL[roles[0]] || roles[0] || 'mono')}</span>`;
+    const open = S.openTracks.has(c.id);
+    return `<button class="trkbtn" data-trk="${c.id}" aria-expanded="${open}"><b>${roles.length} tracks</b><span>${esc(trackSummary(roles))}</span><i>${open ? '▾' : '▸'}</i></button>`;
+  }
+  function trackRows(c) {
+    const roles = c.roles || [], names = c.track_names || {};
+    return `<tr class="trkrow" data-of="${c.id}"><td></td><td colspan="5"><div class="trklist">` + roles.map((r, i) =>
+      `<span class="trk ${r}"><em>${i + 1}</em>${esc(names[i + 1] || names[String(i + 1)] || 'ch' + (i + 1))}<small>${esc(ROLE_LABEL[r] || r)}</small></span>`).join('') + '</div></td></tr>';
   }
   function renderTable() {
     const tb = $('clipRows');
@@ -589,6 +593,7 @@
           <td class="num">${tc}</td><td class="num">${c.dur}</td>
           <td class="tracks">${tracksCell(c)}</td>
           <td class="status">${chipHtml || `<span class="txt">${esc(st.t)}</span>`}</td></tr>`);
+        if (c.kind === 'audio' && S.openTracks.has(c.id)) html.push(trackRows(c));
       }
     }
     tb.innerHTML = html.join('');
@@ -621,16 +626,13 @@
     if (c.kind === 'video') {
       if (ln && ln.rolls.length > 1) out.push(c.roll);
       out.push([c.camera, c.codec && !/not decodable/.test(c.codec) ? c.codec : (c.flags.includes('raw') || /CRM|BRAW|R3D/i.test(c.name) ? 'RAW' : '')].filter(Boolean).join(' '));
-      if (c.width && c.height) out.push(`${c.width}×${c.height}`);
-      if (c.fps) out.push(`${c.fps} fps`);
-      out.push(c.channels ? `${c.channels} × audio` : 'no audio');
+      if (c.fps && S.project && String(c.fps) !== String(S.project.fps)) out.push(`${c.fps} fps`);
     } else {
-      out.push(`${c.channels} track${c.channels === 1 ? '' : 's'}`);
-      if (c.bits || c.sr) out.push([c.bits ? `${c.bits}-bit` : '', c.sr ? `${c.sr / 1000} kHz` : ''].filter(Boolean).join(' '));
       if (c.scene || c.take) out.push(`scene ${c.scene || '–'} take ${c.take || '–'}`);
+      if (c.sr && c.sr !== 48000) out.push(`${c.sr / 1000} kHz`);
     }
     if (c.size) out.push(gb(c.size));
-    if (c.tc_source) out.push(`TC from ${c.tc_source === 'qt-tmcd' ? 'tmcd' : c.tc_source}`);
+    if (!c.tc_source && c.kind === 'audio') out.push('no timecode');
     return out.filter(Boolean).join(' · ');
   }
   function tableOrder() {
@@ -650,6 +652,13 @@
   $('clipRows').addEventListener('click', (e) => {
     const tr = e.target.closest('tr');
     if (!tr || e.target.matches('input')) return;
+    const tb = e.target.closest('[data-trk]');
+    if (tb) {                       // open / close a sound file's track list
+      const id = +tb.dataset.trk;
+      if (S.openTracks.has(id)) S.openTracks.delete(id); else S.openTracks.add(id);
+      renderTable(); return;
+    }
+    if (tr.dataset.of) return;
     if (tr.dataset.grp) {
       const k = tr.dataset.grp;
       if (S.collapsed.has(k)) S.collapsed.delete(k); else S.collapsed.add(k);
@@ -858,32 +867,43 @@
     const row = document.querySelector(`tr[data-id="${id}"]`); if (row) row.scrollIntoView({ block: 'nearest' });
   }
 
+  // Sync to (2.0): one sentence saying what the day syncs to, and a Change link with only the real choices:
+  // each camera body, or sound only. The app always picks the channel itself.
   function renderMode() {
-    const m = S.settings.mode || 'auto', eff = effMode();
-    document.querySelectorAll('#modeSeg [data-mode]').forEach((b) => {
-      b.setAttribute('aria-checked', String(b.dataset.mode === m));
-      b.disabled = S.running || (b.dataset.mode === 'camera' && !hasCamRef());
-    });
-    const P = S.project;
-    let hint = '';
-    if (!P || !P.clips.length) hint = 'Auto picks a camera mic when there is one, otherwise the boom.';
+    const m = S.settings.mode || 'auto', eff = effMode(), P = S.project;
+    const chosen = m !== 'auto' && !(S.settings.reference || {}).auto;
+    const cams = lanesAll().filter((l) => l.kind === 'camera');
+    let text = '';
+    if (!P || !P.clips.length) text = 'Drop a shoot day to see what it syncs to.';
     else if (eff === 'camera') {
-      const r = (S.settings.reference || {}).roll;
-      hint = m === 'auto' ? `Camera sound found, so everything aligns to ${r || 'the camera'}.` : `Everything aligns to ${r || 'the camera'}.`;
+      const ln = refLane();
+      const who = ln ? ln.label : ((S.settings.reference || {}).roll || 'the camera');
+      text = `Everything syncs to ${who}’s onboard mic` + (m === 'camera' && chosen ? ' (your choice).' : '.');
     } else {
       const roles = new Set(dayClips().filter((c) => c.kind === 'audio' && c.include).flatMap((c) => c.roles || []));
       const ref = roles.has('boom') ? 'the boom' : roles.has('plant') ? 'the plant mic' : 'the main lav';
-      hint = (m === 'audio' ? 'Audio only: ' : 'No camera sound, so audio only: ') +
-        `each take aligns to ${ref}, falling back to the next mic when it drops out. Mix and timecode tracks pass through untouched.`;
+      text = (m === 'audio' ? `Sound only (your choice): each take syncs to ${ref}.` : `No usable camera sound, so each take syncs to ${ref}.`);
     }
-    $('modeHint').textContent = hint;
-    $('refRow').hidden = eff !== 'camera';
-    $('refNote').hidden = eff !== 'camera';
+    $('syncText').textContent = text;
+    const canChange = !!(P && P.clips.length) && !S.running && (cams.length > 1 || (cams.length === 1));
+    $('syncChange').hidden = !canChange;
+    if (!canChange) $('syncChooser').hidden = true;
+    // the chooser
+    const cur = eff === 'audio' ? 'audio' : (refLane() || {}).key;
+    const opts = cams.map((l) => ({ key: l.key, label: l.label, sub: l.sub || '' }));
+    if (dayClips().some((c) => c.kind === 'audio')) opts.push({ key: 'audio', label: 'Sound only', sub: 'no camera mic' });
+    $('syncChooser').innerHTML = opts.map((o) => `<button role="radio" data-sync="${esc(o.key)}" aria-checked="${String(o.key === cur)}"><b>${esc(o.label)}</b>${o.sub ? `<span>${esc(o.sub)}</span>` : ''}</button>`).join('')
+      + (m !== 'auto' ? '<button data-sync="auto" class="auto">Let Prep Station pick</button>' : '');
+    $('syncChooser').querySelectorAll('[data-sync]').forEach((b) => b.addEventListener('click', async () => {
+      $('syncChooser').hidden = true;
+      applyState(await call('set_sync_to', b.dataset.sync));
+    }));
+    // what the listening found (after a sync)
+    const pk = S.refPick;
+    $('refNote').hidden = !(eff === 'camera' && pk && pk.why);
+    if (pk && pk.why) $('refNote').textContent = `Listened: channel ${pk.channel + 1} is the onboard mic (${pk.why}).`;
   }
-  document.querySelectorAll('#modeSeg [data-mode]').forEach((b) => b.addEventListener('click', async () => {
-    if (b.disabled) return;
-    applyState(await call('set_setting', 'mode', b.dataset.mode));
-  }));
+  $('syncChange').addEventListener('click', () => { $('syncChooser').hidden = !$('syncChooser').hidden; });
 
   // preflight: refreshed a moment after anything changes
   let checkT = null;
@@ -942,20 +962,6 @@
     $('outDirText').textContent = (dn ? dn.out_dir : st.out_dir) || 'Choose where results go';
     $('outDir').title = dn ? 'Each day gets its own folder. Click to change where they go.' : 'Change the output folder';
     $('tcFps').textContent = P ? `${P.fps}${P.df ? ' DF' : ''} fps` : '';
-    // reference
-    const cams = P ? rolls().filter((r) => r.kind === 'camera') : [];
-    const ref = st.reference || {};
-    const auto = !ref.roll || ref.auto;
-    $('refRoll').innerHTML = cams.length ? `<option value="auto" ${auto ? 'selected' : ''}>Best onboard mic (listen)</option>` + cams.map((r) => `<option value="${esc(r.name)}" ${!auto && r.name === ref.roll ? 'selected' : ''}>${esc(r.name)}${r.camera ? ' (' + esc(r.camera) + ')' : ''}</option>`).join('')
-      : '<option>No camera yet</option>';
-    $('refRoll').disabled = !cams.length;
-    const nch = P ? Math.max(1, ...P.clips.filter((c) => c.roll === ref.roll).map((c) => c.channels || 1)) : 1;
-    $('refCh').innerHTML = Array.from({ length: Math.max(nch, 1) }, (_, i) => `<option value="${i}" ${i === (ref.channel || 0) ? 'selected' : ''}>Ch ${i + 1}</option>`).join('');
-    $('refCh').disabled = !cams.length;
-    $('refCh').hidden = auto;
-    $('refNote').textContent = auto ? (S.refPick ? `Picked ${S.refPick.roll} ch ${S.refPick.channel + 1}: ${S.refPick.why}.`
-      : 'When you sync, every camera channel is compared with the recorder’s mics. The onboard mic that matches best wins. A channel that’s the mixer’s feed, timecode or silence is never used.')
-      : 'Chosen by you.';
     renderMode();
     renderFps();
     // toggles
@@ -1006,7 +1012,7 @@
     ga.textContent = `Sync all ${ds.length} days, one folder each`;
     ga.disabled = S.scanning || fpsAsk();
     document.body.classList.toggle('running', S.running);
-    document.querySelectorAll('[data-set], #refRoll, #refCh, #jobName, #outDir, #addMore, #clearAll').forEach((el) => { el.disabled = S.running || (el.id === 'refRoll' && !cams.length); });
+    document.querySelectorAll('[data-set], #jobName, #outDir, #addMore, #clearAll').forEach((el) => { el.disabled = S.running; });
     $('undoBtn').disabled = !S.undo || S.running || S.scanning;
     $('redoBtn').disabled = !S.redo || S.running || S.scanning;
     $('undoBtn').title = S.undo ? `Undo ${S.undo} (⌘Z)` : 'Nothing to undo (⌘Z)';
@@ -1036,8 +1042,6 @@
     applyState(await call('set_setting', k, v));
   }));
   $('jobName').addEventListener('change', async (e) => applyState(await call('set_setting', 'job_name', e.target.value)));
-  $('refRoll').addEventListener('change', async (e) => { S.refPick = null; applyState(await call('set_reference', e.target.value, 0)); });
-  $('refCh').addEventListener('change', async (e) => applyState(await call('set_reference', $('refRoll').value, +e.target.value)));
   $('outDir').addEventListener('click', async () => applyState(await call('choose_output')));
   $('chooseFolders').addEventListener('click', () => call('choose_folders'));
   $('chooseFiles').addEventListener('click', () => call('choose_files'));
@@ -1068,7 +1072,6 @@
   $('goAll').addEventListener('click', () => go('all'));
   $('showOut').addEventListener('click', () => S.done && call('open_path', S.done.out));
   $('openReport').addEventListener('click', () => S.done && call('open_path', S.done.report));
-  $('openReadme').addEventListener('click', () => S.done && call('open_path', `${S.done.out}/READ ME.txt`));
   $('aapContinue').addEventListener('click', () => call('aap_continue'));
   $('aapPress').addEventListener('click', () => { $('aapLead').textContent = 'Opening the Auto-Align Post panel and pressing Render…'; call('aap_press_again'); });
   $('copyDir').addEventListener('click', () => { call('copy_text', $('aapDir').dataset.full || $('aapDir').textContent); $('copyDir').textContent = 'Copied'; setTimeout(() => { $('copyDir').textContent = 'Copy'; }, 1500); });
@@ -1157,14 +1160,6 @@
     },
     aap_hint: (d) => { const el = $('aapLead'); if (el) el.textContent = d.text; toast(d.text.split('\n')[0]); },
     aap_done: () => { $('aapCard').hidden = true; },
-    rawview: (d) => {
-      $('phWhat').textContent = d.msg || '';
-      if (d.state === 'done' || d.state === 'error') {
-        $('rawBtn').disabled = false;
-        if (S.ph != null) showFrame(S.ph);
-        if (d.state === 'done') toast(d.msg);
-      }
-    },
     side_progress: (d) => {         // the transcript runs alongside Auto-Align: its own line in the step list
       const li = document.querySelector('#steps li[data-key="transcribe"]');
       if (!li) return;

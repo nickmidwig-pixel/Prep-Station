@@ -161,7 +161,18 @@ table.clips { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 select {
   background: var(--well); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 8px; min-width: 0;
 }
-#refRoll { flex: 1; }
+/* Sync to (2.0): one line + a small chooser */
+.syncline { margin: 4px 0 6px; font-size: 13px; line-height: 1.4; color: var(--paper); }
+.linkbtn { background: none; border: 0; padding: 0 0 0 6px; color: var(--muted); font-size: 12px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.linkbtn:hover { color: var(--paper); }
+.chooser { display: grid; gap: 6px; margin: 4px 0 8px; }
+.chooser button { display: flex; align-items: baseline; gap: 8px; text-align: left; background: var(--well); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 7px 10px; cursor: pointer; color: var(--paper); font-size: 12.5px; }
+.chooser button span { color: var(--muted); font-size: 11.5px; }
+.chooser button[aria-checked="true"] { border-color: var(--paper); }
+.chooser button[aria-checked="true"]::before { content: '✓'; font-size: 11px; }
+.chooser button.auto { background: none; color: var(--muted); border-style: dashed; }
+.chooser button:hover { border-color: var(--muted); }
 .path {
   width: 100%; text-align: left; background: var(--well); border: 1px solid var(--line); border-radius: var(--r);
   padding: 8px 10px; cursor: pointer; font-size: 12px; color: var(--paper); direction: rtl; overflow: hidden;
@@ -498,3 +509,15 @@ body.running .steps .pick { pointer-events: none; opacity: .7; }
 #steps li.busy .state { color: var(--fix); font-variant-numeric: tabular-nums; }
 
 .review .why { color: var(--fix); font-size: 12.5px; margin: 2px 0 8px; }
+
+/* sound-file tracks: summary button + the list it opens (2.0) */
+.trkbtn { display: inline-flex; align-items: baseline; gap: 6px; background: none; border: 0; padding: 0; cursor: pointer; color: var(--paper); font-size: 12px; white-space: nowrap; max-width: 100%; }
+.trkbtn b { font-weight: 500; }
+.trkbtn span { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
+.trkbtn i { font-style: normal; color: var(--muted); font-size: 10px; }
+.trkbtn:hover b { text-decoration: underline; text-underline-offset: 2px; }
+tr.trkrow td { padding: 0 8px 8px; border-top: 0; }
+.trklist { display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 6px 8px; background: var(--well); border-radius: var(--r); }
+.trklist .trk { display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 7px; line-height: 16px; }
+.trklist .trk em { font-style: normal; color: var(--muted); font-size: 10px; }
+.trklist .trk small { color: var(--muted); font-size: 10px; }

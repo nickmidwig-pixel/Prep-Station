@@ -3,12 +3,15 @@ output folders don't carry the name, so renaming never changes what you deliver.
 import os
 
 APP_NAME = 'Prep Station'
-APP_VERSION = '1.8'
+APP_VERSION = '2.0'
 BUNDLE_ID = 'com.midwigproductions.prepstation'
 
 OUT_SUFFIX = '_SYNCED'          # <job>_SYNCED next to the sound folders
-WORK_DIR = '_SYNC_WORK'         # inside it: caches, plans, logs, job.json
-OLD_WORK_DIRS = ('_MIDWIG',)    # output folders from earlier versions
+WORK_DIR = 'WORK FILES (not for the edit)'   # report, corrected-TC sound copies, plans, caches, logs; sorts last
+OLD_WORK_DIRS = ('_MIDWIG', '_SYNC_WORK')     # work folders from earlier versions
+TIMELINES_DIR = 'TIMELINES'
+TRANSCRIPT_DIR = 'TRANSCRIPT'
+SOUND_REPORT_DIR = 'SOUND REPORT'
 
 SUPPORT = os.path.expanduser(f'~/Library/Application Support/{APP_NAME}')
 CACHE = os.path.expanduser(f'~/Library/Caches/{APP_NAME}')

@@ -122,7 +122,7 @@ def _overlap(a0, a1, b0, b1):
     return max(0, min(a1, b1) - max(a0, b0))
 
 
-def pick_camera_reference(project, log=print, cancel=None, max_clips=6, seconds=75):
+def pick_camera_reference(project, log=print, cancel=None, max_clips=6, seconds=75, only_lane=None):
     clips = [c for c in project.clips if c['include'] and c['start'] is not None and not c.get('slowmo')]
     cams = [c for c in clips if c['kind'] == 'video' and media.total_audio_channels(c) > 0]
     snd = [c for c in clips if c['kind'] == 'audio']
@@ -131,6 +131,9 @@ def pick_camera_reference(project, log=print, cancel=None, max_clips=6, seconds=
     rolls = {}          # one entry per camera body (all its cards: the timeline lane), else per card
     for c in cams:
         rolls.setdefault(c.get('lane') or c['roll'], []).append(c)
+    if only_lane is not None:       # you chose the camera; only its channels are listened to
+        keep = {k for k in rolls if k == only_lane or any(c['roll'] == only_lane for c in rolls[k])}
+        rolls = {k: v for k, v in rolls.items() if k in keep} or rolls
     from .scan import Project
     roles_of = lambda s: s.get('roles') or Project.clip_roles(s)
 

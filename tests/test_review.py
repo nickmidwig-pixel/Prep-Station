@@ -20,7 +20,7 @@ def run(choice):
             break
         time.sleep(0.2)
     rev = next(d for k, d in ev if k == 'review_tc')
-    written_before = os.path.exists(os.path.join(out, 'SOUND_TC_CORRECTED'))
+    written_before = os.path.exists(os.path.join(out, 'WORK FILES (not for the edit)', 'SOUND_TC_CORRECTED'))
     j.decide(choice); t.join(600)
     errs = [d for k, d in ev if k == 'error']
     return p, j, out, rev, written_before, errs, ev
@@ -29,7 +29,7 @@ ok = True
 p, j, out, rev, early, errs, ev = run('write')
 print('fixes shown:', [(f['name'], f['old'], '->', f['new']) for f in rev['fixes']])
 print('anything written before the answer:', early, '| errors:', [e['message'] for e in errs])
-sc = os.path.join(out, 'SOUND_TC_CORRECTED')
+sc = os.path.join(out, 'WORK FILES (not for the edit)', 'SOUND_TC_CORRECTED')
 files = sorted(os.path.relpath(os.path.join(d, f), sc) for d, _, fs in os.walk(sc) for f in fs)
 aud = [c for c in p.clips if c['kind'] == 'audio' and c['include'] and c['start'] is not None]
 print(f'SOUND_TC_CORRECTED: {len(files)} files for {len(aud)} sound files')
@@ -51,7 +51,7 @@ ok &= not early and not errs and len(files) == len(aud) and same == len(aud) - n
 done = next(d for k, d in ev if k == 'done')
 print('camera fixes offered after the run:', [(x['name'], x['new']) for x in done['camera_fixes']])
 made = j.rewrite_cameras()
-xml = open(os.path.join(out, 'EDITORIAL', 'REVIEW_write_SYNC_UNALIGNED.xml')).read()
+xml = open(os.path.join(out, 'TIMELINES', 'REVIEW_write_SYNC_UNALIGNED.xml')).read()
 print('camera copies:', [os.path.relpath(m, out) for m in made], '| XML points at them:', all(os.path.basename(m) in xml and 'CAMERA_TC_CORRECTED' in xml for m in made))
 for m in made:
     c = next(c for c in p.clips if c.get('stamped_path') == m)
@@ -62,7 +62,7 @@ ok &= len(made) == len(done['camera_fixes']) and len(made) > 0
 
 p2, j2, out2, rev2, early2, errs2, ev2 = run('skip')
 kept = all(c['start'] == c['orig_start'] for c in p2.clips if any(f['name'] == c['name'] for f in rev2['fixes']) and c['orig_start'] is not None)
-print("'skip': files keep their own TC:", kept, '| SOUND_TC_CORRECTED written:', os.path.exists(os.path.join(out2, 'SOUND_TC_CORRECTED')))
+print("'skip': files keep their own TC:", kept, '| SOUND_TC_CORRECTED written:', os.path.exists(os.path.join(out2, 'WORK FILES (not for the edit)', 'SOUND_TC_CORRECTED')))
 ok &= kept and not errs2
 for o in (out, out2):
     shutil.rmtree(o, ignore_errors=True)

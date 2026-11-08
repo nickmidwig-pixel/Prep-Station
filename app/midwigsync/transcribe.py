@@ -9,7 +9,7 @@ when there is one, else the boom, else the plant, else all the lavs together. Sp
 whoever's lav is loudest while a word is spoken, named from the track names the mixer typed (JANE, BOB...).
 Without lavs there are no speaker names, just paragraphs.
 
-Output, in TRANSCRIPTS/: a Word document laid out for producers, plain text, and a CSV (one row per paragraph).
+Output, in TRANSCRIPT/: a Word document laid out for producers, plain text, and a CSV (one row per paragraph).
 Timecode is printed at every speaker change or pause and every whole minute, and it matches the camera/sound TC.
 """
 import csv

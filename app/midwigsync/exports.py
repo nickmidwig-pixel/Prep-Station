@@ -222,10 +222,10 @@ def write_readme(path, job, mode, files):
     L = [f'{job}', f'Made by {APP_NAME} {APP_VERSION} on {dt.datetime.now().strftime("%Y-%m-%d %H:%M")}', '',
          'Mode: ' + ('audio only (reference mic chosen per stretch)' if mode == 'audio' else 'synced to camera audio'), '',
          'WHAT TO OPEN', '',
-         '  Premiere Pro ......... EDITORIAL/*_SYNC_*.xml  (File › Import)',
-         '  DaVinci Resolve ...... EDITORIAL/*_SYNC_*.xml or *.otio  (File › Import › Timeline)',
-         '  Avid Media Composer .. link the camera media + ISO_ALIGNED WAVs, then merge EDITORIAL/*.ale',
-         '  Pro Tools / audio post EDITORIAL/*_AUDIO.aaf  (links to the aligned WAVs; keep the folder structure)',
+         '  Premiere Pro ......... TIMELINES/*_SYNC_*.xml  (File › Import)',
+         '  DaVinci Resolve ...... TIMELINES/*_SYNC_*.xml or *.otio  (File › Import › Timeline)',
+         '  Avid Media Composer .. link the camera media + ISO_ALIGNED WAVs, then merge TIMELINES/*.ale',
+         '  Pro Tools / audio post TIMELINES/*_AUDIO.aaf  (links to the aligned WAVs; keep the folder structure)',
          '', 'FOLDERS', '',
          '  ISO_ALIGNED/     recorder files after Auto-Align Post: same start timecode, length, track names and',
          '                   metadata as the originals. Mix and timecode tracks are untouched.',
@@ -233,9 +233,9 @@ def write_readme(path, job, mode, files):
          '  TC_FIXED/        copies of files whose timecode was wrong or missing, with the corrected timecode',
          '  CONVERTED_48K/   copies of non-48 kHz or non-WAV audio, converted, timecode kept',
          '  REF_<camera>/    the camera channel everything was aligned to',
-         '  EDITORIAL/       XML, OTIO, AAF, ALE and a clip list (CSV)',
+         '  TIMELINES/       XML, OTIO, AAF, ALE and a clip list (CSV)',
          '  SYNCED_CLIPS/    camera clips with the aligned sound inside (if that option was on)',
-         '  _SYNC_WORK/      working files (plans, caches); safe to delete when you are done',
+         '  WORK FILES (not for the edit)/  report, corrected-TC sound copies, plans, caches',
          '', 'Originals were not changed.', '', 'FILES IN THIS DELIVERY', '']
     for rel, what in files:
         L.append(f'  {rel}  —  {what}')

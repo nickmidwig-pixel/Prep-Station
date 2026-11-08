@@ -29,7 +29,7 @@ for d in done[0]['all']:
     out = d['out']
     files = sorted(os.listdir(out))
     print(os.path.basename(out), files)
-    assert any(f.endswith('_REPORT.txt') for f in files) and 'READ ME.txt' in files and 'EDITORIAL' in files
+    assert 'TIMELINES' in files and any(f.endswith('_REPORT.txt') for f in os.listdir(os.path.join(out, 'WORK FILES (not for the edit)')))
 outs = [os.path.basename(d['out']) for d in done[0]['all']]
 assert outs == ['20261103_SYNCED', '20261104_SYNCED'], outs
 print('TWO DAYS GOOD')

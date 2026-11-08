@@ -391,16 +391,11 @@ class Api:
         who = f"{lane['label'] if lane else c['roll']} · {c['name']}"
         src = c['path']
         if c.get('raw_picture'):
-            vc = self._view_copy(c)
-            if vc:                     # Resolve rendered a small copy: the picture anywhere in the clip
-                src, who = vc, who + ' · viewing copy'
-            else:
-                img = self._still(c, 608)
-                if img:                # Canon RAW: the picture the camera saved with the clip (its first frame)
-                    return dict(ok=True, img=img, label=f'{who} · camera preview, start of clip', preview=True,
-                                raw=True, cid=c['id'],
-                                why='Canon RAW: only the camera\'s own still until Resolve makes a viewing copy (Make playable).')
-                return dict(ok=False, why=f"{c['name']}: RAW, no picture preview here.", raw=True, cid=c['id'])
+            img = self._still(c, 608)
+            if img:                    # Canon RAW: the picture the camera saved with the clip (its first frame)
+                return dict(ok=True, img=img, label=f'{who} · camera preview, start of clip', preview=True,
+                            why='Canon RAW shows the camera\'s own preview frame; the sound plays as normal.')
+            return dict(ok=False, why=f"{c['name']}: RAW, no picture preview here.")
         off = max(0, at - c['start']) / TC.SR
         key = (src, round(off, 1))
         cache = self.__dict__.setdefault('_frames', {})
@@ -462,58 +457,6 @@ class Api:
         return 'data:image/jpeg;base64,' + base64.b64encode(data).decode() if data else None
 
     # ------------------------------------------------------------ RAW viewing copies (Resolve renders; app cache only)
-    @staticmethod
-    def _view_key(c):
-        import hashlib
-        try:
-            st = os.stat(c['path'])
-        except OSError:
-            return None
-        return hashlib.sha1(f"{c['path']}|{st.st_size}|{st.st_mtime_ns}".encode()).hexdigest()[:20]
-
-    def _view_copy(self, c):
-        k = self._view_key(c)
-        if not k:
-            return None
-        fp = os.path.join(CACHE, 'rawview', k + '.mov')
-        return fp if os.path.exists(fp) and os.path.getsize(fp) > 0 else None
-
-    def raw_copies(self, ids=None, whole_day=False):
-        """Have Resolve render small viewing copies of Canon RAW clips (the selected ones, or every RAW clip of
-        the day) into the app's cache, so the viewer can show the picture anywhere in them. Originals are only
-        read, by Resolve. Not while a sync runs (it needs Resolve)."""
-        if self._busy():
-            return dict(ok=False, why='Resolve is busy with the sync. Make viewing copies when it has finished.')
-        if getattr(self, '_raw_thread', None) and self._raw_thread.is_alive():
-            return dict(ok=False, why='Viewing copies are already being made.')
-        if whole_day or not ids:
-            cl = [c for c in self.p.clips if c['kind'] == 'video' and c.get('raw_picture') and c['include']]
-        else:
-            cl = [c for c in (self.p.by_id(int(i)) for i in ids) if c and c.get('raw_picture')]
-        cl = [c for c in cl if not self._view_copy(c) and self._view_key(c)]
-        if not cl:
-            return dict(ok=True, n=0, why='Those clips already have viewing copies.')
-        fps = TC.rate_label(self.p.fps) if self.p.fps else '23.976'
-
-        def work():
-            self.emit('rawview', dict(state='start', n=len(cl), msg=f'Resolve is making {len(cl)} viewing cop'
-                                                                     f"{'y' if len(cl) == 1 else 'ies'}…"))
-            try:
-                br = RA.ResolveBridge(log=lambda m: self.emit('log', m))
-                got = br.render_viewing_copies(
-                    [(c['path'], self._view_key(c)) for c in cl], os.path.join(CACHE, 'rawview'),
-                    log=lambda m: self.emit('log', m), fps=fps,
-                    progress=lambda f: self.emit('rawview', dict(state='progress', frac=f,
-                                                                 msg=f'Resolve: viewing copies {round(100 * f)}%')))
-                self.__dict__.pop('_frames', None)
-                self.emit('rawview', dict(state='done', n=len(got), want=len(cl),
-                                          msg=f'{len(got)} of {len(cl)} viewing cop{"y" if len(cl) == 1 else "ies"} ready.'))
-            except Exception as e:  # noqa: BLE001
-                self.emit('rawview', dict(state='error', msg=f'Viewing copies: {e}'))
-        self._raw_thread = threading.Thread(target=work, daemon=True)
-        self._raw_thread.start()
-        return dict(ok=True, n=len(cl))
-
     def thumbs(self, ids):
         """{id: data URI or None} for camera clips, for the clip list (like Tentacle's)."""
         from concurrent.futures import ThreadPoolExecutor
@@ -542,6 +485,25 @@ class Api:
 
     def set_reference(self, roll, channel):
         return self._edit('the reference mic', lambda: self._set_reference_raw(roll, channel))
+
+    def set_sync_to(self, choice):
+        """The one Sync-to control (2.0): 'auto' (the app picks), 'audio' (sound only), or a camera lane key
+        (align to that camera body; the app still listens for which of its channels is the onboard mic)."""
+        return self._edit('what to sync to', lambda: self._set_sync_to_raw(choice))
+
+    def _set_sync_to_raw(self, choice):
+        if choice in (None, '', 'auto'):
+            self.settings['mode'] = 'auto'
+            return self._set_reference_raw('auto', 0)
+        if choice == 'audio':
+            self.settings['mode'] = 'audio'
+            return self._state()
+        lane = next((l for l in self.p.lanes() if l['key'] == choice and l['kind'] == 'camera'), None)
+        if not lane or not lane.get('rolls'):
+            return self._state()
+        self.settings['mode'] = 'camera'
+        self.settings['reference'] = dict(roll=sorted(lane['rolls'])[0], channel=0, auto=False, listen=True, lane=lane['key'])
+        return self._state()
 
     def _set_reference_raw(self, roll, channel):
         if roll in (None, '', 'auto'):

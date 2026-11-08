@@ -26,7 +26,7 @@ from . import refplan as RP
 from . import exports as EX
 
 SR = TC.SR
-from .brand import ENV_CACHE, APP_NAME, OUT_SUFFIX, WORK_DIR
+from .brand import ENV_CACHE, APP_NAME, OUT_SUFFIX, WORK_DIR, TIMELINES_DIR, TRANSCRIPT_DIR, SOUND_REPORT_DIR
 
 DEFAULTS = dict(
     job_name='', out_dir='', reference=None,   # reference: dict(roll, channel, auto) - auto: picked by listening
@@ -428,14 +428,18 @@ class Job:
         """Camera mode: align to an onboard camera mic. Unless you chose one, listen to every camera channel
         against the sound and pick the one that matches best (never the mixer's feed, LTC or a silent channel)."""
         r = self.s.get('reference')
-        if r and not r.get('auto') and r.get('roll'):
+        if r and not r.get('auto') and r.get('roll') and not r.get('listen'):
             self.log(f"Alignment track: {self.ref_label(self.ref())} ch {r['channel'] + 1} (chosen by you)")
             return
         self.step('Choosing the alignment track')
         from . import refpick
-        pick = refpick.pick_camera_reference(self.p, log=self.log, cancel=self.cancelled)
+        only = None
+        if r and not r.get('auto') and r.get('roll'):       # you chose the camera; the app picks its channel
+            only = r.get('lane') or next((c.get('lane') for c in self.p.clips if c['roll'] == r['roll']), None) or r['roll']
+        pick = refpick.pick_camera_reference(self.p, log=self.log, cancel=self.cancelled, only_lane=only)
         if pick:
-            self.s['reference'] = dict(roll=pick['roll'], channel=pick['channel'], auto=True, why=pick['why'])
+            self.s['reference'] = dict(roll=pick['roll'], channel=pick['channel'], auto=only is None, why=pick['why'],
+                                       **({'lane': only, 'listen': True} if only else {}))
             self.emit('ref_pick', self.s['reference'])
         r = self.ref()
         self.log(f"Alignment track: {self.ref_label(r)} ch {r['channel'] + 1}" + (f" ({pick['why']})" if pick else ''))
@@ -506,7 +510,7 @@ class Job:
         if not fixed and not conv:
             self.log('Sound timecode: nothing to fix, working from the originals (read-only).')
             return
-        root = os.path.join(self.out, 'SOUND_TC_CORRECTED')
+        root = os.path.join(self.mid, 'SOUND_TC_CORRECTED')
         n_fix = n_copy = 0
         for i, c in enumerate(aud):
             self.check()
@@ -919,7 +923,7 @@ class Job:
                                   media_start_frames=TC.samples_to_frames(media_start, cfps)))
             if clips:
                 cams.append(dict(label=label, clips=clips))
-        xml_dir = os.path.join(self.out, 'EDITORIAL')
+        xml_dir = os.path.join(self.out, TIMELINES_DIR)
         job = self.s['job_name']
         tracks = []
         if self.polys:
@@ -1030,7 +1034,7 @@ class Job:
         """Transcript of the day from the sound files (local speech model; never fatal to the job)."""
         from . import transcribe as TR
         try:
-            paths = TR.transcribe_day(self.p, os.path.join(self.out, 'TRANSCRIPTS'), self.s['job_name'], self.p.fps,
+            paths = TR.transcribe_day(self.p, os.path.join(self.out, TRANSCRIPT_DIR), self.s['job_name'], self.p.fps,
                                       self.p.df, language=self.s.get('transcribe_language', 'en'), log=self.log,
                                       progress=progress or self.progress, cancel=self.cancelled,
                                       cam_ref=self.ref() if self.mode() == 'camera' else None)
@@ -1042,22 +1046,33 @@ class Job:
         except Exception as e:  # noqa: BLE001
             self.log(f'Transcript failed: {e}')
 
+    def copy_sound_reports(self):
+        """The mixer's sound report(s) found next to the media (CSV/PDF/TXT), copied into SOUND REPORT/ so an
+        editor finds them beside the polywavs. Copies only; the originals are read, never touched."""
+        reps = [r.get('path') for r in (getattr(self.full, 'reports', None) or []) if r.get('path')]
+        if not reps:
+            return
+        dest = os.path.join(self.out, SOUND_REPORT_DIR)
+        os.makedirs(dest, exist_ok=True)
+        n = 0
+        for src in reps:
+            try:
+                to = os.path.join(dest, os.path.basename(src))
+                if not os.path.exists(to):
+                    shutil.copyfile(src, to)
+                    n += 1
+            except OSError as e:
+                self.log(f'  could not copy sound report {os.path.basename(src)}: {e}')
+        if n:
+            self.log(f'{SOUND_REPORT_DIR}: {n} file(s) copied from the mixer.')
+
     def do_report(self):
-        self.report_path = os.path.join(self.out, f"{self.s['job_name']}_REPORT.txt")
+        self.report_path = os.path.join(self.mid, f"{self.s['job_name']}_REPORT.txt")
+        self.copy_sound_reports()
         rf = self.ref()
         st = dict(self.s, _mode=self.mode(), _ref=dict(rf, label=self.ref_label(rf)) if rf else rf,
                   _ref_summary=self.ref_summary, _slow=self.slow,
                   _fps_info=self.full.fps_info)
-        try:
-            files = []
-            for d in sorted(os.listdir(self.out)):
-                full = os.path.join(self.out, d)
-                if os.path.isdir(full) and not d.startswith('.'):
-                    n = sum(len(fs) for _, _, fs in os.walk(full))
-                    files.append((d + '/', f'{n} file(s)'))
-            EX.write_readme(os.path.join(self.out, 'READ ME.txt'), self.s['job_name'], self.mode(), files)
-        except Exception as e:  # noqa: BLE001
-            self.log(f'  could not write READ ME: {e}')
         write_report(self.report_path, self.s['job_name'], self.p, self.sync_report, self.stamped, self.aap_info,
                      self.aligned, self.verify, self.polys, self.xmls, st, self.log_lines)
         self.log(f'Report: {os.path.basename(self.report_path)}')
