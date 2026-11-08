@@ -33,7 +33,7 @@ and checks again; `tests/test_guard.py` tries 19 ways to damage an original.
    not the two cameras that agree; a reference camera that is alone in being off moves too. The one-line reason
    (`decision`) is shown in the review stop, the log and the report.
 4. **Review stop** (`review_fixes`): the window shows every fix and waits: write / keep the files' own TC / stop.
-5. **Corrected sound** (`do_sound_set`): SOUND_TC_CORRECTED/ holds every sound file of the day in its original
+5. **Corrected sound** (`do_sound_set`): WORK FILES/SOUND_TC_CORRECTED/ holds every sound file of the day in its original
    format; fixed files get the new TC, the rest are exact copies (APFS clones on the same drive).
 6. **Auto-Align Post** (refplan.py + resolve_aap.py + aap_panel.py): camera mode aligns to the picked onboard mic
    on every card of that camera body; audio-only picks boom > plant > best lav per stretch. Mix / TC / empty tracks
@@ -46,13 +46,15 @@ and checks again; `tests/test_guard.py` tries 19 ways to damage an original.
 7. **Aligned ISOs** (optional, ISO_ALIGNED/): each mic on its own, no mix.
 8. **Aligned polywavs** (POLY_ALIGNED/): per-take mixer polywavs come back aligned with the same names and track
    layout; ISO days become day polywavs of the largest whole TC minutes under 4 GB. Mix tracks included.
-9. **Editorial** (EDITORIAL/): XML with cameras on A CAM / B CAM... tracks (one lane per camera body, Project.lanes)
+9. **Timelines** (TIMELINES/): XML with cameras on A CAM / B CAM... tracks (one lane per camera body, Project.lanes)
    and the aligned polywavs; `<job>_SLOW_MOTION.xml` for slow motion and other frame rates (shot order, markers);
    OTIO, AAF (from the aligned ISOs), ALE, CSV.
-10. **Transcript** (optional, transcribe.py, TRANSCRIPTS/): local Whisper large-v3-turbo (MLX on Apple Silicon,
+10. **Transcript** (optional, transcribe.py, TRANSCRIPT/): local Whisper large-v3-turbo (MLX on Apple Silicon,
     faster-whisper on Intel; installed on first use), listening to the mix/boom/lavs per stretch, speakers from the
     lav track names, TC at each turn and every minute: Word, text and CSV.
-11. **Report** + READ ME.
+11. **Report** (in WORK FILES) and SOUND REPORT/ (copies of the mixer's report files). The output folder an
+    editor sees: ISO_ALIGNED, POLY_ALIGNED, SOUND REPORT, TIMELINES, TRANSCRIPT, and last "WORK FILES (not for
+    the edit)" with the report, SOUND_TC_CORRECTED, plans, caches and logs.
 After the run: **camera copies** on request (CAMERA_TC_CORRECTED/): the original bytes with only the timecode
 number changed (QuickTime/MP4/CRM/BRAW tmcd, MXF timecode components), else a stream copy into .mov.
 
@@ -79,9 +81,10 @@ shoot folder (never inside a card or roll folder).
 - Zoom slider with a percentage under the timeline (100% = the whole day); big timecode over the picture.
 - Settings sheet (⌘,): synchronisation, sound out, export, transcript. The panel keeps Sync to / Frame rate / Output /
   a one-line-per-step summary.
-- Clip rows carry the facts Tentacle shows: card, camera, codec, size, rate, audio, where the timecode came from.
-- Frame rate block with the evidence; "Sync to" Auto / Camera mic / Audio only; preflight checks; one list of
-  what needs attention; clip list grouped by lane.
+- Clip rows (2.0): camera rows show card, camera, codec, size; sound rows scene/take and size, and a Tracks summary
+  ("4 tracks · boom, lav + 2 safety copies") that opens into the track list. The Info sheet has the rest.
+- Frame rate block with the evidence; "Sync to" is one sentence with a Change link (camera bodies or Sound only;
+  the app picks the channel); preflight checks; one list of what needs attention; clip list grouped by lane.
 
 ## Camera formats worth knowing
 - Canon Cinema RAW Light (.CRM, card layout <card>/CRM/REEL_xxx/): ffmpeg can't open the picture, so it never sees

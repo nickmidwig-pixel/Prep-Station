@@ -221,3 +221,26 @@ Not done / caveats:
   vs a 6-folder Zaxcom would move the cameras. Group audio folders by recorder (bext originator + same parent
   folder) when that comes up.
 - Merging layouts whose aligned mics match (Conversat T01/T02) — waiting on Nick.
+
+## 2.0 (2026-11-08, morning): simple, simple, simple
+
+Nick's notes after the 1.7 run, thinking as an editor opening the app and the folder:
+
+- **Make playable** (RAW viewing copies through Resolve) — gone. Opening Resolve to make proxies is not an option.
+  The viewer keeps the camera's own RAW preview frame and the clip thumbnails.
+- **Sync to** was three tabs (Auto / Camera mic / Audio only) plus a dropdown of every card and a channel menu.
+  Now one sentence ("Everything syncs to B CAM's onboard mic.") and a *Change* link whose chooser lists only
+  the camera bodies and "Sound only" (+ "Let Prep Station pick" once you've chosen). The app always listens for
+  the channel itself, also when you pick the camera (`reference.listen`, `refpick.only_lane`). API:
+  `set_sync_to('auto' | 'audio' | <lane key>)`; `set_setting('mode')` / `set_reference` still work.
+- **Clip list**: a sound file is one line — name, scene/take, size; Tracks shows "4 tracks · boom, lav + 2 safety
+  copies" and opens (▸) into the numbered track list. No chip row of track names. The facts line lost
+  "24-bit 48 kHz", "4 × audio", "TC from bext/tmcd" (still in the Info sheet).
+- **Output folder**, for an editor:
+  `ISO_ALIGNED/ · POLY_ALIGNED/ · SOUND REPORT/ · TIMELINES/ · TRANSCRIPT/ · WORK FILES (not for the edit)/`
+  TIMELINES was EDITORIAL, TRANSCRIPT was TRANSCRIPTS. SOUND REPORT holds copies of the mixer's CSV/PDF found next
+  to the media. WORK FILES (sorts last) holds the report, SOUND_TC_CORRECTED, plans, caches, logs; `brand.WORK_DIR`.
+  No READ ME any more. CAMERA_TC_CORRECTED stays top-level when made (the XML points at it).
+- Kept against the notes: the -6 dB safety tracks stay inside the polywavs (the mixer recorded them; they are not
+  written as ISOs); the report is still written, in WORK FILES.
+- tests/shot_ui.py: Playwright screenshots + smoke test of the new controls (in check_originals).
