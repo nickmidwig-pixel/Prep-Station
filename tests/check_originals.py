@@ -4,7 +4,7 @@ is a failure."""
 import hashlib, os, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOTS = ['/home/claude/testday', '/home/claude/testday_x', '/home/claude/mixerday', '/home/claude/slowday', '/home/claude/hopday',
-         '/home/claude/canonday', '/home/claude/canonday_plain']
+         '/home/claude/canonday', '/home/claude/canonday_plain', '/home/claude/layoutday']
 OUTS = ('_SYNCED', '_MIDWIG', '_SYNC_WORK')
 
 sys.path.insert(0, HERE)
@@ -35,7 +35,7 @@ print(f'{len(before)} original files fingerprinted')
 runs = [['run_pipeline.py'], ['run_pipeline.py', {'AAP2': '1'}], ['run_extras.py'], ['run_mixer_day.py'], ['run_two_days.py'], ['test_guard.py'],
         ['test_framerate.py'], ['test_slowmo.py'], ['test_refpick.py'], ['test_camera_copy.py'], ['test_transcript.py'],
         ['test_review.py'], ['test_canon_raw.py'], ['test_window_keys.py'], ['test_aap_panel.py'],
-        ['test_aap2_names.py']]
+        ['test_aap2_names.py'], ['test_layouts.py']]
 for r in runs:
     t = time.time()
     env = dict(os.environ, **(r[1] if len(r) > 1 else {}))

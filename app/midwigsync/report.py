@@ -65,7 +65,9 @@ def write_report(path, job, project, sync_report, stamped, aap_info, aligned, ve
         w('Mode: audio only (reference mic chosen per stretch)')
     elif mode == 'camera':
         ref = settings.get('_ref') or {}
-        w(f"Mode: camera reference {ref.get('roll', '?')} ch {ref.get('channel', 0) + 1}")
+        w(f"Mode: camera reference {ref.get('label') or ref.get('roll', '?')} ch {ref.get('channel', 0) + 1}")
+        if len(ref.get('rolls') or []) > 1:
+            w(f"      cards: {', '.join(ref['rolls'])}")
     from . import safety
     sm = safety.summary()
     w(f"Originals: {sm['originals']} files read-only, untouched"
@@ -167,7 +169,17 @@ def write_report(path, job, project, sync_report, stamped, aap_info, aligned, ve
         size = p.get('bytes') or p.get('size') or (os.path.getsize(p['path']) if os.path.exists(p['path']) else 0)
         w(f"  {os.path.relpath(p['path'], os.path.dirname(path))}  starts {tcs}  {p['n'] / SR / 60:.1f} min  {size / 1e9:.2f} GB")
     if polys:
-        w(f"  Channels: {', '.join(settings.get('poly_channels', []))}")
+        lays = []
+        for p in polys:
+            key = (p.get('layout') or '', tuple(p.get('channels') or []))
+            if key[1] and key not in lays:
+                lays.append(key)
+        if len(lays) <= 1:
+            w(f"  Channels: {', '.join(settings.get('poly_channels', []))}")
+        else:
+            w(f"  {len(lays)} track layouts on this day, one polywav set per layout:")
+            for sub, ch in lays:
+                w(f"    set {sub}: {', '.join(ch)}")
     w('')
     w('XML')
     for x in xmls or []:

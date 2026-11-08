@@ -36,6 +36,10 @@ DEFAULTS = dict(
     aap_auto_press=True, render_dir='',
     iso_folder=True,               # aligned ISO files (each mic on its own, no mix) in ISO_ALIGNED/
     chunk_mode='max',              # polywavs: largest whole TC minutes under 4 GB ('hour': whole hours)
+    poly_layout='per_layout',      # day polywavs when takes use different track layouts: one set per layout, or
+                                   # 'merged': one wide layout with every mic name of the day
+    poly_style='auto',             # 'per_take': a mixer's per-take polywavs back as they came; 'day': day polywavs
+                                   # of whole TC minutes under 4 GB; 'auto': per_take for short multitrack takes
     short_clip_s=20,
     mode='auto',                   # 'auto' | 'camera' | 'audio'  (auto: audio-only when no camera has sound)
     aligned_names='same',          # 'same' | 'suffix' (_ALN)
@@ -260,17 +264,39 @@ class Job:
         out.sort(key=lambda s: (order.index(s['roll']) if s['roll'] in order else 999, s['start']))
         return out
 
+    def poly_style(self):
+        st = self.s.get('poly_style', 'auto')
+        return st if st in ('per_take', 'day') else RP.delivery_style(self.audio_sources())
+
     def channel_layout(self, sources):
-        names, idx = [], {}
+        """Day-polywav tracks: one per (roll, track name) across the whole day, in order of first appearance, so a
+        recorder whose takes use different layouts (633 on 2026-11-06: 4, 6 and 8 tracks) keeps every mixer label.
+        Until 1.7 each roll got the first take's names and later takes were squeezed in by position, so a 6-track
+        take's BOOM1 sat on a track called "BOOM -6db". A name used twice in one take (MIX, MIX) is numbered.
+        Returns (names, map) with map[path] = [poly channel per file channel]."""
+        names, slot, per_file = [], {}, {}
+        rolls = []
         for s in sources:
-            if s['roll'] in idx:
-                continue
-            ch = max(x['channels'] for x in sources if x['roll'] == s['roll'])
-            names_r = WavInfo(s['path']).track_names()
-            idx[s['roll']] = list(range(len(names), len(names) + ch))
-            for k in range(ch):
-                names.append(s['roll'] if ch == 1 else (names_r.get(k + 1) or f"{s['roll']}_{k + 1}"))
-        return names, idx
+            if s['roll'] not in rolls:
+                rolls.append(s['roll'])
+        for roll in rolls:
+            for s in [x for x in sources if x['roll'] == roll]:
+                ch = s['channels']
+                tn = WavInfo(s['path']).track_names() if ch > 1 or s.get('named') else {}
+                used = Counter()
+                chans = []
+                for k in range(ch):
+                    nm = (tn.get(k + 1) or '').strip()
+                    if not nm:
+                        nm = roll if ch == 1 else f'{roll}_{k + 1}'
+                    used[nm] += 1
+                    key = (roll, nm, used[nm])
+                    if key not in slot:
+                        slot[key] = len(names)
+                        names.append(nm if used[nm] == 1 else f'{nm} ({used[nm]})')
+                    chans.append(slot[key])
+                per_file[s['path']] = chans
+        return names, per_file
 
     # ------------------------------------------------------------ steps
     def run(self):
@@ -736,7 +762,7 @@ class Job:
 
                 def name_for(stem):
                     return stem if self._names == 'same' else stem + '_ALN'
-                per_take = RP.delivery_style(self.audio_sources()) == 'per_take'
+                per_take = self.poly_style() == 'per_take'
                 dest = os.path.join(self.out, 'POLY_ALIGNED') if per_take else os.path.join(self.mid, 'repacked')
                 packed = RP.repack(self._packs, by_mono, dest, name_for, note, log=self.log, cancel=self.cancelled)
                 for r in packed:
@@ -801,7 +827,7 @@ class Job:
         elif not self.aligned:
             srcs = [dict(path=s['path'], start=s['start'], roll=s['roll'], channels=s['channels'])
                     for s in self.audio_sources()]
-            if srcs and RP.delivery_style(self.audio_sources()) == 'per_take':
+            if srcs and self.poly_style() == 'per_take':
                 for s in srcs:
                     w = WavInfo(s['path'])
                     names = w.track_names()
@@ -816,17 +842,47 @@ class Job:
                 continue
             order = [r['name'] for r in p.audio_rolls_ordered()]
             srcs.sort(key=lambda s: (order.index(s['roll']) if s['roll'] in order else 999, s['start']))
-            names, idx = self.channel_layout(srcs)
-            for s in srcs:
-                s['channels'] = idx[s['roll']][:s['channels']]
-            self.s['poly_channels'] = names
-            out = build_polywavs(srcs, names, os.path.join(self.out, folder), f"{self.s['job_name']}_POLY_{tag}",
-                                 p.fps, p.df, ubits, self.s['job_name'], note, self.s['chunk_mode'], log=self.log,
-                                 progress=self.progress, cancel=self.cancelled)
-            for o in out:
-                o['folder'] = folder
-                o['channels'] = names
-            self.polys += out
+            for sub, group, suffix in self.poly_groups(srcs):
+                names, per_file = self.channel_layout(group)
+                for s in group:
+                    s['channels'] = per_file[s['path']]
+                self.s['poly_channels'] = names
+                if sub:
+                    self.log(f'  layout {sub} ({len(names)} tracks): {", ".join(names)}')
+                out = build_polywavs(group, names, os.path.join(self.out, folder),
+                                     f"{self.s['job_name']}_POLY_{tag}{suffix}", p.fps, p.df, ubits, self.s['job_name'],
+                                     note, self.s['chunk_mode'], log=self.log, progress=self.progress, cancel=self.cancelled)
+                for o in out:
+                    o['folder'] = folder
+                    o['channels'] = names
+                    o['layout'] = sub
+                self.polys += out
+
+    def poly_groups(self, srcs):
+        """How a day's sources split into polywav sets. A recorder whose takes use different track layouts (the 633
+        on 2026-11-06: 4, 6 and 8 tracks) gets one set per layout (A, B, C...), each file carrying exactly that
+        layout's mic names, so no file is padded with empty tracks; poly_layout='merged' puts every mic name of the
+        day in one wide layout instead (19 tracks there, 4 GB every 26 minutes). Mono ISO recorders are one set."""
+        def layout_of(s):
+            if s['channels'] <= 1:
+                return ()
+            tn = WavInfo(s['path']).track_names()
+            return tuple((tn.get(i + 1) or '').strip() for i in range(s['channels']))
+        lays = []
+        for s in srcs:
+            k = layout_of(s)
+            if k not in lays:
+                lays.append(k)
+        multi = [k for k in lays if k]
+        if len(multi) <= 1 or self.s.get('poly_layout', 'per_layout') == 'merged':
+            return [('', srcs, '')]
+        groups = []
+        letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        for i, k in enumerate(lays):
+            g = [s for s in srcs if layout_of(s) == k]
+            groups.append((letters[i] if i < 26 else str(i + 1), g, f'_{letters[i] if i < 26 else i + 1}'))
+        self.log(f'  {len(groups)} track layouts on this day -> one polywav set per layout')
+        return groups
 
     def do_xml(self):
         p = self.p
@@ -967,7 +1023,9 @@ class Job:
 
     def do_report(self):
         self.report_path = os.path.join(self.out, f"{self.s['job_name']}_REPORT.txt")
-        st = dict(self.s, _mode=self.mode(), _ref=self.ref(), _ref_summary=self.ref_summary, _slow=self.slow,
+        rf = self.ref()
+        st = dict(self.s, _mode=self.mode(), _ref=dict(rf, label=self.ref_label(rf)) if rf else rf,
+                  _ref_summary=self.ref_summary, _slow=self.slow,
                   _fps_info=self.full.fps_info)
         try:
             files = []

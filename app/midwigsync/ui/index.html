@@ -277,6 +277,12 @@
       <label class="inline">Polywav length
         <select data-set="chunk_mode"><option value="max">As much as fits in 4 GB</option><option value="hour">Whole hours (under 4 GB)</option></select>
       </label>
+      <label class="inline">Day polywavs
+        <select data-set="poly_style"><option value="auto">Per take for a mixer’s takes, by the day for long ISOs</option><option value="day">Always by the day</option><option value="per_take">Always per take</option></select>
+      </label>
+      <label class="inline">When takes use different track layouts
+        <select data-set="poly_layout"><option value="per_layout">One polywav set per layout (A, B, C…)</option><option value="merged">One wide layout with every mic name</option></select>
+      </label>
       <label class="opt" id="isoOpt"><input type="checkbox" data-set="iso_folder"><span><b>Aligned ISOs too</b>Each mic on its own, mix tracks left out. Needs Auto-Align.</span></label>
       <label class="inline">Aligned file names
         <select data-set="aligned_names"><option value="same">Same as the originals</option><option value="suffix">Add _ALN</option></select>

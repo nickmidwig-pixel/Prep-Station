@@ -146,6 +146,36 @@ problems, all fixed in 1.6:
 - **Still open:** Auto-Align's destination could be set to our folder through the panel's settings (Custom /
   Choose opens a file dialog; not automated). Mute/solo per lane, pale clip blocks, "fixed" ribbon.
 
+## 1.6.1 / 1.7 (2026-11-07, evening): the first full real run, and what it showed
+- **The whole day ran end to end** (1.6): 31 CRM clips, 7 takes, Auto-Align 69 pieces in ~10 min, 34 aligned ISOs,
+  9 day polywavs, XML + CSV, transcript, report. Total about 15 min once Auto-Align behaved.
+- **Auto-Align's backend hangs on a hidden dialog.** AutoAlignPost (the backend binary) crashes on *exit* after every
+  successful render (EXC_GUARD in its PACE/iLok teardown, macOS 26.5; crash reports sent to Nick). macOS then shows a
+  "reopen windows?" dialog on the next launch; started from the panel in the background, nobody can answer it, so
+  the panel waits at "Converting... 0/N" for ever (the panel's log ~/Library/Logs/aap-davinci-resolve-log.txt ends
+  on `AutoAlignPost --get-known-formats` with no answer). 1.6.1: `RA.backend_check` clears
+  ~/Library/Saved Application State/com.soundradix.AutoAlignPost.savedState and runs `--version` with a timeout
+  before building the Resolve project; the wait loop says what to do if nothing lands in 4 min; "Press Render again"
+  checks first too. How the panel works (read from its index.html): ffprobe each clip, ffmpeg one mono file per
+  track into /tmp when needed, write a JSON, spawn `AutoAlignPost process-json <file>`, read a JSON line per
+  aligned clip, move results to the project folder as `<src>-AtAlgn-<hash>.wav`, import to an "Aligned files for
+  <timeline>" bin. Polywavs are fine with it (it extracts channels itself).
+- **Sync verified on the real day, independently of the app's own numbers** (boom on the polywav vs the C80
+  reference mic, 3 points per camera clip, FFT lag): 31 of 34 confident points at 0.0 ms from 10:49 to 19:49, fit
+  0.5 ms/hour (noise). Script: tests/measure_drift.py (runs on the Mac against the originals).
+- **Track names did not carry through** (1.6): `channel_layout` took each roll's first take's names and squeezed
+  later takes in by position, so the 633's 6-track Conversat BOOM1 sat on a track called "BOOM -6db" and the
+  Friends lavs were numbered. 1.7: layout by (roll, track name) across the day; a recorder with several layouts
+  gets **one polywav set per layout** (`_POLY_ALN_A_`, `_B_`...; `poly_layout='merged'` gives one wide layout with
+  every name, 19 tracks here = 4 GB every 26 min); the XML names its audio tracks (`<track><name>`); `poly_style`
+  setting (auto / day / per_take); report lists the sets. tests/test_layouts.py covers both modes with tones per
+  (take, track). Note the real day has 4 layouts, not 3: Conversat T01 (`MIX, MIX, ...`) and T02
+  (`Ale Best Mic, Geo Best Mic, ...`) differ by name; T01 is 46 s, so set B is one 40 MB file. Merging layouts
+  whose aligned mics match would be a reasonable later refinement.
+- **Premiere could not be driven from the background** (no accessibility tree), so the check was done on the files.
+- Still open: auto-press of the panel has not been seen working end to end (every run so far hit the stuck
+  backend first); RAW viewing copies untested; mute/solo, pale blocks, "fixed" ribbon.
+
 ## C. Order of work for the next model
 
 1. A1–A3 (CRM timecode, serial, letters) + a test using the small real clips (A005C004 370 MB, C_0001C002 1.3 GB):

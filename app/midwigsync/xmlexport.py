@@ -125,13 +125,13 @@ class XmlBuilder:
             for c in clips:
                 c['track_no'] = i + 1
             items = ''.join(clipitem(c, 'video', k + 1)[1] for k, c in enumerate(clips))
-            vxml.append(f'<track>{items}<enabled>TRUE</enabled><locked>FALSE</locked></track>')
+            vxml.append(f'<track><name>{escape(lab)}</name>{items}<enabled>TRUE</enabled><locked>FALSE</locked></track>')
         axml = []
         for i, (lab, clips) in enumerate(self._place(self.atracks)):
             for c in clips:
                 c['track_no'] = i + 1
             items = ''.join(clipitem(c, 'audio', k + 1)[1] for k, c in enumerate(clips))
-            axml.append(f'<track>{items}<enabled>TRUE</enabled><locked>FALSE</locked>'
+            axml.append(f'<track><name>{escape(lab)}</name>{items}<enabled>TRUE</enabled><locked>FALSE</locked>'
                         f'<outputchannelindex>{1 + i % 2}</outputchannelindex></track>')
         w = max([c.get('width', 0) for _, l in self.vtracks for c in l] + [1920])
         h = max([c.get('height', 0) for _, l in self.vtracks for c in l] + [1080])
