@@ -278,11 +278,13 @@ def repack(packs, aligned_by_mono, out_root, name_for, note='', log=print, cance
 
 
 def delivery_style(sources):
-    """'per_take' for a sound mixer's file-per-take polywavs, 'iso' for long mono ISOs (Zaxcom style)."""
+    """'per_take' for a sound mixer's file-per-take polywavs, 'iso' for mono ISOs (Zaxcom style).
+    A mixer's takes come back as the same files - same names, scene/take/notes, track names - aligned, so the
+    editor's import (and the sound report) line up file for file, however long the takes are. Until 2.0.1 takes
+    over 25 minutes were turned into day polywavs instead, which broke that one-to-one match."""
     if not sources:
         return 'iso'
     multi = sum(1 for s in sources if s['channels'] >= 2)
-    med_len = float(np.median([s['length'] for s in sources])) / SR
-    if multi >= 0.6 * len(sources) and med_len < 25 * 60:
+    if multi >= 0.6 * len(sources):
         return 'per_take'
     return 'iso'

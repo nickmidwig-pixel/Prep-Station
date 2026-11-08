@@ -340,11 +340,19 @@ class Job:
                     self.check()
             self.step('Report')
             self.do_report()
+            if sys.platform == 'darwin' and self.s['aap_mode'] == 'resolve':
+                try:                      # one last look for the backend's "reopen windows?" box
+                    RA.dismiss_backend_dialog(self.log)
+                except Exception:  # noqa: BLE001
+                    pass
+            self._sweep_dialogs = False
             self.emit('done', dict(out=self.out, report=self.report_path, camera_fixes=self.camera_fixes()))
         except Cancelled:
+            self._sweep_dialogs = False
             self.log('Stopped.')
             self.emit('stopped', {})
         except Exception as e:  # noqa: BLE001
+            self._sweep_dialogs = False
             tb = traceback.format_exc()
             self.log(f'ERROR: {e}')
             with open(os.path.join(self.mid, 'error.txt'), 'w') as f:
@@ -744,11 +752,24 @@ class Job:
                     self.log('  Closed the Auto-Align panel (all renders collected).')
             except Exception:  # noqa: BLE001
                 pass
+            # the backend crashes on exit and macOS may put up its "reopen windows?" box minutes later, when
+            # nobody is watching the panel any more; keep answering it for the rest of the job
+            self._sweep_dialogs = True
+            threading.Thread(target=self._dialog_sweeper, name='aap-dialogs', daemon=True).start()
         if not st['files']:
             self.log('No Auto-Align renders found; exporting unaligned audio.')
             self.aap_info['status'] = 'no renders'
             return
         self._assemble(sources, st)
+
+    def _dialog_sweeper(self):
+        t0 = time.time()
+        while getattr(self, '_sweep_dialogs', False) and time.time() - t0 < 3600:
+            try:
+                RA.dismiss_backend_dialog(self.log)
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(5)
 
     def _assemble(self, sources, st):
         self.step('Building aligned ISOs')
