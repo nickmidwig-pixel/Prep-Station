@@ -521,3 +521,18 @@ tr.trkrow td { padding: 0 8px 8px; border-top: 0; }
 .trklist .trk { display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 7px; line-height: 16px; }
 .trklist .trk em { font-style: normal; color: var(--muted); font-size: 10px; }
 .trklist .trk small { color: var(--muted); font-size: 10px; }
+
+/* DONE banner (2.1): big, green, unmistakable at a glance */
+.done-banner { background: #2F6B45; color: #EAF7EE; border-radius: 10px; padding: 16px 18px; margin-bottom: 10px; text-align: center;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.08) inset; animation: donepop .35s ease-out; }
+.done-banner .big { font-size: 30px; font-weight: 700; letter-spacing: .08em; line-height: 1; }
+.done-banner .tick { display: inline-block; width: 34px; height: 34px; line-height: 34px; border-radius: 50%; background: #EAF7EE; color: #2F6B45; font-size: 22px; vertical-align: -3px; margin-right: 6px; }
+.done-banner .sub { margin-top: 8px; font-size: 13px; opacity: .9; }
+@keyframes donepop { from { transform: scale(.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+body.finished .progress { display: none; }
+body.finished #goBtn { background: none; border: 1px solid var(--line); color: var(--muted); }
+
+/* before / after label (2.1) over the picture */
+.ablabel { position: absolute; top: 10px; left: 10px; padding: 4px 10px; border-radius: 4px; font-size: 13px; font-weight: 700; letter-spacing: .12em; color: #111; background: var(--fix); }
+.ablabel.after { background: #5BBF7A; }
+#abBtn { border-color: var(--fix); color: var(--fix); }

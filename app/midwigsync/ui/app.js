@@ -487,9 +487,29 @@
     if (!ended) call('stop_play');
     $('playBtn').textContent = '▶ Play'; $('playBtn').classList.remove('playing');
     $('phWhat').textContent = ended ? 'End of the preview.' : 'Stopped.';
+    abT.forEach(clearTimeout); abT = []; $('abLabel').hidden = true;
     showFrame(S.ph); draw();
   }
   $('playBtn').addEventListener('click', togglePlay);
+  // Hear the difference (2.0.3): before / after, summed with the camera mic, at the playhead
+  let abT = [];
+  async function abPlay() {
+    if (S.playing) { stopPlay(); return; }
+    if (S.ph == null) { const sp = span(); if (!sp) return; S.ph = sp[0]; }
+    const r = await call('ab_play', Math.round(S.ph));
+    if (!r || !r.ok) { $('phWhat').textContent = (r && r.why) || 'Nothing to compare here.'; return; }
+    S.ph = r.from;
+    S.playing = { t0: performance.now(), from: r.from, dur: r.dur, lastFrame: 0, ab: true };
+    $('playBtn').textContent = '■ Stop'; $('playBtn').classList.add('playing');
+    $('phWhat').textContent = `Before / after: ${r.what}`;
+    abT.forEach(clearTimeout); abT = [];
+    (r.sched || []).forEach(([t, lab]) => abT.push(setTimeout(() => {
+      if (!S.playing) return;
+      const el = $('abLabel'); el.textContent = lab; el.hidden = false; el.className = 'ablabel ' + lab.toLowerCase();
+    }, t * 1000)));
+    requestAnimationFrame(tick);
+  }
+  $('abBtn').addEventListener('click', abPlay);
   $('backBtn').addEventListener('click', () => stepPlayhead(-5 * SR));
   function stepPlayhead(ds) {
     if (S.ph == null) { const sp = span(); if (!sp) return; S.ph = sp[0]; }
@@ -1089,7 +1109,8 @@
     resetSteps();
     $('review').hidden = true; $('camFix').hidden = true;
     $('progFill').style.width = '0'; $('progText').textContent = '';
-    $('doneRow').hidden = true; $('aapCard').hidden = true;
+    $('doneRow').hidden = true; $('aapCard').hidden = true; $('doneBanner').hidden = true; $('abBtn').hidden = true;
+    document.body.classList.remove('finished');
     $('msg').textContent = ''; $('msg').className = 'msg';
   }
   function markStep(name) {
@@ -1179,6 +1200,13 @@
       document.querySelectorAll('#steps li').forEach((li) => { li.classList.remove('active'); if (!li.classList.contains('off')) li.classList.add('done'); });
       $('progFill').style.width = '100%'; $('progText').textContent = 'Finished';
       $('doneRow').hidden = false;
+      // a banner you can read from across the room, not a word next to a button
+      const when = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const jobs = (d.all || [d]).length;
+      $('doneSub').textContent = (jobs > 1 ? `${jobs} days synced` : `${S.settings.job_name || 'The day'} is synced`) + ` · finished ${when}`;
+      $('doneBanner').hidden = false;
+      document.body.classList.add('finished');
+      $('abBtn').hidden = false;
       $('openReport').hidden = !d.report;
       const all = d.all || [d];
       const cf = all.flatMap((x) => x.camera_fixes || []);

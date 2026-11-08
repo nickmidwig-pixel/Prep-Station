@@ -275,3 +275,19 @@ Nick's notes after the 1.7 run, thinking as an editor opening the app and the fo
   the "reopen windows?" box, and the wait loop only answered it while the count was 0. Stuck at 28 of 69 until
   Claude clicked three boxes by hand. Now the loop looks every 3 s whenever nothing has landed for 5 s, however
   many files are already counted; the 4-minute stall hint too.
+
+## 2.1 (2026-11-08, afternoon): DONE you can see, and hear the difference
+
+- Nick: "if I was glancing at this for a second I wouldn't know it was finished." A big green DONE banner with a
+  tick replaces the progress bar when the run ends ("20261106 is synced · finished 2:31 PM"); the Sync button
+  turns quiet. Hidden again on the next run.
+- "Hear the difference" button (viewer, after a run): at the playhead, the camera's reference mic summed with
+  the boom - 4 s from the mixer's ORIGINAL file at its own timecode, 4 s from the ALIGNED file, twice - with a
+  BEFORE / AFTER label over the picture. A misaligned pair sounds hollow and doubled; aligned sounds like one
+  mic. Audio-only days compare boom + lav. `Api.ab_play`, tests/test_ab.py.
+- Premiere check of the 2.0.2 run (full-screen control): XML imports clean, 39 items linked; our files' BWF
+  metadata reads 23.976 NDF when imported directly (same as the mixer's originals). Premiere shows any WAV that
+  comes in *through an XML* as 29.97 DF (10;49;35;00 for 10:48:56:00) - proven with the mixer's original file
+  through a test XML, and with four ways of writing the timecode element (24 ntsc, 30, none, no rate). Premiere
+  behaviour, not ours; positions on the timeline are right. Workaround for editors: import POLY_ALIGNED first,
+  then the XML.

@@ -81,11 +81,12 @@
         <button class="keys" id="keysBtn" title="Keyboard shortcuts (⌘/)">Shortcuts ⌘/</button>
       </div>
       <div class="viewer" id="viewer" hidden>
-        <div class="screen"><img id="frame" alt=""><span id="frameNote">Click the timeline to see the picture there</span><b class="bigtc" id="phTc">--:--:--:--</b></div>
+        <div class="screen"><img id="frame" alt=""><span id="frameNote">Click the timeline to see the picture there</span><b class="bigtc" id="phTc">--:--:--:--</b><b class="ablabel" id="abLabel" hidden></b></div>
         <div class="transport">
           <div class="row">
             <button class="btn small" id="playBtn" title="Play from the playhead (Space or L; K stops)">▶ Play</button>
             <button class="btn small ghosted" id="backBtn" title="Back 5 seconds (J)">↺ 5 s</button>
+            <button class="btn small ab" id="abBtn" hidden title="Camera mic + boom: 4 s from the mixer's file at its own timecode, then 4 s from the aligned file, twice">Hear the difference</button>
           </div>
           <div class="ptc"><span id="phWhat">Click the ruler or an empty spot to move the playhead. ← → move a frame, ⇧← ⇧→ a second.</span></div>
           <div class="selline" id="selLine" hidden></div>
@@ -233,6 +234,10 @@
     </div>
 
     <div class="go">
+      <div class="done-banner" id="doneBanner" hidden>
+        <div class="big"><span class="tick">✓</span> DONE</div>
+        <div class="sub" id="doneSub"></div>
+      </div>
       <div class="progress" id="progress" hidden>
         <div class="bar"><div id="progFill"></div></div>
         <span id="progText"></span>
