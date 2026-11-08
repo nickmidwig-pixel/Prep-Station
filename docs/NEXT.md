@@ -314,3 +314,8 @@ Nick's notes, all in:
 - **Fit** and the zoom slider moved above the timeline, into the toolbar. "Left out" dropped from the legend.
 - **Readability**: base type 13 → 14.5 px and every small size up a step; muted grey brightened (#8E969E →
   #A7AFB7); lane rows 34 → 38 px; lane names 13.5 px; roomier clip rows.
+
+## 2.2.1
+- Drag-select on the timeline now starts anywhere in the lane area, including on top of a clip (previously a press on a clip only selected that clip, so a band could not begin there). Text selection / image-drag on the canvas is suppressed so Safari/WebKit does not steal the gesture.
+- Camera lane colours follow tape convention: A red, B blue, C yellow; D green, E orange, F purple, G teal, H pink (no industry standard past C — these were chosen to stay distinct from the red/blue/yellow trio and from the sound colours).
+- Legend shows the three camera swatches instead of a single "Cameras" chip.

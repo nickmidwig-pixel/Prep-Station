@@ -80,7 +80,7 @@ with sync_playwright() as pw:
     pg.screenshot(path=f'{OUT}/3_tracks.png')
     # 2.2: drag-select on the timeline, sortable columns, mute / solo boxes
     box = pg.locator('#tl').bounding_box()
-    x0, y0 = box['x'] + 200, box['y'] + 60
+    x0, y0 = box['x'] + 250, box['y'] + 55          # starts ON a clip: a drag from a clip must still draw the box
     pg.mouse.move(x0, y0); pg.mouse.down(); pg.mouse.move(x0 + 500, y0 + 120, steps=8); pg.mouse.up()
     pg.wait_for_timeout(200)
     sel = pg.inner_text('#selLine') if not pg.is_hidden('#selLine') else ''

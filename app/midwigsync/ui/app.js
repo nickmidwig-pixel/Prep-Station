@@ -8,8 +8,10 @@
     cam: '#6E9CC4', aud: '#93B58A', fix: '#E2A23B', bad: '#E0614A', off: '#5E666E', led: '#FF3B30', man: '#F2EFE6',
     paper: '#E6E2D8', muted: '#A7AFB7', line: '#363E46', well: '#15181B', lane: '#1B1F23', label: '#20252A',
   };
-  // cameras get their own hue each (reference first); sound is coloured by what the mic is
-  const CAM_HUES = ['#6E9CC4', '#5FB3AE', '#9B8BD1', '#7FB0E8', '#C48BB8', '#8FA3B8', '#6FA88F', '#B39C7A'];
+  // cameras follow the camera-tape convention: A red, B blue, C yellow, then green, orange, purple, teal,
+  // pink (there is no industry standard past C; these are the next tape colours ACs reach for). Sound is
+  // coloured by what the mic is.
+  const CAM_HUES = ['#D9534F', '#4F86D9', '#E3C24A', '#5BB874', '#E8923F', '#9B7BD1', '#4FB8B8', '#D77AB0'];
   const ROLE_COL = { boom: '#D9B95B', lav: '#93B58A', plant: '#8FC1A9', safety: '#B8A77A', varies: '#A88F7A', multi: '#C99A6B', mix: '#9A938A', tc: '#6F7780', empty: '#5E666E' };
   const ROLE_LABEL = { boom: 'boom', lav: 'lav', plant: 'plant', safety: 'safety copy', varies: 'varies by take', multi: 'multitrack', mix: 'mix', tc: 'timecode', cam: 'camera' };
   const STEP_MAP = { 'Building aligned ISOs': 'Auto-Align Post', 'Checking alignment': 'Auto-Align Post' };
@@ -421,7 +423,8 @@
     if (!S.view || e.button !== 0) return;
     const r = cv.getBoundingClientRect();
     const mx = e.clientX - r.left, my = e.clientY - r.top;
-    if (mx < LABEL_W || my <= RULER_H || hit(mx, my)) return;
+    if (mx < LABEL_W || my <= RULER_H) return;
+    e.preventDefault();               // WebKit would otherwise start a text/image drag and swallow the moves
     S.band = { x0: mx, y0: my, x1: mx, y1: my, moved: false, keep: (e.shiftKey || e.metaKey || e.ctrlKey) ? new Set(S.picked) : new Set() };
   });
   window.addEventListener('mousemove', (e) => {
