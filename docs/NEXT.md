@@ -189,20 +189,35 @@ problems, all fixed in 1.6:
 
 Repo: github.com/nickmidwig-pixel/prep-station (private). Tests and data layout in README.md.
 
-## 1.8 — timecode correction: fix the fewest sources (Nick, 2026-11-07)
+## 1.8 (2026-11-07, night): fix the fewest sources
 
-Nick: "if 2 cameras are in sync, but audio is off it is better to change the
-audio … we should be changing the least amount of sources as possible … often
-there is one timecode box somewhere that doesn't get plugged in correctly or a
-GoPro that gets added to the mix — use your best assessment to figure out what
-timecode should get corrected."
+Nick: "if 2 cameras are in sync, but audio is off it is better to change the audio … we should be changing the
+least amount of sources as possible … often there is one timecode box somewhere that doesn't get plugged in
+correctly or a GoPro that gets added to the mix — use your best assessment to figure out what timecode should
+get corrected."
 
-Plan:
-- Pairwise waveform offsets between every source (cams + recorders), not just
-  source-vs-reference.
-- Cluster sources that agree with each other (within tolerance). The largest
-  cluster that contains the reference camera is "truth"; nothing in it changes.
-- Everything outside truth gets a correction = its offset to the truth cluster.
-  Tie-break toward moving fewer files (and never the reference).
-- Confirm step explains it: "A CAM + B CAM + 633 agree · GoPro off by +2.4 s →
-  correct GoPro". Corrected files still go to a new folder; originals untouched.
+Done (wavesync.consensus / decision_text):
+- A *source* is one clock: a camera body (every card it shot, via the lane) or a sound folder. Sources whose
+  clocks agree form groups; the biggest group is the truth and is never touched. Ties: the group with the
+  reference camera, then the one with more clips. Everything outside the truth is corrected onto it, however
+  many files it shot (so one GoPro moves, not three cameras; a recorder with a dead TC box moves, not the cams;
+  and if the reference camera is the odd one out, *it* moves, not the two sources that agree).
+- The decision is one line in the confirm step, the log and the report:
+  "A CAM + B CAM agree · 633 off by -2.41 s → correct 633 (2 files), not the 4 that agree."
+  Per-clip oddities (one card jammed late) are named too: "B001C002 (B CAM) off by -7.47 s on its own".
+- Two measurement bugs found by the new fixture, both real on Nick's days: (1) a clip was measured against the
+  other cards of its own camera (same clock, never overlapping) and a 5-second garbage match pulled the median;
+  now a clip is never checked against its own body and a verdict needs ≥15 s of shared sound. (2) A clip's
+  position came from the median of every roll's opinion, so one confident wrong roll could tip it; now the
+  biggest agreeing group of rolls decides and a tie leaves the clip alone.
+- After every render is in, the Auto-Align panel is closed (its backend crashes on exit so the panel never hears
+  "done" and would spin forever).
+- Tests: tests/make_consensus_day.py (audio_off, gopro, ref_off, all_good) + tests/test_consensus.py, in
+  check_originals.
+
+Not done / caveats:
+- Zaxcom-style recorders that write one folder per track look like several sound sources (one per folder) and
+  so count several times in the vote. Fine in practice (they agree with each other), but a day with two cameras
+  vs a 6-folder Zaxcom would move the cameras. Group audio folders by recorder (bext originator + same parent
+  folder) when that comes up.
+- Merging layouts whose aligned mics match (Conversat T01/T02) — waiting on Nick.

@@ -25,8 +25,13 @@ and checks again; `tests/test_guard.py` tries 19 ways to damage an original.
 2. **Alignment track** (refpick.py): every camera channel compared with the recorder's mics on a few clips;
    silent, LTC and mixer-feed channels (waveform rebuilt from the recorder's tracks, feed_score ≥ 0.7) are never
    used; the onboard mic that matches best wins (near-ties go to the lower channel).
-3. **Timecode check** (wavesync.py): every roll against every other; missed jams over 0.2 s corrected, no-TC files
-   placed by a whole-day search.
+3. **Timecode check** (wavesync.py): every roll against every other (never against the other cards of its own
+   camera body); missed jams over 0.2 s corrected, no-TC files placed by a whole-day search. **Fix the fewest
+   sources** (`consensus`): a source is one clock (camera body or sound folder); the biggest group of sources
+   whose clocks agree is the truth and is left alone (ties: the group with the reference camera), everything
+   outside it is corrected onto it. So one GoPro moves, not three cameras; a recorder with a dead TC box moves,
+   not the two cameras that agree; a reference camera that is alone in being off moves too. The one-line reason
+   (`decision`) is shown in the review stop, the log and the report.
 4. **Review stop** (`review_fixes`): the window shows every fix and waits: write / keep the files' own TC / stop.
 5. **Corrected sound** (`do_sound_set`): SOUND_TC_CORRECTED/ holds every sound file of the day in its original
    format; fixed files get the new TC, the rest are exact copies (APFS clones on the same drive).
@@ -35,7 +40,9 @@ and checks again; `tests/test_guard.py` tries 19 ways to damage an original.
    pass through untouched, never aligned to. The app builds the Resolve timeline (REF on A1), sets up the Auto-Align
    Post panel (its own Electron app: Reference = REF, every source ticked) and presses Render; renders are picked
    up from our folder or wherever Resolve's "Aligned files for ..." bin says, named with or without an offset. The
-   transcript runs alongside the render.
+   transcript runs alongside the render. The panel is closed once every render is in (its backend crashes on
+   exit, so the panel would otherwise spin at "Rendering…" forever; the hidden "reopen windows?" dialog that
+   crash leaves for next time is answered by `dismiss_backend_dialog`).
 7. **Aligned ISOs** (optional, ISO_ALIGNED/): each mic on its own, no mix.
 8. **Aligned polywavs** (POLY_ALIGNED/): per-take mixer polywavs come back aligned with the same names and track
    layout; ISO days become day polywavs of the largest whole TC minutes under 4 GB. Mix tracks included.
