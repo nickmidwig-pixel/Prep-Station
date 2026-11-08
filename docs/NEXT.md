@@ -188,3 +188,21 @@ problems, all fixed in 1.6:
 6. Rebuild, test (`tests/check_originals.py` must still say ORIGINALS UNTOUCHED), push.
 
 Repo: github.com/nickmidwig-pixel/prep-station (private). Tests and data layout in README.md.
+
+## 1.8 — timecode correction: fix the fewest sources (Nick, 2026-11-07)
+
+Nick: "if 2 cameras are in sync, but audio is off it is better to change the
+audio … we should be changing the least amount of sources as possible … often
+there is one timecode box somewhere that doesn't get plugged in correctly or a
+GoPro that gets added to the mix — use your best assessment to figure out what
+timecode should get corrected."
+
+Plan:
+- Pairwise waveform offsets between every source (cams + recorders), not just
+  source-vs-reference.
+- Cluster sources that agree with each other (within tolerance). The largest
+  cluster that contains the reference camera is "truth"; nothing in it changes.
+- Everything outside truth gets a correction = its offset to the truth cluster.
+  Tie-break toward moving fewer files (and never the reference).
+- Confirm step explains it: "A CAM + B CAM + 633 agree · GoPro off by +2.4 s →
+  correct GoPro". Corrected files still go to a new folder; originals untouched.
