@@ -162,9 +162,25 @@ def to16k(x48):
     return np.convolve(x48, _TAPS, mode='same')[::3].astype(np.float32)
 
 
-def _read(item, ch, a, n):
+def _read(item, ch, a, n, log=None):
+    """Read a stretch of a source file; a drive that drops off for a moment (external RAID, USB hub) is waited
+    for - up to two minutes - instead of ending the transcript (seen 2026-11-08: the loaner drive vanished for a
+    second mid-transcript and the whole step was lost)."""
     from .refpick import _read as rd
-    return rd(item, ch, a, n)
+    return patient(lambda: rd(item, ch, a, n), f"reading {item.get('name', '?')}", log)
+
+
+def patient(fn, what='', log=None, tries=12, wait_s=10):
+    import time
+    for i in range(tries):
+        try:
+            return fn()
+        except OSError as e:
+            if i == tries - 1:
+                raise
+            if i == 0 and log:
+                log(f'  {what}: {e.strerror or e}; the drive may have dropped off for a moment, waiting for it…')
+            time.sleep(wait_s)
 
 
 def _db(x):
@@ -260,7 +276,7 @@ def transcribe_day(project, out_dir, job, fps, df, language='en', log=print, pro
             if cancel and cancel():
                 raise KeyboardInterrupt
             n = int(min(CHUNK_S * SR, g['b'] - a))
-            x = sum(_read(l['clip'], l['ch'], a, n) for l in g['listen'])
+            x = sum(_read(l['clip'], l['ch'], a, n, log) for l in g['listen'])
             if a + n < g['b'] and n > 60 * SR:          # end the chunk at the quietest second of its last minute
                 tail = x[-60 * SR:]
                 k = 60
@@ -273,7 +289,7 @@ def transcribe_day(project, out_dir, job, fps, df, language='en', log=print, pro
                 segs = engine(to16k(x / pk * 0.7), lang)
                 spk_env = []
                 for s in g['speakers']:
-                    y = _read(s['clip'], s['ch'], a, n)
+                    y = _read(s['clip'], s['ch'], a, n, log)
                     m = len(y) // (SR // 50)
                     spk_env.append(10 * np.log10(np.mean(y[:m * (SR // 50)].reshape(m, SR // 50) ** 2, 1) + 1e-12))
                 for s in segs:

@@ -259,3 +259,11 @@ Nick's notes after the 1.7 run, thinking as an editor opening the app and the fo
   panel is closed until the job ends, plus one last look before "done".
 - Correction to what was said about safety tracks: ISO_ALIGNED does include the -6 dB safety copies
   (`AlexT01_BOOM_-6db.WAV`), as recorded. Left that way (everything carries through); say so to Nick.
+
+## 2.0.2 (2026-11-08): a drive that blinks doesn't end the run
+
+- Nick's 2.0.1 run: polys/ISOs/XML perfect, then at 10:43:18 the loaner drive was unreachable for a moment:
+  the transcript hit ENOENT on FriendsT01.WAV and the report step EACCES on the volume root, in the same second.
+  Transcript, SOUND REPORT and the report were lost; the job ended in error.
+- `transcribe.patient()` retries a read for up to 2 minutes on OSError; the report step is wrapped the same way
+  and, if it still fails, the job finishes with "Report could not be written" instead of an error.

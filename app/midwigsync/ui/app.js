@@ -1071,7 +1071,7 @@
   $('goBtn').addEventListener('click', () => go(S.running ? null : (multiDay() ? S.day : null)));
   $('goAll').addEventListener('click', () => go('all'));
   $('showOut').addEventListener('click', () => S.done && call('open_path', S.done.out));
-  $('openReport').addEventListener('click', () => S.done && call('open_path', S.done.report));
+  $('openReport').addEventListener('click', () => S.done && S.done.report && call('open_path', S.done.report));
   $('aapContinue').addEventListener('click', () => call('aap_continue'));
   $('aapPress').addEventListener('click', () => { $('aapLead').textContent = 'Opening the Auto-Align Post panel and pressing Render…'; call('aap_press_again'); });
   $('copyDir').addEventListener('click', () => { call('copy_text', $('aapDir').dataset.full || $('aapDir').textContent); $('copyDir').textContent = 'Copied'; setTimeout(() => { $('copyDir').textContent = 'Copy'; }, 1500); });
@@ -1179,6 +1179,7 @@
       document.querySelectorAll('#steps li').forEach((li) => { li.classList.remove('active'); if (!li.classList.contains('off')) li.classList.add('done'); });
       $('progFill').style.width = '100%'; $('progText').textContent = 'Finished';
       $('doneRow').hidden = false;
+      $('openReport').hidden = !d.report;
       const all = d.all || [d];
       const cf = all.flatMap((x) => x.camera_fixes || []);
       $('camFix').hidden = !cf.length;

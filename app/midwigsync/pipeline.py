@@ -339,7 +339,12 @@ class Job:
                     tr.join(0.5)
                     self.check()
             self.step('Report')
-            self.do_report()
+            from .transcribe import patient
+            try:
+                patient(self.do_report, 'writing the report', self.log)
+            except Exception as e:  # noqa: BLE001
+                self.log(f'Report could not be written: {e}')
+                self.report_path = None
             if sys.platform == 'darwin' and self.s['aap_mode'] == 'resolve':
                 try:                      # one last look for the backend's "reopen windows?" box
                     RA.dismiss_backend_dialog(self.log)
@@ -1074,7 +1079,11 @@ class Job:
         if not reps:
             return
         dest = os.path.join(self.out, SOUND_REPORT_DIR)
-        os.makedirs(dest, exist_ok=True)
+        try:
+            os.makedirs(dest, exist_ok=True)
+        except OSError as e:
+            self.log(f'  could not make {SOUND_REPORT_DIR}: {e}')
+            return
         n = 0
         for src in reps:
             try:
