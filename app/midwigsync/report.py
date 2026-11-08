@@ -105,6 +105,9 @@ def write_report(path, job, project, sync_report, stamped, aap_info, aligned, ve
     w('')
     w('TIMECODE CHECK')
     if sync_report:
+        if sync_report.get('decision'):
+            w('  ' + sync_report['decision'])
+            w('  (The fewest sources are corrected; the sources that agree with each other are left alone.)')
         w(f"  Rolls whose timecode agrees: {', '.join(sync_report.get('cluster', []))}")
         ck = sync_report.get('clock_ms') or {}
         smalls = {k: v for k, v in ck.items() if abs(v) >= 1}

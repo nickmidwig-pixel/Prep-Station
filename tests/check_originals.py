@@ -4,12 +4,17 @@ is a failure."""
 import hashlib, os, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOTS = ['/home/claude/testday', '/home/claude/testday_x', '/home/claude/mixerday', '/home/claude/slowday', '/home/claude/hopday',
-         '/home/claude/canonday', '/home/claude/canonday_plain', '/home/claude/layoutday']
+         '/home/claude/canonday', '/home/claude/canonday_plain', '/home/claude/layoutday',
+         '/home/claude/consday_audio_off', '/home/claude/consday_gopro', '/home/claude/consday_ref_off', '/home/claude/consday_all_good']
 OUTS = ('_SYNCED', '_MIDWIG', '_SYNC_WORK')
 
 sys.path.insert(0, HERE)
 import make_canon_raw
 make_canon_raw.build()      # Canon RAW stand-ins exist before the fingerprint
+for scen in ('audio_off', 'gopro', 'ref_off', 'all_good'):     # the fewest-sources days too
+    if not os.path.exists(f'/home/claude/consday_{scen}/truth.json'):
+        subprocess.run([sys.executable, os.path.join(HERE, 'make_consensus_day.py'), f'/home/claude/consday_{scen}', scen],
+                       check=True, capture_output=True)
 
 
 def walk():
@@ -35,7 +40,7 @@ print(f'{len(before)} original files fingerprinted')
 runs = [['run_pipeline.py'], ['run_pipeline.py', {'AAP2': '1'}], ['run_extras.py'], ['run_mixer_day.py'], ['run_two_days.py'], ['test_guard.py'],
         ['test_framerate.py'], ['test_slowmo.py'], ['test_refpick.py'], ['test_camera_copy.py'], ['test_transcript.py'],
         ['test_review.py'], ['test_canon_raw.py'], ['test_window_keys.py'], ['test_aap_panel.py'],
-        ['test_aap2_names.py'], ['test_layouts.py']]
+        ['test_aap2_names.py'], ['test_layouts.py'], ['test_consensus.py']]
 for r in runs:
     t = time.time()
     env = dict(os.environ, **(r[1] if len(r) > 1 else {}))

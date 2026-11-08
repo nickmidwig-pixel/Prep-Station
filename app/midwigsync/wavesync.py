@@ -18,6 +18,7 @@ TOL_SAME = 3                     # frames: rolls within this are "in sync" (AAP 
 FIX_THRESHOLD_S = 0.20           # bigger than this -> treat as a TC error and correct it
 MIN_SCORE = 0.30
 MIN_MARGIN = 1.25
+MIN_OVERLAP_S = 15              # a timecode verdict needs at least this much shared sound
 
 
 # ---------------------------------------------------------------- features
@@ -259,6 +260,84 @@ def robust_center(vals, tol):
     return best[1]
 
 
+# ---------------------------------------------------------------- which clocks to trust
+def consensus(clips, all_rolls, rel, tol, ref_set, tc_rolls=None):
+    """Decide whose timecode is right by changing the fewest sources.
+
+    A source is one clock: a camera body (all its cards) or a sound recorder folder. Sources whose clocks agree
+    (within tol samples) form groups; the biggest group is the truth and nothing in it is touched. Ties go to the
+    group holding the reference camera, then to the group with more clips. Everything outside the truth gets
+    corrected onto it - the one GoPro, the one recorder whose timecode box wasn't plugged in - however many
+    clips it shot. Returns cluster (trusted rolls), shift (roll -> clock offset to the anchor, samples),
+    anchor_roll, and a sources summary for the explanation."""
+    src_of, label, nclips, kind = {}, {}, defaultdict(int), {}
+    for c in clips:
+        s = c.get('lane') or c['roll']
+        src_of[c['roll']] = s
+        label[s] = c.get('lane_label') or (c['roll'] if s == c['roll'] else s)
+        nclips[s] += 1 if c['include'] else 0
+        kind[s] = c['kind']
+    for r in all_rolls:
+        src_of.setdefault(r, r)
+        label.setdefault(r, r)
+    rolls_of = defaultdict(list)
+    for r in all_rolls:
+        rolls_of[src_of[r]].append(r)
+    srcs = sorted(rolls_of)
+    ref_src = {src_of[r] for r in ref_set if r in src_of}
+
+    def rel_src(A, B):
+        vals = [rel(a, b) for a in rolls_of[A] for b in rolls_of[B] if a != b and rel(a, b) is not None]
+        return robust_center(vals, tol) if vals else None
+
+    rs = {(A, B): rel_src(A, B) for A in srcs for B in srcs if A != B}
+    agree = {A: [B for B in srcs if B != A and rs[(A, B)] is not None and abs(rs[(A, B)]) <= tol] for A in srcs}
+    anchor = max(srcs, key=lambda A: (len(agree[A]), A in ref_src, nclips[A], kind[A] == 'video', A)) if srcs else None
+    truth = ({anchor} | set(agree[anchor])) if anchor else set()
+    shift_src = {A: (0.0 if A == anchor else (rs[(A, anchor)] or 0.0)) for A in truth}
+    cluster = {r for A in truth for r in rolls_of[A]}
+    shift = {r: shift_src[src_of[r]] for r in cluster}
+    measured = {A for A in srcs if any(v is not None for (X, _), v in rs.items() if X == A)}
+    off = [A for A in srcs if A not in truth and A in measured]
+    no_tc = [A for A in srcs if A not in truth and A not in measured and tc_rolls is not None
+             and not any(r in tc_rolls for r in rolls_of[A])]
+    unknown = [A for A in srcs if A not in truth and A not in measured and A not in no_tc]
+    mk = lambda A: dict(key=A, label=label[A], rolls=rolls_of[A], clips=nclips[A], kind=kind.get(A))  # noqa: E731
+    sources = dict(truth=[mk(A) for A in sorted(truth, key=lambda A: (A != anchor, A))],
+                   off=[mk(A) for A in off], unknown=[mk(A) for A in unknown], no_tc=[mk(A) for A in no_tc],
+                   anchor=label[anchor] if anchor else None, reference=sorted(label[A] for A in ref_src))
+    return dict(cluster=cluster, shift=shift, anchor_roll=(rolls_of[anchor][0] if anchor else None), sources=sources)
+
+
+def _signed_s(v):
+    return f"{v:+.2f} s" if v is not None else 'an unknown amount'
+
+
+def decision_text(sources, odd_clips=None):
+    """One line a person can check: who agrees, who is off, and what gets corrected."""
+    truth = [s['label'] for s in sources['truth']]
+    off = sources['off']
+    unk = sources['unknown']
+    if not truth:
+        return 'Timecode: nothing could be compared.'
+    parts = []
+    if off:
+        agree = ' + '.join(truth) + (' agree' if len(truth) > 1 else ' is the only clock to go by')
+        who = ', '.join(f"{s['label']} off by {_signed_s(s.get('offset_s'))}" for s in off)
+        fix = ', '.join(s['label'] for s in off)
+        parts.append(f"{agree} · {who} → correct {fix} ({sum(s['clips'] for s in off)} file(s)), "
+                     f"not the {sum(s['clips'] for s in sources['truth'])} that agree")
+    else:
+        parts.append(f"{' + '.join(truth)} agree on timecode" if len(truth) > 1 else f"{truth[0]} is the only clock")
+    if sources.get('no_tc'):
+        parts.append(', '.join(s['label'] for s in sources['no_tc']) + ' has no timecode → placed by sound')
+    if unk:
+        parts.append('could not compare ' + ', '.join(s['label'] for s in unk) + ' (no overlapping sound)')
+    for name, lab, s in (odd_clips or []):
+        parts.append(f"{name} ({lab}) off by {_signed_s(s)} on its own → correct that one clip")
+    return 'Timecode: ' + '; '.join(parts) + '.'
+
+
 # ---------------------------------------------------------------- the whole-day analysis
 class SyncAnalyzer:
     def __init__(self, project, cache_dir=None, log=print, progress=None, ref=None, ref_sink_factory=None,
@@ -423,15 +502,16 @@ class SyncAnalyzer:
         per_clip = defaultdict(dict)
         tc_clips = [c for c in p.clips if c['id'] in self.env and self._trusted_tc(c) and c['include']
                     and 'tc_overlap' not in c['flags'] and not c.get('manual')]
+        src_of = {c['roll']: (c.get('lane') or c['roll']) for c in p.clips}
         for i, c in enumerate(tc_clips):
             if self.cancel():
                 raise KeyboardInterrupt
             self.progress(i, len(tc_clips), f"Checking timecode: {c['name']}")
             for r in rolls:
-                if r == c['roll']:
-                    continue
+                if r == c['roll'] or src_of.get(r) == src_of.get(c['roll']):
+                    continue        # another card of the same camera shares its clock (and never overlaps it)
                 m = self.measure(c, r, c['orig_start'], window_s=120)
-                if self.confident(m):
+                if self.confident(m) and m['cov'] * c['length'] >= MIN_OVERLAP_S * TC.SR:
                     m['start'] = c['orig_start'] + m['offset']
                     per_clip[c['id']][r] = m
                     pair[(c['roll'], r)].append(m['offset'])
@@ -445,22 +525,19 @@ class SyncAnalyzer:
             return None
 
         all_rolls = sorted({c['roll'] for c in p.clips})
-        agree = {a: [b for b in all_rolls if b != a and rel(a, b) is not None and abs(rel(a, b)) <= TOL_SAME * spf]
-                 for a in all_rolls}
         ref_set = set(ref_rolls(self.ref)) if self.ref else set()
-        anchor = max(all_rolls, key=lambda a: (len(agree[a]), a in ref_set,
-                                               sum(1 for c in p.clips if c['roll'] == a))) if all_rolls else None
-        cluster = ({anchor} | set(agree.get(anchor, []))) if anchor else set()
-        shift = {}
-        for r in cluster:
-            shift[r] = 0.0 if r == anchor else (rel(r, anchor) or 0.0)
+        cons = consensus(p.clips, all_rolls, rel, TOL_SAME * spf, ref_set, tc_rolls={c['roll'] for c in tc_clips})
+        cluster, shift = cons['cluster'], cons['shift']
+        anchor = cons['anchor_roll']
         report = dict(anchor=anchor, cluster=sorted(cluster), clock_ms={r: round(v / 48, 1) for r, v in shift.items()},
-                      roll_offsets={}, clips={})
+                      roll_offsets={}, clips={}, sources=cons['sources'])
         for a in all_rolls:
             vals = [rel(a, b) + shift[b] for b in cluster if b != a and rel(a, b) is not None]
             report['roll_offsets'][a] = 0.0 if a in cluster else (float(np.median(vals)) if vals else None)
-        if len(cluster) < len(all_rolls):
-            self.log(f"  Timecode agrees across: {', '.join(sorted(cluster))}")
+        for s in cons['sources']['off']:
+            offs = [report['roll_offsets'][r] for r in s['rolls'] if report['roll_offsets'].get(r) is not None]
+            s['offset_s'] = round(float(np.median(offs)) / TC.SR, 3) if offs else None
+        report['decision'] = decision_text(cons['sources'])
 
         def to_own(c, start_in_r, r):
             """Position measured in roll r's clock -> clip c's own clock (anchor clock if its roll is off)."""
@@ -491,10 +568,13 @@ class SyncAnalyzer:
                         moves[c['id']] = dict(start=c['orig_start'] + off, raw=None, roll=None, score=None,
                                               method='tc_check', note='roll median')
                 continue
-            starts = [to_own(c, m['start'], m['roll']) for m in ms]
-            st = float(np.median(starts))
-            off = st - c['orig_start']
-            best = max(ms, key=lambda m: m['score'])
+            # the biggest group of rolls that agree on where this clip sits decides (ties: leave it where it is);
+            # one roll with a confident but wrong match - or its own wrong timecode - can't drag the others
+            offs = {id(m): to_own(c, m['start'], m['roll']) - c['orig_start'] for m in ms}
+            off = robust_center(list(offs.values()), TOL_SAME * spf)
+            st = c['orig_start'] + off
+            near = [m for m in ms if abs(offs[id(m)] - off) <= TOL_SAME * spf]
+            best = max(near or ms, key=lambda m: m['score'])
             if abs(off) > FIX_THRESHOLD_S * TC.SR and (self.confident(best, strict=True) or len(ms) >= 2):
                 moves[c['id']] = dict(start=st, raw=best['start'], roll=best['roll'], score=best['score'],
                                       method='tc_check')
@@ -564,6 +644,12 @@ class SyncAnalyzer:
             if 'sync_failed' in c['flags']:
                 c['flags'].remove('sync_failed')
         report['moved'] = {p.by_id(k)['name']: p.by_id(k)['sync'] for k in moves}
+        odd = [(p.by_id(k)['name'], p.by_id(k).get('lane_label') or p.by_id(k)['roll'],
+                round((p.by_id(k)['sync'] or {}).get('offset', 0) / TC.SR, 3))
+               for k, mv in moves.items() if p.by_id(k)['roll'] in cluster and mv['method'] == 'tc_check']
+        if odd:
+            report['decision'] = decision_text(report['sources'], odd)
+        self.log('  ' + report['decision'])
         self.results = report
         return report
 

@@ -470,7 +470,8 @@ class Job:
                              score=s.get('score'), against=s.get('against')))
         self.decision = None
         self.user_decide = threading.Event()
-        self.emit('review_tc', dict(fixes=rows, checked=sr.get('checked'), in_sync=sr.get('in_sync')))
+        self.emit('review_tc', dict(fixes=rows, checked=sr.get('checked'), in_sync=sr.get('in_sync'),
+                                    decision=sr.get('decision'), sources=sr.get('sources')))
         self.log(f'Waiting for you to confirm {len(rows)} timecode fix(es)…')
         while not self.user_decide.wait(0.5):
             self.check()
@@ -729,6 +730,16 @@ class Job:
         self.aap_info.update(dict(project=info.get('project', ''), renders=f"{st['done']} of {st['want']} pieces",
                                   render_dir=render_dir))
         self.emit('aap_done', {})
+        if pressed and st['complete'] and sys.platform == 'darwin' and not self.s.get('_fake_aap'):
+            # Every render is in. The panel itself often never hears that its backend finished (the backend
+            # crashes on exit), so it would sit at "Rendering…" with a spinner for good. Give it a moment to
+            # file the renders into its bin, then close it.
+            time.sleep(8)
+            try:
+                if RA.close_aap_panel():
+                    self.log('  Closed the Auto-Align panel (all renders collected).')
+            except Exception:  # noqa: BLE001
+                pass
         if not st['files']:
             self.log('No Auto-Align renders found; exporting unaligned audio.')
             self.aap_info['status'] = 'no renders'

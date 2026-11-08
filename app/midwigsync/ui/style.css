@@ -496,3 +496,5 @@ body.running .steps .pick { pointer-events: none; opacity: .7; }
 
 /* a step running alongside another (the transcript while Auto-Align renders) */
 #steps li.busy .state { color: var(--fix); font-variant-numeric: tabular-nums; }
+
+.review .why { color: var(--fix); font-size: 12.5px; margin: 2px 0 8px; }

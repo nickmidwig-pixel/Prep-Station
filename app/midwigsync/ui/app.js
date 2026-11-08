@@ -1201,6 +1201,8 @@
       $('review').hidden = false;
       $('revLead').textContent = `${fx.length} file${fx.length === 1 ? '' : 's'} ${fx.length === 1 ? 'is' : 'are'} off from ${fx.length === 1 ? 'its' : 'their'} own timecode. `
         + 'Nothing has been written yet. Click any of them in the timeline to look closer.';
+      $('revWhy').hidden = !d.decision;
+      $('revWhy').textContent = d.decision ? d.decision.replace(/^Timecode: /, '') + ' (the fewest sources change; the ones that agree are left alone.)' : '';
       $('revList').innerHTML = fx.map((x) => `<li><b>${esc(x.roll)} · ${esc(x.name)}</b>
           <span class="tc">${x.old ? `<s>${x.old}</s>` : '<s>no TC</s>'}${x.new}</span>
           <span class="w">${x.shift_s != null ? signedSec(x.shift_s) + ' · ' : ''}${esc(x.how)}${x.against ? ' against ' + esc(x.against) : ''}${x.score != null ? ` (match ${x.score})` : ''}</span></li>`).join('');
