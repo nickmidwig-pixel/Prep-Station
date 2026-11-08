@@ -720,12 +720,15 @@ class Job:
                 self.emit('aap_status', dict(done=st['done'], want=st['want'], seen=st['seen']))
                 last = st
                 last_change = time.time()
-            if pressed and st['done'] == 0 and sys.platform == 'darwin' and time.time() - dialog_t > 3:
+            # the backend's "reopen windows?" dialog can come up at any launch - the first one, or a "Press Render
+            # again" after a crash with files already counted (2026-11-08: stuck at 28 of 69 because this only
+            # looked while the count was 0). Look every 3 s whenever nothing has landed for a while.
+            if pressed and sys.platform == 'darwin' and time.time() - dialog_t > 3 and time.time() - last_change > 5:
                 dialog_t = time.time()
-                RA.dismiss_backend_dialog(self.log)     # the backend's "reopen windows?" dialog, if it is up
+                RA.dismiss_backend_dialog(self.log)
             # nothing landed for a while: Auto-Align sits at "Converting... 0/N" when its backend hangs
             # (a hidden dialog, see RA.backend_check). Say so once, with what to do.
-            if pressed and st['done'] == 0 and not warned_stall and time.time() - last_change > 240:
+            if pressed and not warned_stall and time.time() - last_change > 240:
                 warned_stall = True
                 ok, msg = RA.backend_check(self.log, timeout=10)
                 hint = (msg if not ok else

@@ -267,3 +267,11 @@ Nick's notes after the 1.7 run, thinking as an editor opening the app and the fo
   Transcript, SOUND REPORT and the report were lost; the job ended in error.
 - `transcribe.patient()` retries a read for up to 2 minutes on OSError; the report step is wrapped the same way
   and, if it still fails, the job finishes with "Report could not be written" instead of an error.
+
+## 2.0.3 (2026-11-08): the reopen dialog after "Press Render again"
+
+- Nick's 2.0.2 run: power to the loaner drive dropped at 28 of 69; Auto-Align's backend died. "Press Render
+  again" worked, but every backend launch after a crash (--get-known-formats, --has-license, process-json) gets
+  the "reopen windows?" box, and the wait loop only answered it while the count was 0. Stuck at 28 of 69 until
+  Claude clicked three boxes by hand. Now the loop looks every 3 s whenever nothing has landed for 5 s, however
+  many files are already counted; the 4-minute stall hint too.
