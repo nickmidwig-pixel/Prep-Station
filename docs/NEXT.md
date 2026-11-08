@@ -244,3 +244,18 @@ Nick's notes after the 1.7 run, thinking as an editor opening the app and the fo
 - Kept against the notes: the -6 dB safety tracks stay inside the polywavs (the mixer recorded them; they are not
   written as ISOs); the report is still written, in WORK FILES.
 - tests/shot_ui.py: Playwright screenshots + smoke test of the new controls (in check_originals).
+
+## 2.0.1 (2026-11-08): the mixer's files, aligned
+
+- Nick, looking at `20261106_POLY_ALN_A_01of03_TC104856.WAV` next to the mixer's `GeorgiaT01.WAV`: "I just want this
+  to feel like the same files that came off the sound mixer, but aligned." `refplan.delivery_style` no longer
+  turns takes over 25 minutes into day polywavs: a mixer's multitrack takes are always delivered per take, same
+  names, same folder (`POLY_ALIGNED/11-6-UDP/GeorgiaT01.WAV`), same bext/iXML (scene, take, notes, track names),
+  so Avid's bin and the sound report line up file for file. Day polywavs only for mono-ISO recorders.
+- Avid and sound reports: Avid reads scene/take/notes/track names from the BWF itself; the CSV/PDF is for the
+  assistant checking the bin. It is copied to SOUND REPORT/ (2.0); nothing else needed.
+- The "reopen windows?" box showed up *after* the 1.8 run (the backend crashes on exit when the panel closes);
+  1.8 only answered it while waiting for renders. Now a sweeper thread answers it every 5 s from the moment the
+  panel is closed until the job ends, plus one last look before "done".
+- Correction to what was said about safety tracks: ISO_ALIGNED does include the -6 dB safety copies
+  (`AlexT01_BOOM_-6db.WAV`), as recorded. Left that way (everything carries through); say so to Nick.
