@@ -453,7 +453,7 @@
   async function showFrame(s) {
     const r = await call('frame', Math.round(s), S.sel);
     const img = $('frame');
-    if (r && r.ok) { img.src = r.img; img.classList.add('on'); $('frameNote').textContent = r.label || ''; img.classList.toggle('pv', !!r.preview); }
+    if (r && r.ok) { img.src = r.img; img.classList.add('on'); $('frameNote').textContent = r.label || ''; img.classList.toggle('pv', !!r.preview); if (r.why) $('phWhat').textContent = r.why; }
     else { img.classList.remove('on'); $('frameNote').textContent = (r && r.why) || 'No picture here'; }
     // Canon RAW with no viewing copy yet: offer to have Resolve make one
     const rb = $('rawBtn');

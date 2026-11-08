@@ -398,7 +398,8 @@ class Api:
                 img = self._still(c, 608)
                 if img:                # Canon RAW: the picture the camera saved with the clip (its first frame)
                     return dict(ok=True, img=img, label=f'{who} · camera preview, start of clip', preview=True,
-                                raw=True, cid=c['id'])
+                                raw=True, cid=c['id'],
+                                why='Canon RAW: only the camera\'s own still until Resolve makes a viewing copy (Make playable).')
                 return dict(ok=False, why=f"{c['name']}: RAW, no picture preview here.", raw=True, cid=c['id'])
         off = max(0, at - c['start']) / TC.SR
         key = (src, round(off, 1))
@@ -776,7 +777,8 @@ class Api:
                 if not RA.ax_trusted(prompt=True):
                     self.emit('log', f'Give {APP_NAME} Accessibility access in System Settings › Privacy & Security, then try again.')
                     return
-                ok, msg = RA.backend_check(lambda m: self.emit('log', m), timeout=10)
+                RA.dismiss_backend_dialog(lambda m: self.emit('log', m))
+                ok, msg = RA.backend_check(lambda m: self.emit('log', m), timeout=20)
                 self.emit('log', '  ' + msg)
                 if not ok:
                     self.emit('aap_hint', dict(text=msg))

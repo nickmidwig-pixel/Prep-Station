@@ -683,6 +683,7 @@ class Job:
         self.user_continue.clear()
         last = None
         last_change = time.time()
+        dialog_t = 0.0
         warned_stall = False
         asked = 0.0
         known = {d for d, _r in watcher.dirs}
@@ -701,6 +702,9 @@ class Job:
                 self.emit('aap_status', dict(done=st['done'], want=st['want'], seen=st['seen']))
                 last = st
                 last_change = time.time()
+            if pressed and st['done'] == 0 and sys.platform == 'darwin' and time.time() - dialog_t > 3:
+                dialog_t = time.time()
+                RA.dismiss_backend_dialog(self.log)     # the backend's "reopen windows?" dialog, if it is up
             # nothing landed for a while: Auto-Align sits at "Converting... 0/N" when its backend hangs
             # (a hidden dialog, see RA.backend_check). Say so once, with what to do.
             if pressed and st['done'] == 0 and not warned_stall and time.time() - last_change > 240:
@@ -914,15 +918,21 @@ class Job:
             for x in ps:
                 if tuple(x['channels']) not in layouts:
                     layouts.append(tuple(x['channels']))
-            seen = Counter()
+            # one XML track per mic name: the same name in two polywav sets (BOOM1 in Conversat T01 and T02)
+            # shares a track, since the sets never overlap in time; the XML writer splits any real overlap itself
+            by_name = {}
+            order = []
             for lay in layouts:
                 for i, nm in enumerate(lay):
-                    seen[nm] += 1
-                    lab = nm if seen[nm] == 1 else f'{nm} ({seen[nm]})'
-                    tracks.append(dict(label=lab, clips=[dict(path=x['path'], start=x['start'], length=x['n'], kind='audio',
-                                                             channels=len(lay), src_track=i + 1, reel=nm,
-                                                             media_start_frames=TC.samples_to_frames(x['start'], p.fps))
-                                                        for x in ps if tuple(x['channels']) == lay]))
+                    if nm not in by_name:
+                        by_name[nm] = []
+                        order.append(nm)
+                    by_name[nm] += [dict(path=x['path'], start=x['start'], length=x['n'], kind='audio',
+                                         channels=len(lay), src_track=i + 1, reel=nm,
+                                         media_start_frames=TC.samples_to_frames(x['start'], p.fps))
+                                    for x in ps if tuple(x['channels']) == lay]
+            for nm in order:
+                tracks.append(dict(label=nm, clips=sorted(by_name[nm], key=lambda c: c['start'])))
             tag = 'ALN' if folder == 'POLY_ALIGNED' else 'UNALIGNED'
             if self.s.get('export_xml', True):
                 path = write_day_xml(os.path.join(xml_dir, f'{job}_SYNC_{tag}.xml'), f'{job} SYNC {tag}', p.fps,

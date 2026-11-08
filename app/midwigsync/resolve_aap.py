@@ -348,7 +348,45 @@ AAP_SAVED_STATE = os.path.expanduser('~/Library/Saved Application State/com.soun
 AAP_LOG = os.path.expanduser('~/Library/Logs/aap-davinci-resolve-log.txt')
 
 
-def backend_check(log=print, timeout=15):
+def dismiss_backend_dialog(log=print, wait_s=0):
+    """macOS shows AutoAlignPost a "reopen windows?" dialog after its crash-on-exit; started in the background
+    nobody can answer it and the panel waits for ever. Find that window through Accessibility and press
+    "Don't Reopen". Returns how many dialogs were answered. Needs Accessibility permission for Prep Station."""
+    if sys.platform != 'darwin':
+        return 0
+    try:
+        AS = _ax()
+        from AppKit import NSWorkspace
+    except Exception:  # noqa: BLE001
+        return 0
+    answered = 0
+    t0 = time.time()
+    while True:
+        for a in NSWorkspace.sharedWorkspace().runningApplications():
+            if str(a.bundleIdentifier() or '') != 'com.soundradix.AutoAlignPost':
+                continue
+            app = AS.AXUIElementCreateApplication(a.processIdentifier())
+            err, wins = AS.AXUIElementCopyAttributeValue(app, 'AXWindows', None)
+            for w in (wins or []):
+                stack = [w]
+                while stack:
+                    el = stack.pop()
+                    e2, role = AS.AXUIElementCopyAttributeValue(el, 'AXRole', None)
+                    e3, title = AS.AXUIElementCopyAttributeValue(el, 'AXTitle', None)
+                    if role == 'AXButton' and str(title or '').lower().replace('\u2019', "'") in ("don't reopen", "dont reopen"):
+                        if AS.AXUIElementPerformAction(el, 'AXPress') == 0:
+                            answered += 1
+                            log("  Auto-Align Post: answered its \"reopen windows?\" dialog (Don't Reopen)")
+                        stack = []
+                        break
+                    e4, kids = AS.AXUIElementCopyAttributeValue(el, 'AXChildren', None)
+                    stack.extend(kids or [])
+        if answered or time.time() - t0 >= wait_s:
+            return answered
+        time.sleep(0.5)
+
+
+def backend_check(log=print, timeout=30):
     """Auto-Align Post is a panel plus a separate backend program; the panel asks the backend a question before
     every render and waits for the answer. On 2026-11-07 the backend had a stale macOS "reopen windows?" dialog
     stuck behind it (left from being killed mid-run), so it never answered and the panel sat at
@@ -366,13 +404,27 @@ def backend_check(log=print, timeout=15):
         except Exception as e:  # noqa: BLE001
             log(f'  Auto-Align Post: could not clear saved state: {e}')
     try:
-        r = subprocess.run([AAP_BACKEND, '--version'], capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return False, (f'Auto-Align\'s backend did not answer in {timeout} s. It is probably waiting on a dialog '
-                       'nobody can see. In Terminal run:\n  "' + AAP_BACKEND + '" --version\nanswer any dialog '
-                       '"Don\'t Reopen", then press Render again.')
+        pr = subprocess.Popen([AAP_BACKEND, '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except Exception as e:  # noqa: BLE001
         return False, f'could not start Auto-Align\'s backend: {e}'
+    t0 = time.time()
+    out = ''
+    while True:
+        try:
+            out, _err = pr.communicate(timeout=1.0)
+            break
+        except subprocess.TimeoutExpired:
+            pass
+        dismiss_backend_dialog(log)          # it may be sitting on the "reopen windows?" dialog
+        if time.time() - t0 > timeout:
+            pr.kill()
+            return False, (f'Auto-Align\'s backend did not answer in {timeout} s. It is probably waiting on a dialog '
+                           'nobody can see. In Terminal run:\n  "' + AAP_BACKEND + '" --version\nanswer any dialog '
+                           '"Don\'t Reopen", then press Render again.')
+    class R:  # noqa: D401
+        pass
+    r = R()
+    r.returncode, r.stdout, r.stderr = pr.returncode, out, _err
     out = (r.stdout or '').strip()
     if r.returncode != 0 or 'version' not in out:
         return False, f'Auto-Align\'s backend answered badly (exit {r.returncode}): {out or r.stderr}'
