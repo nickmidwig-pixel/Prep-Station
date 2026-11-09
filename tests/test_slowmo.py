@@ -43,15 +43,16 @@ if not os.path.exists(D + '/.made'):
     mov(f'{D}/E_C500/E001C001.MOV', '24000/1001', 8, '14:00:00:00', created='2026-11-08T14:00:00Z', took=8)
     mov(f'{D}/E_C500/E001C002.MOV', '24000/1001', 25, '14:01:00:00', audio=False, created='2026-11-08T14:01:00Z', took=10)  # S&F: 25 s of picture in 10 s
     mov(f'{D}/E_C500/E001C003.MOV', '24000/1001', 8, '14:05:00:00', created='2026-11-08T14:05:00Z', took=8)
-    mov(f'{D}/E_C500/E001C004.MOV', '24000/1001', 8, '03:12:40:00', audio=False, created='2026-11-08T14:06:00Z')  # S&F in Rec Run: TC nowhere near the clock
+    mov(f'{D}/E_C500/E001C004.MOV', '24000/1001', 8, '03:12:40:00', audio=False, created='2026-11-08T14:06:00Z')  # silent, TC not jammed: B-roll, real time (11/09: silence is no tell)
     mov(f'{D}/E_C500/E001C005.MOV', '24000/1001', 8, '14:07:00:00', audio=False, created='2026-11-08T14:07:00Z', took=8)  # silent but real time: stays
+    mov(f'{D}/E_C500/E001C006.MOV', '24000/1001', 25, '14:08:00:00', created='2026-11-08T14:08:00Z', took=5)  # has sound, still shot 5x faster
     open(D + '/.made', 'w').write('1')
 
 p = Project(); p.add_paths([D]); p.analyze()
 want = {'A001C001.MOV': None, 'A001C002.MOV': None, 'B001C001.MOV': None, 'B001C002.MOV': 'timebase',
         'C0001.MP4': 'in_camera', 'C0002.MP4': 'likely', 'C0003.MP4': None, 'C0004.MP4': 'likely' if False else None,
         'GX010001.MP4': 'rate', 'E001C001.MOV': None, 'E001C002.MOV': 'clock', 'E001C003.MOV': None,
-        'E001C004.MOV': 'recrun', 'E001C005.MOV': None}
+        'E001C004.MOV': None, 'E001C005.MOV': None, 'E001C006.MOV': 'clock'}
 ok = True
 print('frame rate:', p.fps_info['label'], p.fps_info['status'], '|', p.fps_info['reason'])
 ok &= p.fps_info['label'] == '23.976' and p.fps_info['status'] == 'ok'
@@ -60,6 +61,9 @@ for c in sorted(p.clips, key=lambda c: c['name']):
     good = got == want[c['name']]
     ok &= good
     print(f"  {'ok ' if good else 'BAD'} {c['roll']:8s} {c['name']:14s} {TC.rate_label(c['fps']):7s} audio={bool(c.get('audio_streams'))!s:5s} -> {got}  {(c.get('slowmo') or {}).get('why', '')}")
+e6 = next(c for c in p.clips if c['name'] == 'E001C006.MOV')
+ok &= e6['slowmo']['shot'] == '120' and 'Shot at about 120 fps' in e6['slowmo']['why'] and 'sound' not in e6['slowmo']['why'].lower()
+print('  E001C006:', e6['slowmo']['why'], '| sure:', e6['slowmo']['sure'])
 # by hand: unmark the 'likely' one, mark a normal one
 c2 = next(c for c in p.clips if c['name'] == 'C0002.MP4'); c2['slowmo_user'] = False
 c4 = next(c for c in p.clips if c['name'] == 'C0004.MP4'); c4['slowmo_user'] = True
@@ -77,7 +81,7 @@ j.run()
 ok &= not errs
 main = open(f'{out}/TIMELINES/SLOWDAY_SYNC_ISO.xml').read() if os.path.exists(f'{out}/TIMELINES/SLOWDAY_SYNC_ISO.xml') else ''
 slow = open(f'{out}/TIMELINES/SLOWDAY_SLOW_MOTION.xml').read()
-slow_names = ['B001C002.MOV', 'C0001.MP4', 'C0002.MP4', 'GX010001.MP4', 'E001C002.MOV', 'E001C004.MOV']
+slow_names = ['B001C002.MOV', 'C0001.MP4', 'C0002.MP4', 'GX010001.MP4', 'E001C002.MOV', 'E001C006.MOV']
 in_main = [n for n in slow_names if n in main]
 in_slow = [n for n in slow_names if n in slow]
 print('  sync XML has slow clips:', in_main or 'none', '| normal clips in sync XML:', all(n in main for n in ('A001C001.MOV', 'B001C001.MOV', 'C0003.MP4', 'C0004.MP4')))

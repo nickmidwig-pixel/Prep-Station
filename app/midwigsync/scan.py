@@ -157,9 +157,31 @@ def _recording_span(c):
         if end is None:
             continue
         span = (end - start).total_seconds()
+        if span < 3 and end is not ends[-1]:
+            continue                  # that stamp is the start too (Canon MP4 / RAW), not the end: use the last write
         if 0 < span < 86400:
             return span
     return None
+
+
+_NOMINAL = (24, 25, 30, 48, 50, 60, 72, 75, 90, 96, 100, 110, 120, 144, 150, 160, 180, 200, 240, 300)
+
+
+def _shot_rate(play_fps, speed):
+    """The rate a clip was shot at, from its playback rate and how much slower it plays, as a cameraman says it:
+    23.976 played 5x slower -> '120'. Snaps to the nearest common rate when close, else '~N'."""
+    try:
+        from fractions import Fraction
+        f = float(Fraction(str(play_fps))) / max(1e-6, float(speed))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return '?'
+    best = min(_NOMINAL, key=lambda n: abs(n - f) / n)
+    return str(best) if abs(best - f) / best < 0.08 else f'~{f:.0f}'
+
+
+def _mmss(sec):
+    sec = int(round(sec))
+    return f'{sec // 60}:{sec % 60:02d}' if sec >= 60 else f'{sec} s'
 
 
 _FOLDER_DATE_RES = (re.compile(r'(?<!\d)(20\d{2})[-_. ]?(\d{2})[-_. ]?(\d{2})(?!\d)'),    # 20250208, 2025-02-08
@@ -749,7 +771,8 @@ class Project:
           timebase  : recorded at a higher rate than the project (C500 switched to 59.94): conform to slow down
           rate      : a different, normal-speed rate (29.97 on a 23.976 day)
           in_camera : the file says it was shot faster than it plays (Sony S&Q captureFps, sensor fps)
-          likely    : no sound, and its timecode runs on past the start of the next clip on the same card
+          clock     : shot faster than it plays, by the camera's own clock (see below)
+          likely    : runs on past the start of the next clip on the same card
           marked    : you marked it"""
         pf = float(self.fps)
         for c in self.clips:
@@ -764,73 +787,81 @@ class Project:
             if fps and TC.rate_label(fps) != TC.rate_label(self.fps):
                 ratio = float(fps) / pf
                 if ratio > 1.5:
-                    c['slowmo'] = dict(kind='timebase', speed=round(pf / float(fps), 3),
+                    c['slowmo'] = dict(kind='timebase', speed=round(pf / float(fps), 3), shot=TC.rate_label(fps),
                                        why=f'Shot at {TC.rate_label(fps)} fps. Interpret as {TC.rate_label(self.fps)} '
                                            f'and it plays at {pf / float(fps) * 100:.0f}% speed.')
                 else:
                     c['slowmo'] = dict(kind='rate', speed=1.0,
                                        why=f'{TC.rate_label(fps)} fps on a {TC.rate_label(self.fps)} day.')
             elif cap and fps and float(cap) > float(fps) * 1.2:
-                c['slowmo'] = dict(kind='in_camera', speed=round(float(fps) / float(cap), 3),
+                c['slowmo'] = dict(kind='in_camera', speed=round(float(fps) / float(cap), 3), shot=TC.rate_label(cap),
                                    why=f'Shot at {TC.rate_label(cap)} fps, plays back slowed down in camera '
                                        f'({float(fps) / float(cap) * 100:.0f}% speed).')
             if user and not c['slowmo']:
                 c['slowmo'] = dict(kind='marked', speed=None, why='Marked as slow motion by you.')
-        # Slow & fast motion with playback at the project rate and no capture rate in the file (Canon S&F plays
-        # at 23.98 and, per Canon's manuals, records no sound and forces timecode to Rec Run). Two tells that need
-        # no camera-specific metadata, used only on silent clips:
-        #   clock : the file's own clock says how long the take really took (creation stamp -> last write);
-        #           a clip that plays much longer than that was shot faster than it plays
-        #   recrun: on a jam-synced day every clip's timecode sits a fixed distance from the camera's clock;
-        #           an S&F clip in Rec Run doesn't
-        by_roll = defaultdict(list)
-        for c in self.clips:
-            if c['kind'] == 'video' and not c.get('duplicate_of'):
-                by_roll[(c['roll'], c.get('day'))].append(c)
-        for cl in by_roll.values():
-            deltas = []
-            for c in cl:
-                c['_clock'] = _clock_samples(c)
-                if c['_clock'] is not None and c.get('orig_start') is not None and c.get('audio_streams') and not c['slowmo']:
-                    deltas.append(c['orig_start'] - c['_clock'])
-            d0 = float(np.median(deltas)) if deltas else None
-            for c in cl:
-                if c['slowmo'] or c.get('audio_streams') or c.get('slowmo_user') is False:
-                    continue
-                span = _recording_span(c)
-                if span is not None and span > 1.0 and c['length'] > (span * 1.3 + 2) * TC.SR:
-                    c['slowmo'] = dict(kind='clock', speed=round(span * TC.SR / c['length'], 2),
-                                       why=f'No sound, and the camera took {span:.0f} s to record it but it plays for '
-                                           f'{c["length"] / TC.SR:.0f} s. Shot faster than it plays.')
-                elif d0 is not None and c['_clock'] is not None and c.get('orig_start') is not None \
-                        and abs((c['orig_start'] - c['_clock']) - d0) > 60 * TC.SR:
-                    c['slowmo'] = dict(kind='recrun', speed=None,
-                                       why='No sound, and its timecode does not line up with the camera clock the way '
-                                           'the other clips on this card do (slow & fast motion switches Canon to Rec '
-                                           'Run). Looks like slow motion.')
-        for c in self.clips:
-            c.pop('_clock', None)
-        # no metadata: a silent clip whose timecode runs into the next clip on the same card can't be real time
+        # Slow & fast motion played back at the project rate, with no capture rate in the file (Canon S&F, many
+        # others). Two tells that need no camera-specific metadata. Sound is NOT one of them: B-roll, an unplugged
+        # input or a timecode-only interview camera are silent and real time (Nick, 11/09).
+        #   clock : the camera's own clock says how long the take really took (record start from the clip name or
+        #           creation stamp -> end stamp / last write). A clip that plays much longer was shot faster.
+        #   next  : the next clip on the same card started sooner (camera clock, else timecode) than this one would
+        #           have ended in real time. One camera can't record two clips at once.
+        # Both together = certain. One alone = shown as slow motion and asked once.
         rolls = defaultdict(list)
         for c in self.clips:
-            if c['kind'] == 'video' and c.get('orig_start') is not None and not c.get('duplicate_of'):
+            if c['kind'] == 'video' and not c.get('duplicate_of'):
                 rolls[(c['roll'], c.get('day'))].append(c)
         for cl in rolls.values():
-            cl.sort(key=lambda c: c['orig_start'])
-            for a, b in zip(cl, cl[1:]):
-                if a['slowmo'] or a.get('audio_streams') or a.get('slowmo_user') is False:
+            def key(c):
+                st = _clock_start(c)
+                return (0, st.timestamp()) if st else (1, c.get('orig_start') or 0)
+            cl.sort(key=key)
+            for i, c in enumerate(cl):
+                if c['slowmo'] or c.get('slowmo_user') is False:
                     continue
-                real = b['orig_start'] - a['orig_start']
-                if real > 0 and a['length'] > real + 2 * TC.SR:
-                    a['slowmo'] = dict(kind='likely', speed=round(real / a['length'], 2),
-                                       why='No sound, and its timecode runs into the next clip on this card, so it '
-                                           'plays longer than it took to shoot. Looks like slow motion.')
+                L = c['length'] / TC.SR
+                tells, speeds = [], []
+                span = _recording_span(c)
+                if span is not None and span > 1.0 and L > span * 1.3 + 2:
+                    tells.append(('clock', span))
+                    speeds.append(span / L)
+                nxt = cl[i + 1] if i + 1 < len(cl) else None
+                gap = None
+                if nxt is not None:
+                    s0, s1 = _clock_start(c), _clock_start(nxt)
+                    if s0 and s1:
+                        gap = (s1 - s0).total_seconds()
+                    elif c.get('orig_start') is not None and nxt.get('orig_start') is not None:
+                        gap = (nxt['orig_start'] - c['orig_start']) / TC.SR
+                if gap is not None and 0 < gap and L > gap + 2:
+                    tells.append(('next', gap))
+                    if not speeds:
+                        speeds.append(gap / L)     # an upper bound: the gap includes the pause between takes
+                if not tells:
+                    continue
+                speed = speeds[0]
+                shot = _shot_rate(c.get('fps') or self.fps, speed)
+                if tells[0][0] != 'clock':          # only the gap to the next clip: a lower bound on the rate
+                    shot = shot.lstrip('~') + '+'
+                parts = []
+                for t, v in tells:
+                    if t == 'clock':
+                        parts.append(f'the camera took {_mmss(v)} to record a clip that plays {_mmss(L)}')
+                    else:
+                        parts.append(f'the next clip on this card started {_mmss(v)} after this one, '
+                                     f'yet this one plays {_mmss(L)}')
+                c['slowmo'] = dict(kind='clock' if tells[0][0] == 'clock' else 'likely', speed=round(speed, 3),
+                                   shot=shot, tells=[t for t, _ in tells],
+                                   why=(f"Shot at about {shot} fps" if not shot.endswith('+') else f"Shot at {shot[:-1]} fps or faster")
+                                       + f", plays at {TC.rate_label(c.get('fps') or self.fps)}: "
+                                       + '; '.join(parts) + '.')
         # how sure: the file's own rate / capture rate / your word are certain; the clock and timecode tells are
         # strong but inferred, so the window asks you to confirm them once
         for c in self.clips:
             sm = c.get('slowmo')
             if sm:
-                sm['sure'] = bool(c.get('slowmo_user')) or sm['kind'] in ('timebase', 'in_camera', 'rate', 'marked')
+                sm['sure'] = (bool(c.get('slowmo_user')) or sm['kind'] in ('timebase', 'in_camera', 'rate', 'marked')
+                              or len(sm.get('tells') or []) >= 2)
 
     def sync_view(self):
         """This project without slow motion / other frame rates (the clip dicts are shared)."""

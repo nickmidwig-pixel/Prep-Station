@@ -97,9 +97,9 @@
     }
     return out;
   }
-  function blockRate(c) {
-    if (!c.slowmo) return '';
-    return c.slowmo.kind === 'timebase' || c.slowmo.kind === 'rate' ? `${c.fps}` : c.slowmo.speed ? `${c.fps} · ${slowX(c)}` : `${c.fps || ''}`;
+  function blockRate(c) {             // what it was shot at, the way you'd say it on set
+    const sm = c.slowmo; if (!sm) return '';
+    return sm.kind === 'timebase' || sm.kind === 'rate' ? `${c.fps} fps` : sm.shot ? `${sm.shot} fps` : '';
   }
   function slowSub(row) {
     const cl = rowClips(row);
@@ -721,10 +721,9 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
   const slowX = (c) => (c.slowmo && c.slowmo.speed ? `${Math.round(1 / c.slowmo.speed)}×` : '');
   const SLOW_LABEL = (c) => {
-    const k = c.slowmo && c.slowmo.kind, q = c.slowmo && !c.slowmo.sure ? ' — confirm?' : '';
-    return k === 'timebase' ? `Slow motion · ${c.fps} fps` : k === 'in_camera' ? `Slow motion · shot ${c.capture_fps}` :
-      k === 'clock' ? `Slow motion · ${slowX(c)} in camera${q}` : k === 'likely' ? `Slow motion · ${slowX(c)}${q}` :
-      k === 'recrun' ? `Slow motion · rec-run timecode${q}` : k === 'rate' ? `${c.fps} fps · own timeline` : 'Slow motion (you)';
+    const sm = c.slowmo, k = sm && sm.kind, q = sm && !sm.sure ? ' — confirm?' : '';
+    return k === 'timebase' ? `Slow motion · ${c.fps} fps` : k === 'rate' ? `${c.fps} fps · own timeline`
+      : k === 'marked' ? 'Slow motion (you)' : `Slow motion · shot at ${sm.shot || '?'} fps${q}`;
   };
   function chips(c) {
     const f = new Set(c.flags), out = [];
@@ -949,7 +948,9 @@
     if (!c) return;
     const busy = S.running || S.scanning;
     $('iName').textContent = c.name;
-    const rate = c.kind === 'video' && c.fps ? `${c.fps} fps${c.capture_fps ? ` (shot at ${c.capture_fps})` : c.slowmo && c.slowmo.speed && c.slowmo.kind !== 'timebase' && c.slowmo.kind !== 'rate' ? ` (shot ${slowX(c)} faster)` : ''}` : '';
+    const sm = c.slowmo;
+    const rate = c.kind !== 'video' || !c.fps ? '' : !sm || sm.kind === 'rate' || sm.kind === 'marked' ? `${c.fps} fps`
+      : sm.kind === 'timebase' ? `${c.fps} fps · slow motion` : `Shot at ${sm.shot || '?'} fps · plays at ${c.fps}`;
     const lnk = (lanesAll().find((l) => l.key === c.lane) || {});
     const who = c.kind === 'video' ? [lnk.label, c.roll, c.camera] : [lnk.label || c.roll];
     const sub = [...who, c.kind === 'video' ? (c.codec || '') : `${c.channels} ch`, rate, c.dur].filter(Boolean);
@@ -985,7 +986,7 @@
     $('askStep').hidden = !(queue.length && (unsure || qi >= 0));
     $('askN').textContent = qi >= 0 ? `${qi + 1} of ${queue.length}` : `${queue.length} to decide`;
     if (isVid) {
-      $('iSlowText').textContent = c.slowmo ? `${c.fps ? `${c.fps} fps file. ` : ''}${c.slowmo.why}${unsure ? ' Is it slow motion?' : ' On the slow-motion timeline; its sound isn’t used.'}`
+      $('iSlowText').textContent = c.slowmo ? `${c.slowmo.why}${unsure ? ' Is it slow motion?' : ' On the slow-motion timeline; its sound isn’t used.'}`
         : 'Real time, on the sync timeline.';
       $('iSlow').textContent = c.slowmo ? (unsure ? 'No, real time' : 'Not slow motion') : 'Mark as slow motion';
       $('iSlow').disabled = busy;
@@ -1085,7 +1086,7 @@
     for (const c of dayClips()) {
       const f = new Set(c.flags);
       if (c.slowmo) {
-        if (c.include && ['likely', 'clock', 'recrun'].includes(c.slowmo.kind)) out.push(['warn', c, `looks like slow motion: ${c.slowmo.why.replace(/ Looks like slow motion\.$/, '').replace(/^No sound, and /, 'no sound, and ')} It goes on the slow-motion timeline. If it isn’t, select it and click “Not slow motion”.`]);
+        if (c.include && ['likely', 'clock'].includes(c.slowmo.kind) && !c.slowmo.sure) out.push(['warn', c, `looks like slow motion: ${c.slowmo.why}`]);
         continue;
       }
       if (f.has('sync_failed')) out.push(['bad', c, 'couldn’t be placed by waveform. Type its timecode or use Find.']);
@@ -1135,6 +1136,11 @@
     pick(id);
     if (c.lane) S.collapsed.delete(c.lane), S.collapsed.delete(c.lane + '|slow');
     if (zoom && c.start != null) { const L = c.length || SR * 10, pad = Math.max(L * 0.6, SR * 20); S.view = [c.start - pad, c.start + L + pad]; }
+    if (c.kind === 'video') {                                 // the picture box says at once which clip it's fetching
+      const ln = lanesAll().find((l) => l.key === c.lane) || {};
+      $('frameNote').textContent = `${ln.label || c.roll}${c.slowmo ? ' · slow motion' : ''} · ${c.name} · loading…`;
+      $('frame').classList.remove('on');
+    }
     if (c.start != null && (S.ph == null || S.ph < c.start || S.ph >= c.start + c.length)) setPlayhead(c.start);
     else if (c.start != null) setPlayhead(S.ph);              // same spot, but the viewer now shows this clip
     renderTable(); renderInspector(); slateIdle(); draw();

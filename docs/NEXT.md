@@ -367,5 +367,10 @@ Nick's notes, all in:
 - **Each slow-motion block carries its own rate** ("59.94", "23.976 · 5×") in a dark tag at its left edge; the slow lane label is just the camera ("C80 · slow motion") instead of a mixed list of rates.
 - Slow-motion question text uses the panel's full width, buttons below it.
 
-## Queue
-- Auto-confirm slow motion when two clocks agree (filename start → last write, and timecode gap to the next clip on the same body); ask only when they disagree. Offered to Nick after walking through C017 — waiting for his OK.
+## 2.4.7
+Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MOS), and set the rule: **silence is never a slow-motion tell** — B-roll, an unplugged input or a timecode-only interview camera are silent and real time.
+- Inferred slow motion now rests on two clock tells only, neither of which looks at sound: **clock** (record start from the clip name / creation stamp → end stamp / last write vs how long it plays) and **next** (the next clip on the same card started — by camera clock, else timecode — before this one would have ended in real time). Both together = certain, no question asked; one alone = shown and asked once. The rec-run tell (silent + timecode off the clock line) is gone: an unjammed silent camera looked exactly like it.
+- A start stamp within 3 s of the record start is not taken as the end of the take (Canon MP4/RAW stamp the start); C029 had been reading as a 1 s take.
+- Wording is how a camera person says it: "Shot at 120 fps · plays at 23.976" (header), "Slow motion · shot at 120 fps" (list), "120 fps" tag on the block, "59.94 fps" for the shoot-high clips; the reasoning reads "Shot at about 120 fps, plays at 23.976: the camera took 3:28 to record a clip that plays 17:16; the next clip on this card started 3:58 after this one". Next-gap-only gives a lower bound: "Shot at 72 fps or faster". Rates snap to common camera rates (24 … 120 … 240).
+- Viewer: the moment a clip is picked the picture box says which clip it is fetching ("B CAM · slow motion · <name> · loading…") instead of keeping the last camera's frame up.
+- On 20250208: 23 × 59.94 (certain, file rate), C017 and C029 both "shot at about 120 fps", both certain; nothing left to confirm.
