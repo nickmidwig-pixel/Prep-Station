@@ -357,3 +357,6 @@ Nick's notes, all in:
 
 ## 2.4.4
 - Inspector header shows the clip's frame rate next to the codec — "23.976 fps (shot 5× faster)" or "(shot at 119.88)" for slow motion, highlighted; the slow-motion question starts with the file's rate.
+
+## 2.4.5
+- Step through everything waiting for a slow-motion decision without leaving the inspector: "‹ 2 of 3 ›" next to the Yes / No buttons (⇧⌥↓ / ⇧⌥↑), in timeline order; answering Yes or No moves on to the next one. The summary-line link opens the first in timeline order.

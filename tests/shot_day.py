@@ -38,6 +38,12 @@ with sync_playwright() as pw:
         ask.click(); pg.wait_for_timeout(400)
         print('ASK', pg.inner_text('#iSlowRow').replace('\n', ' | '), '| wave hidden:', pg.eval_on_selector('.insp-wave', 'e => e.hidden'))
         pg.screenshot(path=OUT.replace('.png', '_ask.png'))
+        print('STEP', pg.inner_text('#askStep').replace('\n', ' '), '| hidden:', pg.eval_on_selector('#askStep', 'e => e.hidden'))
+        before = pg.evaluate('window.MS.sel ? window.MS.sel() : null')
+        pg.click('#askNext'); pg.wait_for_timeout(300)
+        print('NEXT', pg.inner_text('#iName'), pg.inner_text('#askN'))
+        pg.click('#iSlowYes'); pg.wait_for_timeout(500)
+        print('AFTER YES', pg.inner_text('#iName'), pg.inner_text('#askN') if not pg.eval_on_selector('#askStep', 'e => e.hidden') else '(done)')
     if pg.query_selector('tr.world'):
         pg.evaluate("document.querySelector('tr.world').scrollIntoView({block:'start'})"); pg.wait_for_timeout(200)
         pg.screenshot(path=OUT.replace('.png', '_table.png'), clip={'x': 0, 'y': 700, 'width': 1100, 'height': 200})

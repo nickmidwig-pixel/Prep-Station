@@ -965,6 +965,10 @@
     $('iSlowRow').classList.toggle('on', !!c.slowmo);
     const unsure = !!(c.slowmo && !c.slowmo.sure);
     $('iSlowRow').classList.toggle('ask', unsure);
+    // step through everything that still needs a yes / no, without leaving the inspector
+    const queue = askQueue(), qi = queue.indexOf(c.id);
+    $('askStep').hidden = !(queue.length && (unsure || qi >= 0));
+    $('askN').textContent = qi >= 0 ? `${qi + 1} of ${queue.length}` : `${queue.length} to decide`;
     if (isVid) {
       $('iSlowText').textContent = c.slowmo ? `${c.fps ? `${c.fps} fps file. ` : ''}${c.slowmo.why}${unsure ? ' Is it slow motion?' : ' On the slow-motion timeline; its sound isn’t used.'}`
         : 'Real time, on the sync timeline.';
@@ -1248,7 +1252,7 @@
       const fixed = cl.filter(moved).length;
       if (fixed) notes.push(`${fixed} timecode${fixed === 1 ? '' : 's'} fixed`);
       const slow = cl.filter((c) => c.slowmo && c.include).length;
-      const ask = cl.filter((c) => c.slowmo && !c.slowmo.sure && c.include);
+      const ask = cl.filter((c) => c.slowmo && !c.slowmo.sure && c.include).sort((a, b) => (a.start ?? 1e18) - (b.start ?? 1e18));
       if (ask.length) notes.unshift(`<button class="linkbtn" data-ask-slow="${ask[0].id}">${ask.length} to confirm as slow motion</button>`);
       if (slow) notes.push(`${slow} slow motion`);
       const forced = cl.find((c) => c.day_forced);
@@ -1496,11 +1500,28 @@
   $('camNo').addEventListener('click', () => { $('camFix').hidden = true; });
   $('iSlow').addEventListener('click', async () => {
     const c = selClip(); if (!c) return;
+    const wasAsk = !!(c.slowmo && !c.slowmo.sure);
     applyState(await call('clip_slowmo', c.id, !c.slowmo));
+    if (wasAsk) askAdvance(c.id);
   });
+  // the list of clips still waiting for a slow-motion decision, in timeline order
+  const askQueue = () => dayClips().filter((c) => c.slowmo && !c.slowmo.sure && c.include).sort((a, b) => (a.start ?? 1e18) - (b.start ?? 1e18)).map((c) => c.id);
+  function askStep(dir) {
+    const q = askQueue(); if (!q.length) return;
+    const i = q.indexOf(S.sel);
+    const next = i < 0 ? q[0] : q[(i + dir + q.length) % q.length];
+    selectClip(next, true);
+  }
+  function askAdvance(fromId) {
+    const q = askQueue().filter((id) => id !== fromId);
+    if (q.length) selectClip(q[0], true);
+  }
+  $('askPrev').addEventListener('click', () => askStep(-1));
+  $('askNext').addEventListener('click', () => askStep(1));
   $('iSlowYes').addEventListener('click', async () => {
     const c = S.project && S.project.clips.find((x) => x.id === S.sel); if (!c) return;
     applyState(await call('clip_slowmo', c.id, true));
+    askAdvance(c.id);
   });
   window.MS = { event: (kind, data) => { const h = handlers[kind]; if (h) h(data); }, rows: () => laneRows().map((r) => ({ type: r.type, key: r.key, slow: !!r.slow })) };
 
@@ -1601,6 +1622,7 @@
     ['L', 'Play forward · each tap faster, up to 5×', 'Playback', K('l'), () => jkl(1)],
     ['J', 'Play backwards · each tap faster, up to 5×', 'Playback', K('j'), () => jkl(-1)],
     ['K', 'Stop', 'Playback', K('k'), () => stopPlay()],
+    ['⇧⌥↓ / ⇧⌥↑', 'Next / previous clip that needs a slow-motion decision', 'Clips', (e) => e.altKey && e.shiftKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp'), (e) => askStep(e.key === 'ArrowDown' ? 1 : -1)],
     ['← / →', 'Playhead one frame back / on', 'Playback', (e) => !isMod(e) && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => stepPlayhead((e.key === 'ArrowLeft' ? -1 : 1) * frameS())],
     ['⇧← / ⇧→', 'Playhead one second back / on', 'Playback', (e) => !isMod(e) && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => stepPlayhead((e.key === 'ArrowLeft' ? -1 : 1) * SR)],
     ['⌥← / ⌥→', 'Playhead to the previous / next clip edge', 'Playback', (e) => e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => jumpEdge(e.key === 'ArrowLeft' ? -1 : 1)],
