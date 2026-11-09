@@ -342,3 +342,11 @@ Nick's notes, all in:
 - **Playback is one player at a time.** A play request renders first (ffmpeg) and only then starts afplay; Space during that render used to fire a second request, and the first one started its player anyway once it finished — an orphan nobody could stop. Now every request takes a generation number, a stop or a newer request retires the old one before it can start, the Play button shows "… Stop" while rendering so Space / K cancel it, and each render writes its own file. The player is killed when the window closes and at process exit (no more sound after quitting).
 - "N to know about" strip shows only what blocks the run (no timecode, unreadable files, failed checks); informational notes stay on the clip rows and the summary line.
 - tests/test_play_race.py.
+
+## 2.4.2
+- Slow-motion tells carry a confidence: the file's own rate, a capture rate in the file, and your word are certain; the clock tell (camera took 208 s, plays 1036 s) and the timecode tells are strong but inferred, so those clips read "Slow motion · 5× in camera — confirm?" and the summary line offers "N to confirm as slow motion" → the inspector asks "Yes, slow motion / No, real time". Confirmed clips become certain.
+- The inspector hides the whole "Find by waveform" block for slow motion (it isn't synced, so there is nothing to find).
+- Jumping to a clip from a note scrolls its row into view and opens its group (a clip without timecode has no place on the timeline to jump to; the row is where it lives).
+- Slow lane label: "59.94 fps · 40% speed".
+- On the 20250208 card the clock tell found the two in-camera S&F clips Nick described (C017, C029: XF-HEVC S MP4s, 17 and 14 min, shot in 208 s and 171 s = 5×, i.e. 120 fps → 23.976).
+- **Corrected sound moves to the top level** (Nick, on seeing the first confirm prompt on 20250208): `<date>_SYNCED/SOUND_TC_CORRECTED/` mirrors the folders the sound came in below the dropped folder (`SOUND/01LAV/…`, `SOUND/02LAV/…`), not WORK FILES. WORK FILES keeps the report, plans, caches and logs.

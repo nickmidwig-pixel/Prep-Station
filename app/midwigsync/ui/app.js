@@ -99,7 +99,7 @@
     const cl = rowClips(row);
     const rates = [...new Set(cl.map((c) => c.slowmo && c.slowmo.kind === 'marked' ? 'marked' : (c.fps || '')))].filter(Boolean);
     const pct = [...new Set(cl.map((c) => c.slowmo && c.slowmo.speed ? Math.round(c.slowmo.speed * 100) + '%' : ''))].filter(Boolean);
-    return [rates.join(' / ') + (rates.some((r) => /\d/.test(r)) ? ' fps' : ''), pct.length === 1 ? `plays at ${pct[0]}` : ''].filter(Boolean).join(' · ');
+    return [rates.join(' / ') + (rates.some((r) => /\d/.test(r)) ? ' fps' : ''), pct.length === 1 ? `${pct[0]} speed` : ''].filter(Boolean).join(' · ');
   }
   const refLane = () => {
     const r = S.settings.reference && S.settings.reference.roll;
@@ -704,10 +704,12 @@
 
   // ------------------------------------------------------------------ table
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+  const slowX = (c) => (c.slowmo && c.slowmo.speed ? `${Math.round(1 / c.slowmo.speed)}×` : '');
   const SLOW_LABEL = (c) => {
-    const k = c.slowmo && c.slowmo.kind;
+    const k = c.slowmo && c.slowmo.kind, q = c.slowmo && !c.slowmo.sure ? ' — confirm?' : '';
     return k === 'timebase' ? `Slow motion · ${c.fps} fps` : k === 'in_camera' ? `Slow motion · shot ${c.capture_fps}` :
-      k === 'likely' ? 'Slow motion?' : k === 'rate' ? `${c.fps} fps · own timeline` : 'Slow motion (you)';
+      k === 'clock' ? `Slow motion · ${slowX(c)} in camera${q}` : k === 'likely' ? `Slow motion · ${slowX(c)}${q}` :
+      k === 'recrun' ? `Slow motion · rec-run timecode${q}` : k === 'rate' ? `${c.fps} fps · own timeline` : 'Slow motion (you)';
   };
   function chips(c) {
     const f = new Set(c.flags), out = [];
@@ -958,13 +960,16 @@
     const isVid = c.kind === 'video';
     $('iSlowRow').hidden = !isVid;
     $('iSlowRow').classList.toggle('on', !!c.slowmo);
+    const unsure = !!(c.slowmo && !c.slowmo.sure);
+    $('iSlowRow').classList.toggle('ask', unsure);
     if (isVid) {
-      $('iSlowText').textContent = c.slowmo ? `${c.slowmo.why} Kept off the sync timeline; its sound isn’t used.`
-        : 'On the sync timeline.';
-      $('iSlow').textContent = c.slowmo ? 'Not slow motion' : 'Mark as slow motion';
+      $('iSlowText').textContent = c.slowmo ? `${c.slowmo.why}${unsure ? ' Is it slow motion?' : ' On the slow-motion timeline; its sound isn’t used.'}`
+        : 'Real time, on the sync timeline.';
+      $('iSlow').textContent = c.slowmo ? (unsure ? 'No, real time' : 'Not slow motion') : 'Mark as slow motion';
       $('iSlow').disabled = busy;
+      $('iSlowYes').hidden = !unsure; $('iSlowYes').disabled = busy;
     }
-    if (c.slowmo) { $('iFind').disabled = true; $('iAgainst').disabled = true; }
+    document.querySelector('.insp-wave').hidden = !!c.slowmo;      // nothing to find by waveform: it isn't synced
     $('iStamp').disabled = busy || c.start == null || !S.settings.out_dir;
     $('iStamp').hidden = c.kind === 'video';
     $('iOpen').textContent = /\.crm$/i.test(c.name) ? 'Open in Cinema RAW Development' : 'Open in its app';
@@ -1094,6 +1099,10 @@
       `<li><i class="k ${k}"></i><span>${c.id != null ? `<button data-jump="${c.id}">${esc(c.name)}</button>` : `<b>${esc(c.name)}</b>`} <span class="w">${esc(t)}</span></span></li>`).join('');
     if (bad && !el.dataset.seen) { el.open = true; el.dataset.seen = '1'; }
   }
+  $('sumSub').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-ask-slow]'); if (!b) return;
+    selectClip(+b.dataset.askSlow, true); renderTable(); renderInspector(); draw();
+  });
   $('attnList').addEventListener('click', (e) => {
     const b = e.target.closest('[data-jump]'); if (!b) return;
     selectClip(+b.dataset.jump, true);
@@ -1102,9 +1111,10 @@
     const c = S.project && S.project.clips.find((x) => x.id === id);
     if (!c) return;
     pick(id);
+    if (c.lane) S.collapsed.delete(c.lane), S.collapsed.delete(c.lane + '|slow');
     if (zoom && c.start != null) { const L = c.length || SR * 10, pad = Math.max(L * 0.6, SR * 20); S.view = [c.start - pad, c.start + L + pad]; }
     renderTable(); renderInspector(); slateIdle(); draw();
-    const row = document.querySelector(`tr[data-id="${id}"]`); if (row) row.scrollIntoView({ block: 'nearest' });
+    const row = document.querySelector(`tr[data-id="${id}"]`); if (row) row.scrollIntoView({ block: 'center' });
   }
 
   // Sync to (2.0): one sentence saying what the day syncs to, and a Change link with only the real choices:
@@ -1235,13 +1245,15 @@
       const fixed = cl.filter(moved).length;
       if (fixed) notes.push(`${fixed} timecode${fixed === 1 ? '' : 's'} fixed`);
       const slow = cl.filter((c) => c.slowmo && c.include).length;
-      if (slow) notes.push(`${slow} slow motion / other rate, on their own timeline`);
+      const ask = cl.filter((c) => c.slowmo && !c.slowmo.sure && c.include);
+      if (ask.length) notes.unshift(`<button class="linkbtn" data-ask-slow="${ask[0].id}">${ask.length} to confirm as slow motion</button>`);
+      if (slow) notes.push(`${slow} slow motion`);
       const forced = cl.find((c) => c.day_forced);
       const dayKey = cl[0] && cl[0].day;
       if (forced && dayKey) notes.push(`${fmtDay(dayKey)} from the folder name ${forced.day_forced}`);
       const wrongClock = new Set(cl.filter((c) => /camera date says/.test(c.date_note || '')).map((c) => (lanesAll().find((l) => l.key === c.lane) || {}).label || c.roll));
       if (wrongClock.size) notes.push(`${[...wrongClock].join(', ')}: camera clock is wrong, dated by ${forced ? 'the folder' : 'its timecode'}`);
-      $('sumSub').textContent = notes.join(' · ');
+      $('sumSub').innerHTML = notes.map((n) => n.startsWith('<button') ? n : esc(n)).join(' · ');
     }
     renderAttention();
     $('viewer').hidden = !has;
@@ -1482,6 +1494,10 @@
   $('iSlow').addEventListener('click', async () => {
     const c = selClip(); if (!c) return;
     applyState(await call('clip_slowmo', c.id, !c.slowmo));
+  });
+  $('iSlowYes').addEventListener('click', async () => {
+    const c = S.project && S.project.clips.find((x) => x.id === S.sel); if (!c) return;
+    applyState(await call('clip_slowmo', c.id, true));
   });
   window.MS = { event: (kind, data) => { const h = handlers[kind]; if (h) h(data); }, rows: () => laneRows().map((r) => ({ type: r.type, key: r.key, slow: !!r.slow })) };
 

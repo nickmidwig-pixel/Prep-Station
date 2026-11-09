@@ -33,6 +33,11 @@ with sync_playwright() as pw:
     rows = pg.evaluate("window.MS && window.MS.rows ? window.MS.rows() : null")
     print('ROWS', json.dumps(rows))
     pg.screenshot(path=OUT)
+    ask = pg.query_selector('#sumSub [data-ask-slow]')
+    if ask:
+        ask.click(); pg.wait_for_timeout(400)
+        print('ASK', pg.inner_text('#iSlowRow').replace('\n', ' | '), '| wave hidden:', pg.eval_on_selector('.insp-wave', 'e => e.hidden'))
+        pg.screenshot(path=OUT.replace('.png', '_ask.png'))
     if pg.query_selector('tr.world'):
         pg.evaluate("document.querySelector('tr.world').scrollIntoView({block:'start'})"); pg.wait_for_timeout(200)
         pg.screenshot(path=OUT.replace('.png', '_table.png'), clip={'x': 0, 'y': 700, 'width': 1100, 'height': 200})

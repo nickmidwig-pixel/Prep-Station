@@ -523,12 +523,14 @@ class Job:
         if not fixed and not conv:
             self.log('Sound timecode: nothing to fix, working from the originals (read-only).')
             return
-        root = os.path.join(self.mid, 'SOUND_TC_CORRECTED')
+        # top level of the output, mirroring the folders the sound came in (SOUND/01LAV/...), so an editor who
+        # wants the corrected recorder files finds them laid out like the recorder's card
+        root = os.path.join(self.out, 'SOUND_TC_CORRECTED')
         n_fix = n_copy = 0
         for i, c in enumerate(aud):
             self.check()
             self.progress(i, len(aud), c['name'])
-            out = os.path.join(root, c['roll'], c.get('out_name', c['name']))
+            out = os.path.join(root, self._mirror_dir(c), c.get('out_name', c['name']))
             os.makedirs(os.path.dirname(out), exist_ok=True)
             if c['id'] in fixed or c.get('converted'):
                 note = f"{APP_NAME}: {c['converted']}" if c.get('converted') and c['id'] not in fixed else None
@@ -545,6 +547,17 @@ class Job:
                 n_copy += 1
         self.log(f'SOUND_TC_CORRECTED: {n_fix} file(s) with corrected timecode, {n_copy} copied as they were '
                  f'(same format, names and metadata).')
+
+    def _mirror_dir(self, c):
+        """The sound file's folders below the folder that was dropped ('SOUND/01LAV'); its roll when that can't be
+        worked out."""
+        src = os.path.normpath(c.get('source_path') or c['path'])
+        for r in sorted((os.path.normpath(x) for x in self.p.dropped), key=len, reverse=True):
+            base = r if os.path.isdir(r) else os.path.dirname(r)
+            if src.startswith(base + os.sep):
+                rel = os.path.dirname(os.path.relpath(src, base))
+                return rel if rel and rel != '.' else c['roll']
+        return c['roll']
 
     def camera_fixes(self):
         """Camera clips whose timecode was fixed: offered after the run as full-quality copies."""

@@ -823,6 +823,12 @@ class Project:
                     a['slowmo'] = dict(kind='likely', speed=round(real / a['length'], 2),
                                        why='No sound, and its timecode runs into the next clip on this card, so it '
                                            'plays longer than it took to shoot. Looks like slow motion.')
+        # how sure: the file's own rate / capture rate / your word are certain; the clock and timecode tells are
+        # strong but inferred, so the window asks you to confirm them once
+        for c in self.clips:
+            sm = c.get('slowmo')
+            if sm:
+                sm['sure'] = bool(c.get('slowmo_user')) or sm['kind'] in ('timebase', 'in_camera', 'rate', 'marked')
 
     def sync_view(self):
         """This project without slow motion / other frame rates (the clip dicts are shared)."""

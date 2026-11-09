@@ -33,7 +33,7 @@ and checks again; `tests/test_guard.py` tries 19 ways to damage an original.
    not the two cameras that agree; a reference camera that is alone in being off moves too. The one-line reason
    (`decision`) is shown in the review stop, the log and the report.
 4. **Review stop** (`review_fixes`): the window shows every fix and waits: write / keep the files' own TC / stop.
-5. **Corrected sound** (`do_sound_set`): WORK FILES/SOUND_TC_CORRECTED/ holds every sound file of the day in its original
+5. **Corrected sound** (`do_sound_set`): SOUND_TC_CORRECTED/ (top level, mirroring the recorder's folders) holds every sound file of the day in its original
    format; fixed files get the new TC, the rest are exact copies (APFS clones on the same drive).
 6. **Auto-Align Post** (refplan.py + resolve_aap.py + aap_panel.py): camera mode aligns to the picked onboard mic
    on every card of that camera body; audio-only picks boom > plant > best lav per stretch. Mix / TC / empty tracks
@@ -54,7 +54,7 @@ and checks again; `tests/test_guard.py` tries 19 ways to damage an original.
     lav track names, TC at each turn and every minute: Word, text and CSV.
 11. **Report** (in WORK FILES) and SOUND REPORT/ (copies of the mixer's report files). The output folder an
     editor sees: ISO_ALIGNED, POLY_ALIGNED, SOUND REPORT, TIMELINES, TRANSCRIPT, and last "WORK FILES (not for
-    the edit)" with the report, SOUND_TC_CORRECTED, plans, caches and logs.
+    the edit)" with the report, plans, caches and logs.
 After the run: **camera copies** on request (CAMERA_TC_CORRECTED/): the original bytes with only the timecode
 number changed (QuickTime/MP4/CRM/BRAW tmcd, MXF timecode components), else a stream copy into .mov.
 

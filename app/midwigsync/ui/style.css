@@ -562,3 +562,7 @@ body.finished #goBtn { background: none; border: 1px solid var(--line); color: v
 .clips th.sortable.on.desc .arrow { border-bottom: 0; border-top: 5px solid var(--paper); }
 .clips td { padding: 8px 10px; }
 .tl-tools .zoomctl { margin-right: 4px; }
+
+.slowrow.ask { border-color: var(--fix, #E2A23B); }
+.slowrow.ask #iSlowText { color: var(--paper); }
+.tl-title .linkbtn { font: inherit; color: var(--fix, #E2A23B); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
