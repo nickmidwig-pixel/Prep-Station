@@ -32,7 +32,8 @@ def gopro_chapter(name):
 def card_roll(path):
     """Camera roll name = the card/folder that holds the camera's folder structure."""
     parts = os.path.normpath(path).split(os.sep)
-    for marker in ('XDROOT', 'PRIVATE', 'CONTENTS', 'DCIM', 'CLIPS001', 'M4ROOT', 'CLIPS002', 'BRAW', 'NIKON', 'CRM'):
+    for marker in ('XDROOT', 'PRIVATE', 'CONTENTS', 'DCIM', 'CLIPS001', 'M4ROOT', 'CLIPS002', 'BRAW', 'NIKON', 'CRM',
+                   'XFVC'):     # XFVC: Canon C80/C400 XF-AVC S / XF-HEVC S (.MP4) folder, beside CONTENTS and CRM
         if marker in parts:
             i = parts.index(marker)
             if i >= 1 and parts[i - 1] not in ('', 'Volumes'):
@@ -81,6 +82,9 @@ def shoot_day(c):
             try:
                 d = dt.date(int(ub[:4]), int(ub[4:6]), int(ub[6:8]))
                 if tc_h is not None and tc_h < NIGHT_HOURS:
+                    # after midnight: some recorders roll their date at 00:00, some keep the day's date
+                    # (Zaxcom names and stamps 00:21 as the evening's date). assign_days settles it.
+                    c['day_alt'] = d.isoformat()
                     d -= dt.timedelta(days=1)
                 return d.isoformat(), True
             except ValueError:
@@ -278,6 +282,7 @@ class Project:
         """Group clips into shoot days, and unwrap timecode that runs past midnight within a day."""
         H = TC.SR * 3600
         for c in self.clips:
+            c.pop('day_alt', None)
             c['day'], c['day_trusted'] = shoot_day(c)
             c.pop('date_note', None)
         strong = [c for c in self.clips if c['day'] and c['day_trusted']]
@@ -286,20 +291,44 @@ class Project:
         def span_of(d):
             st = [(c['orig_start'], c['orig_start'] + c['length']) for c in strong if c['day'] == d and c['orig_start'] is not None]
             return (min(a for a, _ in st), max(b for _, b in st)) if st else None
-        # a camera whose clock date is off: one roll alone on a date, timecode inside exactly one other day
+
+        def date_of(d):
+            try:
+                return dt.date.fromisoformat(d)
+            except ValueError:
+                return None
+        # a date that is really part of another day:
+        #   - a camera whose clock date is off (a C500 II that says 2019): only camera clips carry that date, no sound
+        #     recorder agrees with it, and the date sits apart from the other days (not the day before or after,
+        #     which could be a real second shoot day); or a single small roll alone on its date
+        #   - sound recorded after midnight whose recorder kept the evening's date
+        #   either way its timecode has to fall inside exactly one other day
         if len(days) > 1:
             for d in list(days):
                 cl = [c for c in strong if c['day'] == d]
-                if len({c['roll'] for c in cl}) != 1 or len(cl) > 0.25 * len(strong):
+                if not cl:
+                    continue
+                cams_only = all(c['kind'] != 'audio' for c in cl)
+                night_audio = all(c['kind'] == 'audio' and c.get('day_alt') for c in cl)
+                lone_roll = len({c['roll'] for c in cl}) == 1 and len(cl) <= 0.25 * len(strong)
+                dd = date_of(d)
+                apart = dd is not None and all(abs((date_of(e) - dd).days) > 1 for e in days if e != d and date_of(e))
+                if not ((cams_only and (apart or lone_roll)) or night_audio or lone_roll):
                     continue
                 st = [c['orig_start'] for c in cl if c['orig_start'] is not None]
                 if not st:
                     continue
                 hits = [e for e in days if e != d and span_of(e) and span_of(e)[0] - H <= min(st) and max(st) <= span_of(e)[1] + H]
+                if night_audio and not hits:
+                    hits = [e for e in days if e != d and e in {c.get('day_alt') for c in cl}]
                 if len(hits) == 1:
                     for c in cl:
                         c['day'] = hits[0]
-                        c['date_note'] = f'camera date says {d}'
+                        if c['kind'] == 'audio':
+                            c['date_note'] = 'recorded after midnight'
+                        else:
+                            c['date_note'] = f'camera date says {d}'
+                    days = sorted({c['day'] for c in strong})
             days = sorted({c['day'] for c in strong})
         # everything else: the trusted day whose timecode range it falls in; else its own date; else the biggest day
         if days:

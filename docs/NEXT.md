@@ -319,3 +319,8 @@ Nick's notes, all in:
 - Drag-select on the timeline now starts anywhere in the lane area, including on top of a clip (previously a press on a clip only selected that clip, so a band could not begin there). Text selection / image-drag on the canvas is suppressed so Safari/WebKit does not steal the gesture.
 - Camera lane colours follow tape convention: A red, B blue, C yellow; D green, E orange, F purple, G teal, H pink (no industry standard past C — these were chosen to stay distinct from the red/blue/yellow trio and from the sound colours).
 - Legend shows the three camera swatches instead of a single "Cameras" chip.
+
+## 2.2.2
+- Shoot-day grouping (from the 20250208 RODEO day): a camera whose clock date is wrong (C500 II saying 2019) no longer becomes its own day tab even when it holds most of the dated clips — a camera-only date with no sound recorder agreeing and no neighbouring day is placed by its timecode. Zaxcom ISOs recorded after midnight but stamped with the evening's date stay with the evening ("recorded after midnight").
+- Canon C80/C400 `XFVC/REEL_xxxx` (XF-AVC S / XF-HEVC S .MP4) folder now counts as part of the same card as CONTENTS and CRM — no phantom "C CAM".
+- tests/test_days.py covers both, plus a real camera-only next day that must stay separate.
