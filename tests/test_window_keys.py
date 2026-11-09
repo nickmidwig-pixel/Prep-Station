@@ -68,9 +68,9 @@ with sync_playwright() as pw:
 
     print('lanes')
     check(lanes() == [('A CAM', ['Card1', 'Card2']), ('C CAM', ['Card3', 'Card4'])], lanes())
-    # the C CAM lane label on the timeline opens the letter menu
+    # the C CAM lane label on the timeline opens the letter menu (cameras stack like an edit: C above A, so first row)
     box = pg.locator('#tl').bounding_box()
-    pg.mouse.click(box['x'] + 40, box['y'] + 26 + 3 + 34 + 17)
+    pg.mouse.click(box['x'] + 40, box['y'] + 26 + 3 + 17)
     pg.wait_for_timeout(200)
     check(not pg.is_hidden('#popMenu') and 'C CAM' in pg.inner_text('#popMenu'), 'letter menu opens on C CAM')
     pg.click('#popMenu [data-letter="B"]'); pg.wait_for_timeout(300)
