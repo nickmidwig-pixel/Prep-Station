@@ -29,14 +29,16 @@ ok = True
 p, j, out, rev, early, errs, ev = run('write')
 print('fixes shown:', [(f['name'], f['old'], '->', f['new']) for f in rev['fixes']])
 print('anything written before the answer:', early, '| errors:', [e['message'] for e in errs])
-sc = os.path.join(out, 'SOUND_TC_CORRECTED')
+sc = os.path.join(out, 'SOUND_TC_CORRECTED')                     # what the editor sees: only the fixed files
+work = os.path.join(out, 'WORK FILES (not for the edit)', 'sound_for_align')   # what Auto-Align reads: the full set
 files = sorted(os.path.relpath(os.path.join(d, f), sc) for d, _, fs in os.walk(sc) for f in fs)
 aud = [c for c in p.clips if c['kind'] == 'audio' and c['include'] and c['start'] is not None]
-print(f'SOUND_TC_CORRECTED: {len(files)} files for {len(aud)} sound files')
+n_fixed_audio = sum(1 for f in rev['fixes'] if f['kind'] == 'audio')
+print(f'SOUND_TC_CORRECTED: {len(files)} files ({n_fixed_audio} fixed) for {len(aud)} sound files: {files}')
 same = 0
 for c in aud:
-    path = os.path.join(sc, j._mirror_dir(c), c['name'])      # mirrors the dropped folder: SOUND/02LAV/...
     fixed = any(f['name'] == c['name'] for f in rev['fixes'])
+    path = os.path.join(sc, j._mirror_dir(c), c['name']) if fixed else os.path.join(work, j._mirror_dir(c), c['name'])
     w0, w1 = WavInfo(c['path']), WavInfo(path)
     if not fixed:
         same += hashlib.sha256(open(c['path'], 'rb').read()).digest() == hashlib.sha256(open(path, 'rb').read()).digest()
@@ -45,9 +47,8 @@ for c in aud:
                 and abs(w1.time_reference - TC.wrap(c['stamped_start'], p.fps)) <= 1)
         print(f'  fixed {c["name"]}: same format/names {good}, new TC {TC.samples_to_tc(c["stamped_start"], p.fps)}')
         ok &= good
-n_fixed_audio = sum(1 for f in rev['fixes'] if f['kind'] == 'audio')
-print(f'  unchanged copies identical to the originals: {same} of {len(aud) - n_fixed_audio}')
-ok &= not early and not errs and len(files) == len(aud) and same == len(aud) - n_fixed_audio
+print(f'  unchanged working copies identical to the originals: {same} of {len(aud) - n_fixed_audio}')
+ok &= not early and not errs and len(files) == n_fixed_audio and same == len(aud) - n_fixed_audio
 done = next(d for k, d in ev if k == 'done')
 print('camera fixes offered after the run:', [(x['name'], x['new']) for x in done['camera_fixes']])
 made = j.rewrite_cameras()

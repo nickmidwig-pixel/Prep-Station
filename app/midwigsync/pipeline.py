@@ -511,10 +511,10 @@ class Job:
             self.user_decide.set()
 
     def do_sound_set(self):
-        """A complete copy of the day's sound in SOUND_TC_CORRECTED/: every file in its original format (bit depth,
-        channels, track names, bext/iXML); files whose timecode was fixed carry the new timecode, the rest are exact
-        copies (instant clones on the same drive). Everything after this works from these copies. Skipped when no
-        sound file needed a fix (the originals are used, read-only)."""
+        """SOUND_TC_CORRECTED/ (top level, for the edit): only the sound files whose timecode was fixed, in their
+        original format (bit depth, channels, track names, bext/iXML) with the new timecode, in the folders they came
+        in (SOUND/03_LAV/…). WORK FILES/sound_for_align/ holds the full set Auto-Align works from (fixed files plus
+        instant clones of the rest), so its renders never land beside the originals. Skipped when nothing changed."""
         p = self.p
         fps, df = p.fps, p.df
         aud = [c for c in p.clips if c['kind'] == 'audio' and c['include'] and c['start'] is not None]
@@ -523,9 +523,11 @@ class Job:
         if not fixed and not conv:
             self.log('Sound timecode: nothing to fix, working from the originals (read-only).')
             return
-        # top level of the output, mirroring the folders the sound came in (SOUND/01LAV/...), so an editor who
-        # wants the corrected recorder files finds them laid out like the recorder's card
-        root = os.path.join(self.out, 'SOUND_TC_CORRECTED')
+        # The working set Auto-Align reads lives in WORK FILES (it writes its renders next to its sources, and those
+        # must never land beside the originals). The editor-facing SOUND_TC_CORRECTED/ gets only the files whose
+        # timecode changed, in the folders they came in (SOUND/03_LAV/...).
+        root = os.path.join(self.mid, 'sound_for_align')
+        shown = os.path.join(self.out, 'SOUND_TC_CORRECTED')
         n_fix = n_copy = 0
         for i, c in enumerate(aud):
             self.check()
@@ -539,14 +541,17 @@ class Job:
                 c['length'] = WavInfo(path).nframes * SR // max(1, WavInfo(path).sr)
                 if c['id'] in fixed:
                     n_fix += 1
-                    self.stamped.append(dict(name=c['name'], out=os.path.relpath(path, self.out),
+                    vis = os.path.join(shown, self._mirror_dir(c), os.path.basename(path))
+                    os.makedirs(os.path.dirname(vis), exist_ok=True)
+                    SAFE.clone_or_copy(path, vis)
+                    self.stamped.append(dict(name=c['name'], out=os.path.relpath(vis, self.out),
                                              tc=TC.samples_to_tc(st, fps, df)))
             else:
                 SAFE.clone_or_copy(c['path'], out)
                 c['stamped_path'], c['stamped_start'] = out, c['start']
                 n_copy += 1
-        self.log(f'SOUND_TC_CORRECTED: {n_fix} file(s) with corrected timecode, {n_copy} copied as they were '
-                 f'(same format, names and metadata).')
+        self.log(f'SOUND_TC_CORRECTED: {n_fix} file(s) with corrected timecode (the only files in that folder); '
+                 f'{n_copy} unchanged file(s) cloned into WORK FILES for Auto-Align.')
 
     def _mirror_dir(self, c):
         """The sound file's folders below the folder that was dropped ('SOUND/01LAV'); its roll when that can't be
@@ -777,11 +782,33 @@ class Job:
             # nobody is watching the panel any more; keep answering it for the rest of the job
             self._sweep_dialogs = True
             threading.Thread(target=self._dialog_sweeper, name='aap-dialogs', daemon=True).start()
+        st['files'] = self._tidy_renders(st['files'], render_dir)
         if not st['files']:
             self.log('No Auto-Align renders found; exporting unaligned audio.')
             self.aap_info['status'] = 'no renders'
             return
         self._assemble(sources, st)
+
+    def _tidy_renders(self, files, render_dir):
+        """Auto-Align writes its renders next to the source media (now SOUND_TC_CORRECTED/…, which the editor
+        sees). They are working pieces, not deliverables: move them into WORK FILES/AAP_RENDERS. Only our own
+        output folder is touched, never the originals."""
+        out = []
+        moved = 0
+        for f in files:
+            if os.path.dirname(os.path.abspath(f)) != os.path.abspath(render_dir) and \
+                    os.path.abspath(f).startswith(os.path.abspath(self.out) + os.sep):
+                dst = os.path.join(render_dir, os.path.basename(f))
+                try:
+                    SAFE.move(f, dst) if hasattr(SAFE, 'move') else os.replace(f, dst)
+                    f = dst
+                    moved += 1
+                except OSError as e:
+                    self.log(f'  could not move {os.path.basename(f)} into WORK FILES ({e})')
+            out.append(f)
+        if moved:
+            self.log(f'  Moved {moved} Auto-Align render(s) out of the delivery folders into WORK FILES/AAP_RENDERS.')
+        return sorted(out)
 
     def _dialog_sweeper(self):
         t0 = time.time()

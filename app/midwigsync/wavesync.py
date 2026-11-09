@@ -19,6 +19,7 @@ FIX_THRESHOLD_S = 0.20           # bigger than this -> treat as a TC error and c
 MIN_SCORE = 0.30
 MIN_MARGIN = 1.25
 MIN_OVERLAP_S = 15              # a timecode verdict needs at least this much shared sound
+FULLDAY_MIN_S = 60              # ... and a whole-day search (no match near its own timecode) at least this much
 
 
 # ---------------------------------------------------------------- features
@@ -543,6 +544,16 @@ class SyncAnalyzer:
             """Position measured in roll r's clock -> clip c's own clock (anchor clock if its roll is off)."""
             return start_in_r + shift.get(r, 0.0) - shift.get(c['roll'], 0.0)
 
+        by_roll_tc = defaultdict(list)
+        for x in tc_clips:
+            by_roll_tc[x['roll']].append(x)
+
+        def continuous(c):
+            """The clip starts within a few seconds of where another file on the same roll ended."""
+            # 23.976 timecode runs 0.1% slower than the clock, so a long file's end drifts ~9 s over 2.5 h
+            return any(x is not c and -5 * TC.SR <= c['orig_start'] - (x['orig_start'] + x['length'])
+                       <= 10 * TC.SR + 0.002 * x['length'] for x in by_roll_tc[c['roll']])
+
         moves = {}   # clip id -> dict(start, roll, score, method, ...)
         for c in p.clips:
             c['sync'] = None
@@ -550,10 +561,15 @@ class SyncAnalyzer:
                 c['start'] = c['manual']['start']
         for c in tc_clips:
             ms = [m for r, m in per_clip[c['id']].items() if r in cluster]
-            if not ms and self.coverage(c, c['orig_start'], cluster) > 0.5:
-                # others were rolling but nothing matched near the claimed TC: maybe a missed jam -> search the day
+            if not ms and self.coverage(c, c['orig_start'], cluster) > 0.5 and not continuous(c):
+                # others were rolling but nothing matched near the claimed TC: maybe a missed jam -> search the day.
+                # Not for a file that carries straight on from the one before it on the same recorder (the take
+                # rolled over: its timecode is right by construction), and only on a long shared stretch: two lavs
+                # on different people barely match anywhere, and a few seconds at a file's edge can match by chance
+                # (20250208: 03_LAV_004 was moved 3.5 h on 11 s of overlap at 0.87).
                 g = [self.measure(c, r) for r in cluster if r != c['roll']]
-                g = [m for m in g if self.confident(m, strict=True)]
+                need = max(FULLDAY_MIN_S * TC.SR, 0.25 * c['length'])
+                g = [m for m in g if self.confident(m, strict=True) and m['cov'] * c['length'] >= need]
                 if g:
                     best = max(g, key=lambda m: m['score'])
                     st = to_own(c, best['start'], best['roll'])
