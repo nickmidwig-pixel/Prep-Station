@@ -208,6 +208,17 @@
     for (const c of cl) { a = Math.min(a, c.start, c.orig_start ?? c.start); b = Math.max(b, c.start + c.length); }
     return [a, b];
   }
+  // the timeline only goes an hour past the first and last clip: you can't scroll off into empty day
+  const BUFFER = 3600 * SR;
+  function bounds() { const sp = span(); return sp ? [sp[0] - BUFFER, sp[1] + BUFFER] : null; }
+  function clampView() {
+    const b = bounds(); if (!b || !S.view) return;
+    let [a, z] = S.view;
+    const w = Math.min(z - a, b[1] - b[0]);
+    if (a < b[0]) a = b[0];
+    if (a + w > b[1]) a = b[1] - w;
+    S.view = [a, a + w];
+  }
   function fit() {
     const sp = span();
     if (!sp) { S.view = null; return; }
@@ -246,6 +257,7 @@
     if (!S.project || !S.project.clips.length) return;
     if (!S.view) fit();
     if (!S.view) return;
+    clampView();
     const L = layout();
     ctx.clearRect(0, 0, L.W, L.H);
     ctx.fillStyle = COL.well; ctx.fillRect(0, 0, L.W, L.H);
@@ -266,6 +278,15 @@
       ctx.fillStyle = COL.line; ctx.fillRect(Math.round(x), RULER_H - 7, 1, 7);
     }
     ctx.fillStyle = COL.line; ctx.fillRect(0, RULER_H - 1, L.W, 1);
+    { // the hour of buffer before the first clip and after the last one reads as outside the day
+      const sp = span();
+      if (sp) {
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        const xa = Math.max(LABEL_W, xOf(sp[0], L)), xb = Math.min(L.W, xOf(sp[1], L));
+        if (xa > LABEL_W) ctx.fillRect(LABEL_W, RULER_H, xa - LABEL_W, L.H - RULER_H);
+        if (xb < L.W) ctx.fillRect(Math.max(LABEL_W, xb), RULER_H, L.W - Math.max(LABEL_W, xb), L.H - RULER_H);
+      }
+    }
     // rows
     const rl = refLane();
     if (S.band && S.band.moved) {
@@ -548,6 +569,7 @@
   // ------------------------------------------------------------------ playhead, sound and picture
   let frameT = null;
   function setPlayhead(s) {
+    const b = bounds(); if (b) s = Math.max(b[0], Math.min(b[1], s));
     S.ph = s;
     $('phTc').textContent = samplesToTc(s);
     if (S.playing || pending) stopPlay();
@@ -1546,7 +1568,7 @@
     applyState(await call('clip_slowmo', c.id, true));
     askAdvance(c.id);
   });
-  window.MS = { event: (kind, data) => { const h = handlers[kind]; if (h) h(data); }, rows: () => laneRows().map((r) => ({ type: r.type, key: r.key, slow: !!r.slow })) };
+  window.MS = { event: (kind, data) => { const h = handlers[kind]; if (h) h(data); }, rows: () => laneRows().map((r) => ({ type: r.type, key: r.key, slow: !!r.slow })), view: () => ({ view: S.view, bounds: bounds() }) };
 
   // ------------------------------------------------------------------ sheets, toast, menus
   let toastT = null;

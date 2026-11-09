@@ -120,6 +120,14 @@ with sync_playwright() as pw:
     pg.keyboard.press('l'); pg.wait_for_timeout(200)
     check(pg.query_selector('#shuttle') is not None, 'shuttle badge present')
     pg.screenshot(path=f'{OUT}/5_resized.png')
+    # 2.4.9: the view can't leave the day by more than an hour either side, however far you scroll or zoom out
+    tl = pg.query_selector('#tl').bounding_box()
+    for _ in range(30):
+        pg.mouse.move(tl['x'] + tl['width'] * 0.6, tl['y'] + 60); pg.mouse.wheel(0, 900)          # zoom way out
+    for _ in range(40):
+        pg.mouse.wheel(4000, 0)                                                                    # scroll right
+    v = pg.evaluate('window.MS.view()')
+    check(v['view'][0] >= v['bounds'][0] - 1 and v['view'][1] <= v['bounds'][1] + 1, f"view stays within the day ±1 h {v}")
     # 2.4: two worlds — mark the selection as slow motion and it moves under the SLOW MOTION divider, in list and timeline
     rows0 = pg.evaluate('window.MS.rows()')
     check(not any(r['type'] == 'divider' for r in rows0), 'no slow-motion world before anything is marked')
