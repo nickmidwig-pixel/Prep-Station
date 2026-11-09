@@ -72,17 +72,34 @@
     if (ln.kind === 'camera') return CAM_HUES[Math.max(0, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.indexOf(ln.letter)) % CAM_HUES.length];
     return ROLE_COL[ln.role] || COL.aud;
   }
+  // Two worlds, stacked: the real-time lanes (what gets synced to sound) and, under a divider, the slow-motion
+  // lanes — one per camera that has off-rate / S&F clips. A clip lives in exactly one of them.
+  const isSlow = (c) => !!c.slowmo;
+  const rowClips = (row) => laneClips(row.lane.key).filter((c) => row.type === 'track' || isSlow(c) === !!row.slow);
   function laneRows() {
-    const present = new Set(dayClips().map((c) => c.lane));
+    const cl = dayClips();
+    const real = new Set(cl.filter((c) => !isSlow(c)).map((c) => c.lane));
+    const slow = new Set(cl.filter(isSlow).map((c) => c.lane));
     const out = [];
     for (const ln of lanesAll()) {
-      if (!present.has(ln.key)) continue;
+      if (!real.has(ln.key)) continue;
       const multi = ln.kind === 'audio' && ln.channels > 1;
       const open = multi && S.expanded.has(ln.key);
       out.push({ type: 'lane', lane: ln, key: ln.key, multi, open });
       if (open) (ln.tracks || []).forEach((t, i) => out.push({ type: 'track', lane: ln, key: `${ln.key}#${i}`, i, t }));
     }
+    if (slow.size) {
+      const n = cl.filter(isSlow).length;
+      out.push({ type: 'divider', key: 'slow', label: 'SLOW MOTION', sub: `${n} clip${n === 1 ? '' : 's'} · own timeline, not synced to sound` });
+      for (const ln of lanesAll()) if (slow.has(ln.key)) out.push({ type: 'lane', lane: ln, key: ln.key + '|slow', slow: true, multi: false, open: false });
+    }
     return out;
+  }
+  function slowSub(row) {
+    const cl = rowClips(row);
+    const rates = [...new Set(cl.map((c) => c.slowmo && c.slowmo.kind === 'marked' ? 'marked' : (c.fps || '')))].filter(Boolean);
+    const pct = [...new Set(cl.map((c) => c.slowmo && c.slowmo.speed ? Math.round(c.slowmo.speed * 100) + '%' : ''))].filter(Boolean);
+    return [rates.join(' / ') + (rates.some((r) => /\d/.test(r)) ? ' fps' : ''), pct.length === 1 ? `plays at ${pct[0]}` : ''].filter(Boolean).join(' · ');
   }
   const refLane = () => {
     const r = S.settings.reference && S.settings.reference.roll;
@@ -199,7 +216,7 @@
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const rows = laneRows();
-    const base = rows.map((x) => (x.type === 'lane' ? 38 : 24));
+    const base = rows.map((x) => (x.type === 'lane' ? 38 : x.type === 'divider' ? 26 : 24));
     const want = Math.round(RULER_H + 8 + base.reduce((a, b) => a + b, 0));
     const box = cv.parentElement;
     const maxH = Math.round(window.innerHeight * 0.5);
@@ -253,9 +270,23 @@
     }
     L.rows.forEach((row, n) => {
       const { y, h: rh } = row;
+      if (row.type === 'divider') {
+        ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(0, y, L.W, rh - 2);
+        ctx.fillStyle = 'rgba(242,239,230,.14)'; ctx.fillRect(0, y, L.W, 1);
+        ctx.save(); ctx.beginPath(); ctx.rect(0, y, L.W, rh); ctx.clip();
+        ctx.strokeStyle = 'rgba(242,239,230,.10)'; ctx.lineWidth = 2;
+        for (let sx = -rh; sx < L.W; sx += 10) { ctx.beginPath(); ctx.moveTo(sx, y + rh); ctx.lineTo(sx + rh, y); ctx.stroke(); }
+        ctx.restore();
+        ctx.fillStyle = COL.paper; ctx.font = '700 11px Barlow, sans-serif';
+        ctx.fillText(row.label, 12, y + rh / 2 - 1);
+        const tw = ctx.measureText(row.label).width;
+        ctx.fillStyle = COL.muted; ctx.font = '400 11.5px Barlow, sans-serif';
+        ctx.fillText(row.sub, 12 + tw + 10, y + rh / 2 - 1);
+        return;
+      }
       const ln = row.lane;
       const isTrack = row.type === 'track';
-      ctx.fillStyle = isTrack ? 'rgba(21,24,27,0.9)' : (n % 2 ? COL.lane : 'rgba(27,31,35,0.55)');
+      ctx.fillStyle = isTrack ? 'rgba(21,24,27,0.9)' : row.slow ? 'rgba(14,16,18,0.8)' : (n % 2 ? COL.lane : 'rgba(27,31,35,0.55)');
       ctx.fillRect(LABEL_W, y, L.W - LABEL_W, rh - 2);
       // label column
       ctx.fillStyle = isTrack ? '#1A1E22' : COL.label; ctx.fillRect(0, y, LABEL_W - 1, rh - 2);
@@ -268,8 +299,8 @@
       }
       const name0 = isTrack ? row.t.name : ln.label;
       const name = name0.length > 15 ? name0.slice(0, 14) + '…' : name0;
-      const isRef = !isTrack && rl && rl.key === ln.key && effMode() !== 'audio';
-      const sub = isTrack ? (ROLE_LABEL[row.t.role] || row.t.role || '') : (isRef ? `reference · ${ln.sub}` : ln.sub);
+      const isRef = !isTrack && !row.slow && rl && rl.key === ln.key && effMode() !== 'audio';
+      const sub = isTrack ? (ROLE_LABEL[row.t.role] || row.t.role || '') : row.slow ? slowSub(row) : (isRef ? `reference · ${ln.sub}` : ln.sub);
       ctx.fillStyle = COL.paper; ctx.font = isTrack ? '500 12px Barlow, sans-serif' : '600 13.5px Barlow, sans-serif';
       if (rh >= 28) {
         ctx.fillText(name, x0l, y + rh / 2 - 7);
@@ -280,7 +311,7 @@
         if (isTrack && sub) { const tw = ctx.measureText(name).width; ctx.fillStyle = COL.muted; ctx.font = '400 10px Barlow, sans-serif'; ctx.fillText(sub, x0l + tw + 6, y + rh / 2 - 1); }
         if (isRef) { const tw = ctx.measureText(name).width; ctx.fillStyle = COL.led; ctx.beginPath(); ctx.arc(x0l + tw + 8, y + rh / 2 - 1, 3, 0, Math.PI * 2); ctx.fill(); }
       }
-      if (!isTrack) {                 // M / S for playback
+      if (!isTrack && !row.slow) {    // M / S for playback (slow motion has no synced sound to hear)
         const muted = S.mute.has(ln.key), solo = S.solo.has(ln.key), dim = S.solo.size && !solo;
         const by = y + rh / 2 - 9;
         [['M', muted, MS_X, '#E0614A'], ['S', solo, MS_X + MS_W + 3, '#E2A23B']].forEach(([t, on, bx, colOn]) => {
@@ -292,7 +323,7 @@
         if (muted || dim) { ctx.fillStyle = 'rgba(27,31,35,.55)'; ctx.fillRect(LABEL_W, y, L.W - LABEL_W, rh - 2); }
       }
       // clips
-      for (const c of laneClips(ln.key)) {
+      for (const c of rowClips(row)) {
         if (c.start == null) continue;
         const h = rh - (isTrack ? 6 : 10), yy = y + (isTrack ? 2 : 4);
         if (!isTrack && moved(c) && c.orig_start != null) {
@@ -311,13 +342,6 @@
         roundRect(x0, yy, Math.max(2, x1 - x0), h, 2); ctx.fill();
         ctx.globalAlpha = 1;
         const ov = isTrack ? null : overlay(c);
-        if (ov === 'slow') {
-          ctx.save(); roundRect(x0, yy, Math.max(2, x1 - x0), h, 2); ctx.clip();
-          ctx.fillStyle = 'rgba(21,24,27,.55)'; ctx.fillRect(x0, yy, x1 - x0, h);
-          ctx.strokeStyle = 'rgba(242,239,230,.45)'; ctx.lineWidth = 2;
-          for (let sx = x0 - h; sx < x1; sx += 6) { ctx.beginPath(); ctx.moveTo(sx, yy + h); ctx.lineTo(sx + h, yy); ctx.stroke(); }
-          ctx.restore();
-        }
         if (ov === 'bad') {
           ctx.save(); roundRect(x0, yy, Math.max(2, x1 - x0), h, 2); ctx.clip();
           ctx.strokeStyle = 'rgba(224,97,74,.85)'; ctx.lineWidth = 3;
@@ -337,7 +361,7 @@
         if (S.picked.has(c.id)) { ctx.strokeStyle = S.sel === c.id ? '#fff' : 'rgba(255,255,255,.7)'; ctx.lineWidth = 1.5; roundRect(x0 - 1, yy - 1, Math.max(2, x1 - x0) + 2, h + 2, 3); ctx.stroke(); }
       }
       if (!isTrack) {
-        const unplaced = laneClips(ln.key).filter((c) => c.start == null).length;
+        const unplaced = rowClips(row).filter((c) => c.start == null).length;
         if (unplaced) {
           ctx.fillStyle = COL.fix; ctx.font = '500 11px Barlow, sans-serif';
           ctx.fillText(`${unplaced} without timecode`, LABEL_W + 8, y + rh / 2);
@@ -368,7 +392,8 @@
     if (!row || mx < LABEL_W) return null;
     const s = sOf(mx, L);
     const tol = (S.view[1] - S.view[0]) / (L.W - LABEL_W) * 3;
-    return laneClips(row.lane.key).find((c) => c.start != null && s >= c.start - tol && s <= c.start + c.length + tol) || null;
+    if (row.type === 'divider') return null;
+    return rowClips(row).find((c) => c.start != null && s >= c.start - tol && s <= c.start + c.length + tol) || null;
   }
 
   cv.addEventListener('mousemove', (e) => {
@@ -397,7 +422,7 @@
     const L = layout();
     if (mx < LABEL_W) {                       // lane labels: M / S, open / close a multitrack lane, or a camera's menu
       const row = rowAt(my, L);
-      if (row && row.type === 'lane' && mx >= MS_X && my >= row.y + row.h / 2 - 9 && my <= row.y + row.h / 2 + 9) {
+      if (row && row.type === 'lane' && !row.slow && mx >= MS_X && my >= row.y + row.h / 2 - 9 && my <= row.y + row.h / 2 + 9) {
         const set = mx < MS_X + MS_W + 1 ? S.mute : S.solo;
         if (mx >= MS_X + MS_W + 1 && mx < MS_X + MS_W + 3) return;
         if (set.has(row.lane.key)) set.delete(row.lane.key); else set.add(row.lane.key);
@@ -448,7 +473,7 @@
     const got = new Set(b.keep);
     for (const row of L.rows) {
       if (row.y + row.h < ya || row.y > yb || row.type !== 'lane') continue;
-      for (const c of laneClips(row.lane.key)) if (c.start != null && c.start < sb && c.start + c.length > sa) got.add(c.id);
+      for (const c of rowClips(row)) if (c.start != null && c.start < sb && c.start + c.length > sa) got.add(c.id);
     }
     S.picked = got; S.sel = got.size ? [...got][got.size - 1] : null;
   }
@@ -740,13 +765,18 @@
     document.querySelectorAll('#clipTable th.sortable').forEach((th) => {
       th.classList.toggle('on', th.dataset.sort === sk); th.classList.toggle('desc', th.dataset.sort === sk && sd < 0);
     });
-    for (const ln of lanesAll()) {
-      const cl = laneClips(ln.key).sort(bySort);
-      if (!cl.length) continue;
-      const closed = S.collapsed.has(ln.key);
+    const groups = tableGroups();
+    for (const g of groups) {
+      if (g.type === 'world') {
+        html.push(`<tr class="world"><td colspan="7"><b>${esc(g.label)}</b><span>${esc(g.sub)}</span></td></tr>`);
+        continue;
+      }
+      const ln = g.lane, key = g.key;
+      const cl = g.clips.slice().sort(bySort);
+      const closed = S.collapsed.has(key);
       const inc = cl.filter((c) => c.include).length;
-      html.push(`<tr class="grp" data-grp="${esc(ln.key)}"><td colspan="7"><span class="tw">${closed ? '▸' : '▾'}</span>`
-        + `<i class="sw" style="background:${laneColor(ln)}"></i><b>${esc(ln.label)}</b>${esc(ln.sub || '')}`
+      html.push(`<tr class="grp ${g.slow ? 'slow' : ''}" data-grp="${esc(key)}"><td colspan="7"><span class="tw">${closed ? '▸' : '▾'}</span>`
+        + `<i class="sw" style="background:${laneColor(ln)}"></i><b>${esc(ln.label)}</b>${esc(g.slow ? slowSub({ lane: ln, type: 'lane', slow: true }) : (ln.sub || ''))}`
         + `<span class="cnt">${inc === cl.length ? `${cl.length} clip${cl.length === 1 ? '' : 's'}` : `${inc} of ${cl.length} used`}</span></td></tr>`);
       if (closed) continue;
       for (const c of cl) {
@@ -804,11 +834,28 @@
     if (!c.tc_source && c.kind === 'audio') out.push('no timecode');
     return out.filter(Boolean).join(' · ');
   }
-  function tableOrder() {
+  // the clip list mirrors the timeline: real-time lanes, then the slow-motion world with its own camera groups
+  function tableGroups() {
     const out = [];
     for (const ln of lanesAll()) {
-      if (S.collapsed.has(ln.key)) continue;
-      out.push(...laneClips(ln.key).sort((a, b) => (a.start ?? 1e18) - (b.start ?? 1e18) || a.name.localeCompare(b.name)));
+      const cl = laneClips(ln.key).filter((c) => !isSlow(c));
+      if (cl.length) out.push({ type: 'lane', lane: ln, key: ln.key, slow: false, clips: cl });
+    }
+    const slowAll = dayClips().filter(isSlow);
+    if (slowAll.length) {
+      out.push({ type: 'world', label: 'SLOW MOTION', sub: `${slowAll.length} clip${slowAll.length === 1 ? '' : 's'} · own timeline, not synced to sound` });
+      for (const ln of lanesAll()) {
+        const cl = laneClips(ln.key).filter(isSlow);
+        if (cl.length) out.push({ type: 'lane', lane: ln, key: ln.key + '|slow', slow: true, clips: cl });
+      }
+    }
+    return out;
+  }
+  function tableOrder() {
+    const out = [];
+    for (const g of tableGroups()) {
+      if (g.type !== 'lane' || S.collapsed.has(g.key)) continue;
+      out.push(...g.clips.slice().sort((a, b) => (a.start ?? 1e18) - (b.start ?? 1e18) || a.name.localeCompare(b.name)));
     }
     return out;
   }
@@ -1426,7 +1473,7 @@
     const c = selClip(); if (!c) return;
     applyState(await call('clip_slowmo', c.id, !c.slowmo));
   });
-  window.MS = { event: (kind, data) => { const h = handlers[kind]; if (h) h(data); } };
+  window.MS = { event: (kind, data) => { const h = handlers[kind]; if (h) h(data); }, rows: () => laneRows().map((r) => ({ type: r.type, key: r.key, slow: !!r.slow })) };
 
   // ------------------------------------------------------------------ sheets, toast, menus
   let toastT = null;

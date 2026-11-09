@@ -332,3 +332,8 @@ Nick's notes, all in:
 - **Clip list:** fps column (sortable; a rate that isn't the day's is highlighted), draggable column widths (double-click a grip to reset), kept between launches.
 - **Panes:** drag the bar under the viewer to trade timeline height for clip-list height (lanes grow with it); drag the edge of the side panel to widen it. Double-click either to reset. Kept between launches.
 - Legend no longer lists the camera swatches (the lane labels already say A/B/C).
+
+## 2.4
+- **Two worlds on the timeline.** Real-time lanes on top; under a hatched "SLOW MOTION" divider, a second stack with one lane per camera holding only its off-rate / S&F / marked clips. A clip is in exactly one world, so nothing slow ever sits beside synced sound. Slow lanes show the rate and playback percentage instead of the camera model and have no M/S (nothing synced to hear). The clip list mirrors it: a SLOW MOTION section with its own camera groups. Marking / unmarking a selection moves it between worlds.
+- Hatch overlay and its legend entry dropped (the divider says it). Transport help line shortened. tl-bar tools no longer wrap.
+- tests/shot_day.py: screenshot any day folder; `window.MS.rows()` exposes the row plan for tests.
