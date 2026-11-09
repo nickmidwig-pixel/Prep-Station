@@ -97,6 +97,10 @@
     }
     return out;
   }
+  function blockRate(c) {
+    if (!c.slowmo) return '';
+    return c.slowmo.kind === 'timebase' || c.slowmo.kind === 'rate' ? `${c.fps}` : c.slowmo.speed ? `${c.fps} · ${slowX(c)}` : `${c.fps || ''}`;
+  }
   function slowSub(row) {
     const cl = rowClips(row);
     const rates = [...new Set(cl.map((c) => c.slowmo && c.slowmo.kind === 'marked' ? 'marked' : (c.fps || '')))].filter(Boolean);
@@ -302,7 +306,7 @@
       const name0 = isTrack ? row.t.name : ln.label;
       const name = name0.length > 15 ? name0.slice(0, 14) + '…' : name0;
       const isRef = !isTrack && !row.slow && rl && rl.key === ln.key && effMode() !== 'audio';
-      const sub = isTrack ? (ROLE_LABEL[row.t.role] || row.t.role || '') : row.slow ? slowSub(row) : (isRef ? `reference · ${ln.sub}` : ln.sub);
+      const sub = isTrack ? (ROLE_LABEL[row.t.role] || row.t.role || '') : row.slow ? `${ln.sub} · slow motion` : (isRef ? `reference · ${ln.sub}` : ln.sub);
       ctx.fillStyle = COL.paper; ctx.font = isTrack ? '500 12px Barlow, sans-serif' : '600 13.5px Barlow, sans-serif';
       if (rh >= 28) {
         ctx.fillText(name, x0l, y + rh / 2 - 7);
@@ -355,10 +359,19 @@
           roundRect(x0 + 1, yy + 1, Math.max(2, x1 - x0) - 2, h - 2, 2); ctx.stroke();
         }
         const label = isTrack ? row.t.name : c.name;
-        if (x1 - x0 > 60 && h >= 12) {
+        const rateTag = row.slow ? blockRate(c) : '';        // slow lane: each block says its own rate up front
+        if (x1 - x0 > (rateTag ? 34 : 60) && h >= 12) {
           ctx.save(); ctx.beginPath(); ctx.rect(x0 + 5, yy, x1 - x0 - 10, h); ctx.clip();
+          let tx = x0 + 6;
+          if (rateTag) {
+            ctx.font = '700 11.5px Barlow, sans-serif';
+            const tw = ctx.measureText(rateTag).width;
+            ctx.fillStyle = 'rgba(21,24,27,.82)'; roundRect(tx - 2, yy + 3, tw + 10, h - 6, 3); ctx.fill();
+            ctx.fillStyle = COL.paper; ctx.fillText(rateTag, tx + 3, yy + h / 2 + 0.5);
+            tx += tw + 14;
+          }
           ctx.fillStyle = '#15181B'; ctx.font = `500 ${isTrack ? 11 : 12}px Barlow, sans-serif`;
-          ctx.fillText(label, x0 + 6, yy + h / 2 + 0.5); ctx.restore();
+          ctx.fillText(label, tx, yy + h / 2 + 0.5); ctx.restore();
         }
         if (S.picked.has(c.id)) { ctx.strokeStyle = S.sel === c.id ? '#fff' : 'rgba(255,255,255,.7)'; ctx.lineWidth = 1.5; roundRect(x0 - 1, yy - 1, Math.max(2, x1 - x0) + 2, h + 2, 3); ctx.stroke(); }
       }
@@ -937,7 +950,9 @@
     const busy = S.running || S.scanning;
     $('iName').textContent = c.name;
     const rate = c.kind === 'video' && c.fps ? `${c.fps} fps${c.capture_fps ? ` (shot at ${c.capture_fps})` : c.slowmo && c.slowmo.speed && c.slowmo.kind !== 'timebase' && c.slowmo.kind !== 'rate' ? ` (shot ${slowX(c)} faster)` : ''}` : '';
-    const sub = [c.roll, c.camera, c.kind === 'video' ? (c.codec || '') : `${c.channels} ch`, rate, c.dur].filter(Boolean);
+    const lnk = (lanesAll().find((l) => l.key === c.lane) || {});
+    const who = c.kind === 'video' ? [lnk.label, c.roll, c.camera] : [lnk.label || c.roll];
+    const sub = [...who, c.kind === 'video' ? (c.codec || '') : `${c.channels} ch`, rate, c.dur].filter(Boolean);
     $('iSub').innerHTML = sub.map((x, i) => (x === rate && rate ? `<b class="rate${c.slowmo ? ' slow' : ''}">${esc(x)}</b>` : esc(x))).join(' · ');
     const src = c.tc_source ? ` <span class="why">(${esc(c.tc_source)})</span>` : '';
     $('iFileTc').innerHTML = c.orig_tc ? `${c.orig_tc}${src}` : '<span class="why">No timecode in the file</span>';
@@ -1120,6 +1135,8 @@
     pick(id);
     if (c.lane) S.collapsed.delete(c.lane), S.collapsed.delete(c.lane + '|slow');
     if (zoom && c.start != null) { const L = c.length || SR * 10, pad = Math.max(L * 0.6, SR * 20); S.view = [c.start - pad, c.start + L + pad]; }
+    if (c.start != null && (S.ph == null || S.ph < c.start || S.ph >= c.start + c.length)) setPlayhead(c.start);
+    else if (c.start != null) setPlayhead(S.ph);              // same spot, but the viewer now shows this clip
     renderTable(); renderInspector(); slateIdle(); draw();
     const row = document.querySelector(`tr[data-id="${id}"]`); if (row) row.scrollIntoView({ block: 'center' });
   }
@@ -1553,9 +1570,55 @@
     m.style.left = `${Math.min(x, window.innerWidth - 260)}px`; m.style.top = `${Math.min(y, window.innerHeight - 160)}px`;
     m.dataset.lane = ln.key;
   }
+  // right-click a clip (timeline or list): the source file and the everyday per-clip actions
+  function clipMenu(c, x, y) {
+    const m = $('popMenu');
+    const ln = lanesAll().find((l) => l.key === c.lane) || {};
+    const isV = c.kind === 'video';
+    m.innerHTML = `<div class="pm-h">${esc(c.name)}</div><div class="pm-l">${esc([ln.label, c.roll, isV && c.fps ? c.fps + ' fps' : ''].filter(Boolean).join(' · '))}</div>`
+      + `<button class="pm-i" data-act="finder">Show in Finder</button>`
+      + `<button class="pm-i" data-act="open">Open in its app</button>`
+      + `<button class="pm-i" data-act="name">Copy file name</button>`
+      + (c.tc ? `<button class="pm-i" data-act="tc">Copy timecode (${esc(c.tc)})</button>` : '')
+      + `<div class="pm-sep"></div>`
+      + (isV ? `<button class="pm-i" data-act="slow">${c.slowmo ? 'Real time, not slow motion' : 'Mark as slow motion'}</button>` : '')
+      + `<button class="pm-i" data-act="incl">${c.include ? 'Leave out of the day' : 'Use in the day'}</button>`;
+    m.hidden = false;
+    m.style.left = `${Math.min(x, window.innerWidth - 260)}px`; m.style.top = `${Math.min(y, window.innerHeight - 250)}px`;
+    m.dataset.lane = ''; m.dataset.clip = c.id;
+  }
+  cv.addEventListener('contextmenu', (e) => {
+    const r = cv.getBoundingClientRect();
+    const c = hit(e.clientX - r.left, e.clientY - r.top);
+    if (!c) return;
+    e.preventDefault();
+    if (!S.picked.has(c.id)) pick(c.id);
+    renderTable(); renderInspector(); draw();
+    clipMenu(c, e.clientX, e.clientY);
+  });
+  $('clipRows').addEventListener('contextmenu', (e) => {
+    const tr = e.target.closest('tr[data-id]'); if (!tr) return;
+    const c = S.project.clips.find((x) => x.id === +tr.dataset.id); if (!c) return;
+    e.preventDefault();
+    if (!S.picked.has(c.id)) pick(c.id);
+    renderTable(); renderInspector(); draw();
+    clipMenu(c, e.clientX, e.clientY);
+  });
   $('popMenu').addEventListener('click', async (e) => {
     const b = e.target.closest('button'); if (!b) return;
     const key = $('popMenu').dataset.lane;
+    if (b.dataset.act) {
+      const c = S.project.clips.find((x) => x.id === +$('popMenu').dataset.clip);
+      closeMenu(); if (!c) return;
+      const act = b.dataset.act;
+      if (act === 'finder') call('reveal', c.path);
+      else if (act === 'open') call('open_in_app', c.id);
+      else if (act === 'name') { await call('copy_text', c.name); toast(`Copied ${c.name}`); }
+      else if (act === 'tc') { await call('copy_text', c.tc); toast(`Copied ${c.tc}`); }
+      else if (act === 'slow') applyState(await call('clip_slowmo', c.id, !c.slowmo));
+      else if (act === 'incl') applyState(await call('set_include', c.id, !c.include));
+      return;
+    }
     closeMenu();
     if (b.dataset.letter) applyState(await call('set_lane_letter', key, b.dataset.letter));
     else if (b.dataset.selall) { S.picked = new Set(laneClips(key).map((c) => c.id)); S.sel = [...S.picked][0] ?? null; renderTable(); renderInspector(); draw(); }

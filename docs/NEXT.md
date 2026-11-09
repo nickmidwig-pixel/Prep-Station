@@ -361,6 +361,11 @@ Nick's notes, all in:
 ## 2.4.5
 - Step through everything waiting for a slow-motion decision without leaving the inspector: "‹ 2 of 3 ›" next to the Yes / No buttons (⇧⌥↓ / ⇧⌥↑), in timeline order; answering Yes or No moves on to the next one. The summary-line link opens the first in timeline order.
 
-## Queue (Nick's notes, 11/09 afternoon, for the next build)
-- Auto-confirm slow motion when two clocks agree (filename start → last write, and timecode gap to the next clip on the same body); ask only when they disagree. (Offered after walking through C017.)
-- Right-click menu on timeline clips and clip-list rows: **Show in Finder** (reveal the original file), plus the existing per-clip actions.
+## 2.4.6
+- **Viewer, header and timeline name the same clip.** Selecting a clip (click, list, ‹ › stepper, a note) now moves the playhead into it, so the picture, the big timecode and the highlight agree; before, the viewer kept showing whatever camera was under the old playhead (Nick saw "A CAM · A001C003" over a selected B CAM slow clip). The selected clip always wins in the viewer, labelled "B CAM · slow motion · <name>". The inspector header leads with the camera as the timeline says it ("B CAM · B01 · C80 · hevc · 23.976 fps …") instead of the card name.
+- **Right-click a clip** (timeline or list): Show in Finder, Open in its app, Copy file name, Copy timecode, Mark as slow motion / Real time, Leave out / Use.
+- **Each slow-motion block carries its own rate** ("59.94", "23.976 · 5×") in a dark tag at its left edge; the slow lane label is just the camera ("C80 · slow motion") instead of a mixed list of rates.
+- Slow-motion question text uses the panel's full width, buttons below it.
+
+## Queue
+- Auto-confirm slow motion when two clocks agree (filename start → last write, and timecode gap to the next clip on the same body); ask only when they disagree. Offered to Nick after walking through C017 — waiting for his OK.

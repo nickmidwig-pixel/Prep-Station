@@ -41,7 +41,7 @@ with sync_playwright() as pw:
         print('STEP', pg.inner_text('#askStep').replace('\n', ' '), '| hidden:', pg.eval_on_selector('#askStep', 'e => e.hidden'))
         before = pg.evaluate('window.MS.sel ? window.MS.sel() : null')
         pg.click('#askNext'); pg.wait_for_timeout(300)
-        print('NEXT', pg.inner_text('#iName'), pg.inner_text('#askN'))
+        print('NEXT', pg.inner_text('#iName'), pg.inner_text('#askN'), '| header:', pg.inner_text('#iSub'), '| playhead:', pg.inner_text('#phTc'))
         pg.click('#iSlowYes'); pg.wait_for_timeout(500)
         print('AFTER YES', pg.inner_text('#iName'), pg.inner_text('#askN') if not pg.eval_on_selector('#askStep', 'e => e.hidden') else '(done)')
     if pg.query_selector('tr.world'):

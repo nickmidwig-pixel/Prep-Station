@@ -572,3 +572,6 @@ body.finished #goBtn { background: none; border: 1px solid var(--line); color: v
 .stepper .linkbtn { font: inherit; font-size: 18px; line-height: 1; color: var(--paper); background: none; border: 1px solid var(--line); border-radius: 6px; width: 26px; height: 26px; cursor: pointer; }
 .stepper .linkbtn:hover { border-color: var(--muted); }
 .slowrow { flex-wrap: wrap; }
+.popmenu .pm-sep { height: 1px; background: var(--line); margin: 6px 2px; }
+#iSlowRow.ask > span:first-child, #iSlowRow > #iSlowText { flex: 1 1 100%; }
+#iSlowRow.ask { padding: 12px 14px; }
