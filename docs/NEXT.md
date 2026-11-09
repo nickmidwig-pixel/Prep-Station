@@ -354,3 +354,6 @@ Nick's notes, all in:
 ## 2.4.3
 - Timeline stacks cameras like an edit: A CAM sits right above the sound (V1), B CAM above it, C above that — "it moves up from there". The exported XML already had A on V1, B on V2 (checked). The clip list stays A-first (it is a list).
 - Cameras with no letter anywhere (card name, clip names, your ⌘G) are lettered by how much they shot: the body that carried the day gets the next free letter, a phone or GoPro with a few clips falls to the end. The reference pick no longer influences lettering. tests/test_days.py covers it (A labelled + unlabelled C80 with most footage + iPhone → A, B, C).
+
+## 2.4.4
+- Inspector header shows the clip's frame rate next to the codec — "23.976 fps (shot 5× faster)" or "(shot at 119.88)" for slow motion, highlighted; the slow-motion question starts with the file's rate.

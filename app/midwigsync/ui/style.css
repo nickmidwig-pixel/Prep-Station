@@ -566,3 +566,5 @@ body.finished #goBtn { background: none; border: 1px solid var(--line); color: v
 .slowrow.ask { border-color: var(--fix, #E2A23B); }
 .slowrow.ask #iSlowText { color: var(--paper); }
 .tl-title .linkbtn { font: inherit; color: var(--fix, #E2A23B); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+#iSub b.rate { color: var(--paper); font-weight: 600; }
+#iSub b.rate.slow { color: var(--fix, #E2A23B); }

@@ -936,8 +936,9 @@
     if (!c) return;
     const busy = S.running || S.scanning;
     $('iName').textContent = c.name;
-    const sub = [c.roll, c.camera, c.kind === 'video' ? (c.codec || '') : `${c.channels} ch`, c.dur].filter(Boolean);
-    $('iSub').textContent = sub.join(' · ');
+    const rate = c.kind === 'video' && c.fps ? `${c.fps} fps${c.capture_fps ? ` (shot at ${c.capture_fps})` : c.slowmo && c.slowmo.speed && c.slowmo.kind !== 'timebase' && c.slowmo.kind !== 'rate' ? ` (shot ${slowX(c)} faster)` : ''}` : '';
+    const sub = [c.roll, c.camera, c.kind === 'video' ? (c.codec || '') : `${c.channels} ch`, rate, c.dur].filter(Boolean);
+    $('iSub').innerHTML = sub.map((x, i) => (x === rate && rate ? `<b class="rate${c.slowmo ? ' slow' : ''}">${esc(x)}</b>` : esc(x))).join(' · ');
     const src = c.tc_source ? ` <span class="why">(${esc(c.tc_source)})</span>` : '';
     $('iFileTc').innerHTML = c.orig_tc ? `${c.orig_tc}${src}` : '<span class="why">No timecode in the file</span>';
     let now = c.tc || '—';
@@ -965,7 +966,7 @@
     const unsure = !!(c.slowmo && !c.slowmo.sure);
     $('iSlowRow').classList.toggle('ask', unsure);
     if (isVid) {
-      $('iSlowText').textContent = c.slowmo ? `${c.slowmo.why}${unsure ? ' Is it slow motion?' : ' On the slow-motion timeline; its sound isn’t used.'}`
+      $('iSlowText').textContent = c.slowmo ? `${c.fps ? `${c.fps} fps file. ` : ''}${c.slowmo.why}${unsure ? ' Is it slow motion?' : ' On the slow-motion timeline; its sound isn’t used.'}`
         : 'Real time, on the sync timeline.';
       $('iSlow').textContent = c.slowmo ? (unsure ? 'No, real time' : 'Not slow motion') : 'Mark as slow motion';
       $('iSlow').disabled = busy;
