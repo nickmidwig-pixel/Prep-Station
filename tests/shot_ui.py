@@ -95,6 +95,31 @@ with sync_playwright() as pw:
     pg.mouse.click(box['x'] + 150, box['y'] + 47)       # the M box of the first lane
     pg.wait_for_timeout(150)
     pg.screenshot(path=f'{OUT}/4_controls.png')
+    # 2.3: fps column, draggable column widths, draggable panes, JKL shuttle (play stubbed -> badge stays hidden)
+    check(pg.query_selector('#clipTable th[data-sort="fps"]') is not None, 'clip list has an fps column')
+    fps_cells = [t.strip() for t in pg.eval_on_selector_all('#clipTable td.fps', 'els => els.map(e => e.textContent)')]
+    check(any(t and t != '—' for t in fps_cells), f'camera rows show a frame rate {fps_cells[:4]}')
+    check(pg.query_selector('.legend .sw[style*="D9534F"]') is None and 'Cameras' not in pg.inner_text('.legend'), 'legend has no camera swatches')
+    check(pg.query_selector('#backBtn') is None, 'no back-5-seconds button')
+    g = pg.query_selector('#clipTable th[data-sort="name"] .grip').bounding_box()
+    w_before = pg.eval_on_selector('#clipCols col[data-col="name"]', 'e => e.style.width')
+    pg.mouse.move(g['x'] + 4, g['y'] + 10); pg.mouse.down(); pg.mouse.move(g['x'] - 96, g['y'] + 10, steps=6); pg.mouse.up()
+    w_after = pg.eval_on_selector('#clipCols col[data-col="name"]', 'e => e.style.width')
+    check(w_before != w_after and int(w_after[:-2]) < int(w_before[:-2]), f'dragging the File grip narrows the column {w_before} -> {w_after}')
+    check('on' in (pg.get_attribute('#clipTable th[data-sort="start"]', 'class') or ''), 'the grip drag did not re-sort')
+    vb = pg.query_selector('#vsplit').bounding_box()
+    h_before = pg.query_selector('#timeline').bounding_box()['height']
+    pg.mouse.move(vb['x'] + vb['width'] / 2, vb['y'] + 4); pg.mouse.down(); pg.mouse.move(vb['x'] + vb['width'] / 2, vb['y'] + 84, steps=6); pg.mouse.up()
+    h_after = pg.query_selector('#timeline').bounding_box()['height']
+    check(h_after > h_before + 60, f'dragging the split grows the timeline {h_before:.0f} -> {h_after:.0f}')
+    hb = pg.query_selector('#hsplit').bounding_box()
+    r_before = pg.query_selector('#run').bounding_box()['width']
+    pg.mouse.move(hb['x'] + 3, hb['y'] + 300); pg.mouse.down(); pg.mouse.move(hb['x'] - 117, hb['y'] + 300, steps=6); pg.mouse.up()
+    r_after = pg.query_selector('#run').bounding_box()['width']
+    check(r_after > r_before + 100, f'dragging the side split widens the panel {r_before:.0f} -> {r_after:.0f}')
+    pg.keyboard.press('l'); pg.wait_for_timeout(200)
+    check(pg.query_selector('#shuttle') is not None, 'shuttle badge present')
+    pg.screenshot(path=f'{OUT}/5_resized.png')
     check(not errs, f'no page errors {errs[:2]}')
     b.close()
 print('UI SHOTS OK' if ok else 'UI SHOTS FAILED')

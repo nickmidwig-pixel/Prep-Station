@@ -323,15 +323,18 @@ class Api:
         return [c for c in self.p.clips if c['kind'] in kinds and c['include'] and c['start'] is not None
                 and c['start'] <= at < c['start'] + c['length'] and media.total_audio_channels(c) + (c['kind'] == 'video') > 0]
 
-    def play(self, at, cid=None, ms=None, seconds=180):
+    def play(self, at, cid=None, ms=None, seconds=180, speed=1.0, reverse=False):
         """Play from the playhead: the selected clip if it's under the playhead, else the recorder's mix (or boom)
         there, else the reference camera's sound. A preview copy goes to the app's cache; afplay plays it.
         With mute / solo set on lanes (ms = {mute: [lane keys], solo: [...]}) every audible lane under the playhead
-        is mixed instead (its best channel), 60 s at a time."""
+        is mixed instead (its best channel), 60 s at a time.
+        speed (1, 2, 4, 8) and reverse are JKL shuttling: the window is rendered backwards / faster first, so the
+        returned dur is real seconds and the picture side advances the playhead by speed * dur."""
         self.stop_play()
         at = int(at)
+        speed = max(1.0, min(16.0, float(speed or 1.0)))
         if ms and (ms.get('mute') or ms.get('solo')):
-            return self._play_mix(at, set(ms.get('mute') or []), set(ms.get('solo') or []))
+            return self._play_mix(at, set(ms.get('mute') or []), set(ms.get('solo') or []), speed=speed, reverse=reverse)
         c = self.p.by_id(int(cid)) if cid is not None else None
         if c and not (c['start'] is not None and c['start'] <= at < c['start'] + c['length']):
             c = None
@@ -355,8 +358,14 @@ class Api:
             at = c['start']
         if not media.total_audio_channels(c):
             return dict(ok=False, why=f"{c['name']} has no sound.")
-        off = max(0, at - c['start']) / TC.SR
-        dur = min(seconds, max(0.5, (c['start'] + c['length'] - at) / TC.SR))
+        if reverse:
+            dur = min(seconds * speed, max(0.5, (at - c['start']) / TC.SR))
+            if dur < 0.5:
+                return dict(ok=False, why='Nothing before the playhead in that clip.')
+            off = max(0, at - c['start']) / TC.SR - dur
+        else:
+            off = max(0, at - c['start']) / TC.SR
+            dur = min(seconds * speed, max(0.5, (c['start'] + c['length'] - at) / TC.SR))
         roles = Project.clip_roles(c) if c['kind'] == 'audio' else ['cam'] * media.total_audio_channels(c)
         n = len(roles)
         pick = [i for i, r in enumerate(roles) if r == 'mix'][:2] or [i for i, r in enumerate(roles) if r == 'boom'][:1] \
@@ -378,15 +387,36 @@ class Api:
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0 or not os.path.exists(out):
             return dict(ok=False, why='Could not read the sound there.')
+        out = self._shuttle(out, speed, reverse)
         if sys.platform != 'darwin':
             return dict(ok=False, why='Playback works on the Mac.')
         self._player = subprocess.Popen(['afplay', out])
         names = c.get('track_names') or {}
         what = ' + '.join(dict.fromkeys(str(names.get(i + 1) or names.get(str(i + 1)) or f'ch {i + 1}') for i in pick)) \
             if c['kind'] == 'audio' else f"ch {pick[0] + 1}" + (f"–{pick[-1] + 1}" if len(pick) > 1 else '')
-        return dict(ok=True, from_=at, dur=dur, what=f"{c['roll']} · {c['name']} ({what})", **{'from': at})
+        return dict(ok=True, from_=at, dur=dur / speed, speed=speed, reverse=bool(reverse),
+                    what=f"{c['roll']} · {c['name']} ({what})", **{'from': at})
 
-    def _play_mix(self, at, mute, solo, seconds=60):
+    @staticmethod
+    def _shuttle(wav, speed, reverse):
+        """Render a preview wav backwards and/or faster (ffmpeg areverse / atempo) for JKL shuttling."""
+        if speed == 1.0 and not reverse:
+            return wav
+        filt = []
+        if reverse:
+            filt.append('areverse')
+        sp = speed
+        while sp > 1.0001:
+            step = min(2.0, sp)
+            filt.append(f'atempo={step:.4f}')
+            sp /= step
+        out = os.path.splitext(wav)[0] + '_shuttle.wav'
+        ff = media.ffmpeg_exe() if hasattr(media, 'ffmpeg_exe') else __import__('midwigsync.convert', fromlist=['x']).ffmpeg_exe()
+        r = subprocess.run([ff, '-y', '-v', 'error', '-i', wav, '-af', ','.join(filt), '-c:a', 'pcm_s16le', out],
+                           capture_output=True, text=True)
+        return out if r.returncode == 0 and os.path.exists(out) else wav
+
+    def _play_mix(self, at, mute, solo, seconds=60, speed=1.0, reverse=False):
         import numpy as np
         from .refpick import _read as rd
         from .bwf import WavWriter
@@ -403,8 +433,15 @@ class Api:
                 return dict(ok=False, why='No sound at the playhead on the lanes you have on.')
             at = nxt[0]['start']
             here = [c for c in self._covering(at) if (c.get('lane') or c['roll']) in keys]
-        end = max(c['start'] + c['length'] for c in here)
-        n = int(min(seconds * TC.SR, max(TC.SR // 2, end - at)))
+        if reverse:
+            first = min(c['start'] for c in here)
+            n = int(min(seconds * speed * TC.SR, max(TC.SR // 2, at - first)))
+            if at - first < TC.SR // 2:
+                return dict(ok=False, why='Nothing before the playhead on the lanes you have on.')
+            at = at - n
+        else:
+            end = max(c['start'] + c['length'] for c in here)
+            n = int(min(seconds * speed * TC.SR, max(TC.SR // 2, end - at)))
         mix = np.zeros(n, np.float32)
         names = []
         ref = self.settings.get('reference') or {}
@@ -436,10 +473,13 @@ class Api:
         ww = WavWriter(out, n, 1, TC.SR, 16)
         ww.write_float(mix)
         ww.close()
+        out = self._shuttle(out, speed, reverse)
         if sys.platform != 'darwin':
             return dict(ok=False, why='Playback works on the Mac.')
         self._player = subprocess.Popen(['afplay', out])
-        return dict(ok=True, dur=n / TC.SR, what=' + '.join(names), **{'from': at})
+        # from = where the sound starts in timeline terms: the playhead going forward, the window's end going back
+        return dict(ok=True, dur=n / TC.SR / speed, speed=speed, reverse=bool(reverse), what=' + '.join(names),
+                    **{'from': at + n if reverse else at})
 
     def stop_play(self):
         p = getattr(self, '_player', None)

@@ -57,3 +57,8 @@ Everything in group 1 is solved. Group 2 is where the work is, and three of the 
 - Canon XF605 / XF705 / XA70 / C300 Mk III manuals: S&F records no sound, TC switches to Rec Run; Canon R5 C / C80 online manuals (CRM, XF-AVC S).
 - Blackmagic RAW SDK (clip metadata; Resolve "Camera FPS" = sensor rate), Blackmagic forum thread on reading camera FPS outside Resolve.
 - Panasonic VariCam LT / EVA1 recording-format papers (VFR 1–240 fps, conformed recording).
+
+## Update from the 20250208 C80 card (2.3)
+- Canon C80 XF-AVC/RAW/MP4 clip names encode the record-start clock: `B_0001C015A250209_001152HN` → 2025-02-09 00:11:52. XF-AVC `.MXF` creation_time is the **end** of the take; `.CRM` and `.MP4` creation_time is the start and the file mtime the end. So every Canon clip has a real-time span even when the audio tracks are silent — the `clock` tell no longer depends on mtime surviving the copy.
+- The Canon `.XML` sidecar beside XF-AVC clips holds only device/location fields (no frame-rate or S&F field), confirming there is nothing camera-specific to read.
+- On this card every 59.94 clip was real-time 59.94P (name→stamp span = duration), i.e. "slow motion to be slowed in post" → `timebase` tell, 40 % on a 23.976 day. No in-camera S&F clip was found by the clock tell; if Nick confirms one, compare its name-start to its stamp — the span should be 1/N of the duration.

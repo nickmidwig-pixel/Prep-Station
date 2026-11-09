@@ -3,7 +3,7 @@ run every test pipeline, fingerprint again. Any difference, or any new file outs
 is a failure."""
 import hashlib, os, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOTS = ['/home/claude/testday', '/home/claude/testday_x', '/home/claude/mixerday', '/home/claude/slowday', '/home/claude/dayshape', '/home/claude/dayshape2', '/home/claude/hopday',
+ROOTS = ['/home/claude/testday', '/home/claude/testday_x', '/home/claude/mixerday', '/home/claude/slowday', '/home/claude/dayshape', '/home/claude/dayshape2', '/home/claude/dayshape_20250301', '/home/claude/dayshape_parent', '/home/claude/hopday',
          '/home/claude/canonday', '/home/claude/canonday_plain', '/home/claude/layoutday',
          '/home/claude/consday_audio_off', '/home/claude/consday_gopro', '/home/claude/consday_ref_off', '/home/claude/consday_all_good']
 OUTS = ('_SYNCED', '_MIDWIG', '_SYNC_WORK', 'WORK FILES (not for the edit)')

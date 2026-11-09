@@ -103,28 +103,83 @@ def shoot_day(c):
     return (d - dt.timedelta(hours=NIGHT_HOURS)).date().isoformat(), bool(c.get('created_meta'))
 
 
+_CANON_NAME_TIME = re.compile(r'C\d{3}[A-Z](\d{2})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})[0-9A-Z]{2}_CANON', re.I)
+
+
+def _name_start(c):
+    """The record-start clock a camera wrote into the file name, as a local datetime, or None.
+    Canon C80 / C400 / R5 C: B_0001C015A250209_001152HN_CANON = 2025-02-09 00:11:52. (Their XF-AVC .MXF files
+    carry the END of the take as creation time, the RAW and MP4 files the start, so the name is the one stamp
+    that always means the same thing.)"""
+    m = _CANON_NAME_TIME.search(c.get('name') or os.path.basename(c.get('path') or ''))
+    if not m:
+        return None
+    yy, mo, dd, hh, mi, ss = (int(x) for x in m.groups())
+    try:
+        return dt.datetime(2000 + yy, mo, dd, hh, mi, ss)
+    except ValueError:
+        return None
+
+
+def _clock_start(c):
+    """The camera's clock at the start of the clip (local), or None."""
+    d = _name_start(c)
+    if d is None and c.get('created_meta'):
+        d = _local(c.get('created'))
+    if d is None or d.year < 2000:
+        return None
+    return d
+
+
 def _clock_samples(c):
     """The camera's clock at the start of the clip, as samples since midnight (local), or None."""
-    if not c.get('created_meta'):
-        return None
-    d = _local(c.get('created'))
-    if d is None or d.year < 2000:
+    d = _clock_start(c)
+    if d is None:
         return None
     return int((d.hour * 3600 + d.minute * 60 + d.second) * TC.SR)
 
 
 def _recording_span(c):
-    """Seconds the take really took, from the clip's creation stamp to the file's last write; None when the copy
-    didn't keep the write time (end before start, or more than a day apart)."""
-    d = _local(c.get('created')) if c.get('created_meta') else None
-    if d is None:
+    """Seconds the take really took: from the start the camera wrote (file name, else creation stamp) to the end
+    (creation stamp when the camera stamps the end, as Canon XF-AVC does, else the file's last write). None when
+    nothing usable survived the copy (end before start, or more than a day apart)."""
+    start = _clock_start(c)
+    if start is None:
         return None
+    ends = []
+    if _name_start(c) is not None and c.get('created_meta'):
+        ends.append(_local(c.get('created')))
     try:
-        end = dt.datetime.fromtimestamp(os.path.getmtime(c['path']))
+        ends.append(dt.datetime.fromtimestamp(os.path.getmtime(c['path'])))
     except OSError:
-        return None
-    span = (end - d).total_seconds()
-    return span if 0 < span < 86400 else None
+        pass
+    for end in ends:
+        if end is None:
+            continue
+        span = (end - start).total_seconds()
+        if 0 < span < 86400:
+            return span
+    return None
+
+
+_FOLDER_DATE_RES = (re.compile(r'(?<!\d)(20\d{2})[-_. ]?(\d{2})[-_. ]?(\d{2})(?!\d)'),    # 20250208, 2025-02-08
+                    re.compile(r'(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)'))                     # 250208 / 261106
+
+
+def folder_date(name):
+    """A shoot date written into a folder name, as 'YYYY-MM-DD', or None."""
+    for i, rx in enumerate(_FOLDER_DATE_RES):
+        for m in rx.finditer(name or ''):
+            y, mo, d = (int(x) for x in m.groups())
+            if i == 1:
+                if not 20 <= y <= 39:
+                    continue
+                y += 2000
+            try:
+                return dt.date(y, mo, d).isoformat()
+            except ValueError:
+                continue
+    return None
 
 
 def track_number(roll):
@@ -283,8 +338,21 @@ class Project:
         H = TC.SR * 3600
         for c in self.clips:
             c.pop('day_alt', None)
+            c.pop('day_forced', None)
             c['day'], c['day_trusted'] = shoot_day(c)
             c.pop('date_note', None)
+        # the folder you dropped is the master date: "20250208", "UDP_261106_C80" or a dated folder under the drop.
+        # Camera clocks can't be trusted (rental bodies, a C500 II set to 2019); the folder you made can.
+        for c in self.clips:
+            fd = self._folder_day(c)
+            if not fd:
+                continue
+            day, folder = fd
+            if c['day'] != day:
+                c['date_note'] = (f"camera date says {c['day']}" if c['day'] and c['day_trusted'] and c['kind'] != 'audio'
+                                  else f"recorder date says {c['day']}" if c['day'] and c['day_trusted']
+                                  else f'dated by the folder {folder}')
+            c['day'], c['day_trusted'], c['day_forced'] = day, True, folder
         strong = [c for c in self.clips if c['day'] and c['day_trusted']]
         days = sorted({c['day'] for c in strong})
 
@@ -306,7 +374,7 @@ class Project:
         if len(days) > 1:
             for d in list(days):
                 cl = [c for c in strong if c['day'] == d]
-                if not cl:
+                if not cl or any(c.get('day_forced') for c in cl):
                     continue
                 cams_only = all(c['kind'] != 'audio' for c in cl)
                 night_audio = all(c['kind'] == 'audio' and c.get('day_alt') for c in cl)
@@ -351,6 +419,16 @@ class Project:
                     c['date_note'] = ('grouped by its timecode' if c['orig_start'] is not None
                                       else 'no recording date or timecode: grouped with the main day')
                 c['day'] = pick
+        # one drop with no date in its name = one day ("I put the whole day in one folder"): whatever the clocks say
+        if len(self.dropped) == 1 and not any(c.get('day_forced') for c in self.clips):
+            cnt = Counter(c['day'] for c in self.clips if c['day'] and c['day_trusted'])
+            if len({c['day'] for c in self.clips if c['day']}) > 1 and cnt:
+                main = cnt.most_common(1)[0][0]
+                for c in self.clips:
+                    if c['day'] != main:
+                        c['date_note'] = c.get('date_note') or (f"camera date says {c['day']}" if c['day'] and c['kind'] != 'audio'
+                                                                else 'grouped with the day you dropped')
+                        c['day'] = main
         # midnight: a day with clips both late evening and early morning -> the early ones are after midnight
         for d in {c['day'] for c in self.clips}:
             cl = [c for c in self.clips if c['day'] == d and c['orig_start'] is not None]
@@ -366,6 +444,24 @@ class Project:
                         if c.get('manual'):
                             c['manual']['start'] += add
                         c['after_midnight'] = True
+
+    def _folder_day(self, c):
+        """(date, folder name) from the dropped folder holding this clip, or the shallowest dated folder between
+        the drop and the file; None when no folder on that path carries a date."""
+        path = os.path.normpath(c.get('source_path') or c['path'])
+        roots = sorted((os.path.normpath(r) for r in self.dropped), key=len, reverse=True)
+        root = next((r for r in roots if path == r or path.startswith(r + os.sep)), None)
+        if root is None:
+            return None
+        if os.path.isfile(root):
+            root = os.path.dirname(root)
+        rel = os.path.dirname(os.path.relpath(path, root))
+        chain = [os.path.basename(root)] + [x for x in rel.split(os.sep) if x and x != '.']
+        for name in chain:
+            d = folder_date(name)
+            if d:
+                return d, name
+        return None
 
     def days(self):
         cnt = defaultdict(lambda: dict(n=0, rolls=set()))
@@ -836,6 +932,7 @@ class Project:
                 has_audio=media.total_audio_channels(c) > 0 and not (c.get('ltc') and c.get('listen_ch') is None),
                 source_path=c.get('source_path'), opatom=c.get('opatom', False),
                 day=c.get('day') or 'unknown', after_midnight=c.get('after_midnight', False), date_note=c.get('date_note'),
+                day_forced=c.get('day_forced'),
                 duplicate_of=os.path.basename(c['duplicate_of']) if c.get('duplicate_of') else None,
                 roles=self.clip_roles(c), track_names=c.get('track_names') or {}, scene=c.get('scene', ''), take=c.get('take', ''),
                 size=c.get('size', 0), width=c.get('width', 0), height=c.get('height', 0), sr=c.get('sr') or c.get('source_sr'),

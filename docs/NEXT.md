@@ -324,3 +324,11 @@ Nick's notes, all in:
 - Shoot-day grouping (from the 20250208 RODEO day): a camera whose clock date is wrong (C500 II saying 2019) no longer becomes its own day tab even when it holds most of the dated clips — a camera-only date with no sound recorder agreeing and no neighbouring day is placed by its timecode. Zaxcom ISOs recorded after midnight but stamped with the evening's date stay with the evening ("recorded after midnight").
 - Canon C80/C400 `XFVC/REEL_xxxx` (XF-AVC S / XF-HEVC S .MP4) folder now counts as part of the same card as CONTENTS and CRM — no phantom "C CAM".
 - tests/test_days.py covers both, plus a real camera-only next day that must stay separate.
+
+## 2.3
+- **Master date from the folder.** The folder you drop (or a dated folder under it) names the day: `20250208`, `2025-02-08 rodeo`, `UDP_261106_C80` all count. Every clip inside gets that date whatever its camera or recorder clock says (note: "camera date says 2019-04-27"). A single drop with no date in its name is treated as one day too. Dated folders side by side under one drop stay separate days; separate undated drops keep the clock-based grouping.
+- **Canon clip names carry the record-start clock** (`B_0001C015A250209_001152HN` = 00:11:52). Used for the clock tells: XF-AVC .MXF files stamp the END of the take as creation time, RAW/MP4 the start, so the name is the one stamp that always means the same thing. A silent 23.976 Canon clip that runs longer than the name→stamp span is S&F → slow motion ("clock").
+- **JKL shuttle.** L plays forward, J backwards, each tap one step faster up to 5× (rendered with areverse/atempo, afplay); K or Space stops; Space from a stop plays 1×. Badge next to Play shows direction and speed. The back-5-seconds button is gone.
+- **Clip list:** fps column (sortable; a rate that isn't the day's is highlighted), draggable column widths (double-click a grip to reset), kept between launches.
+- **Panes:** drag the bar under the viewer to trade timeline height for clip-list height (lanes grow with it); drag the edge of the side panel to widen it. Double-click either to reset. Kept between launches.
+- Legend no longer lists the camera swatches (the lane labels already say A/B/C).

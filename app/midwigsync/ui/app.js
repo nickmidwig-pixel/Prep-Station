@@ -24,6 +24,7 @@
   const call = async (name, ...args) => { const a = api(); if (!a || !a[name]) return null; try { return await a[name](...args); } catch (e) { console.error(e); return null; } };
 
   // ------------------------------------------------------------------ timecode
+  function fmtDay(k) { try { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }); } catch (e) { return k; } }
   function fpsPair() { return RATES[(S.project && S.project.fps) || '23.976'] || RATES['23.976']; }
   function samplesToTc(s, withFrames = true) {
     if (s == null) return '--:--:--:--';
@@ -202,9 +203,9 @@
     const want = Math.round(RULER_H + 8 + base.reduce((a, b) => a + b, 0));
     const box = cv.parentElement;
     const maxH = Math.round(window.innerHeight * 0.5);
-    const h = Math.max(120, Math.min(want, maxH));
+    const h = S.tlh ? Math.max(120, S.tlh) : Math.max(120, Math.min(want, maxH));   // your split height wins
     if (Math.abs(box.getBoundingClientRect().height - h) > 1) { box.style.height = `${h}px`; return layout(); }
-    const k = Math.min(1, (r.height - RULER_H - 6) / Math.max(1, base.reduce((a, b) => a + b, 0)));
+    const k = Math.min(S.tlh ? 1.6 : 1, (r.height - RULER_H - 6) / Math.max(1, base.reduce((a, b) => a + b, 0)));
     let y = RULER_H + 3;
     for (let n = 0; n < rows.length; n++) { rows[n].y = y; rows[n].h = Math.max(14, base[n] * k); y += rows[n].h; }
     return { W: r.width, H: r.height, rows };
@@ -519,41 +520,137 @@
     if (r && r.ok) { img.src = r.img; img.classList.add('on'); $('frameNote').textContent = r.label || ''; img.classList.toggle('pv', !!r.preview); if (r.why) $('phWhat').textContent = r.why; }
     else { img.classList.remove('on'); $('frameNote').textContent = (r && r.why) || 'No picture here'; }
   }
-  async function togglePlay() {
-    if (S.playing) { stopPlay(); return; }
+  // JKL shuttle: L forward, J backwards, each tap one step faster up to 5x, K or Space stops. Space from a stop plays 1x.
+  let playSeq = 0;
+  async function shuttle(dir, speed) {
     if (S.ph == null) { const sp = span(); if (!sp) return; S.ph = sp[0]; }
-    const r = await call('play', Math.round(S.ph), S.sel, (S.mute.size || S.solo.size) ? { mute: [...S.mute], solo: [...S.solo] } : null);
-    if (!r || !r.ok) { $('phWhat').textContent = (r && r.why) || 'Nothing to play here.'; return; }
+    const seq = ++playSeq;
+    if (S.playing) { S.playing = null; call('stop_play'); }
+    const ms = (S.mute.size || S.solo.size) ? { mute: [...S.mute], solo: [...S.solo] } : null;
+    const r = await call('play', Math.round(S.ph), S.sel, ms, 180, speed, dir < 0);
+    if (seq !== playSeq) return;                              // a newer key press won
+    if (!r || !r.ok) { $('phWhat').textContent = (r && r.why) || 'Nothing to play here.'; showShuttle(null); return; }
     S.ph = r.from;
-    S.playing = { t0: performance.now(), from: r.from, dur: r.dur, lastFrame: 0 };
+    S.playing = { t0: performance.now(), from: r.from, dur: r.dur, lastFrame: 0, dir, speed: r.speed || speed };
     $('playBtn').textContent = '■ Stop'; $('playBtn').classList.add('playing');
+    showShuttle(S.playing);
     $('phWhat').textContent = `Playing ${r.what}`;
     requestAnimationFrame(tick);
+  }
+  function showShuttle(p) {
+    const el = $('shuttle');
+    if (!p) { el.hidden = true; return; }
+    el.hidden = false;
+    el.textContent = `${p.dir < 0 ? '◀' : '▶'}${p.speed > 1 ? ' ' + p.speed + '×' : ''}`;
+  }
+  function togglePlay() {
+    if (S.playing) { stopPlay(); return; }
+    shuttle(1, 1);
+  }
+  function jkl(dir) {
+    const p = S.playing;
+    const speed = p && p.dir === dir ? Math.min(5, p.speed + 1) : 1;   // 1×, 2×, 3×, 4×, 5× like Premiere
+    shuttle(dir, speed);
   }
   function tick(now) {
     const p = S.playing;
     if (!p) return;
     const el = (performance.now() - p.t0) / 1000;
     if (el >= p.dur) { stopPlay(true); return; }
-    S.ph = p.from + el * SR;
+    S.ph = p.from + p.dir * el * SR * p.speed;
     $('phTc').textContent = samplesToTc(S.ph);
-    if (S.view && S.ph > S.view[1] - (S.view[1] - S.view[0]) * 0.05) {      // page along
-      const w = S.view[1] - S.view[0]; S.view = [S.ph - w * 0.1, S.ph + w * 0.9];
+    if (S.view) {                                                 // page along in the direction of travel
+      const w = S.view[1] - S.view[0];
+      if (p.dir > 0 && S.ph > S.view[1] - w * 0.05) S.view = [S.ph - w * 0.1, S.ph + w * 0.9];
+      if (p.dir < 0 && S.ph < S.view[0] + w * 0.05) S.view = [S.ph - w * 0.9, S.ph + w * 0.1];
     }
-    if (el - p.lastFrame >= 1) { p.lastFrame = el; showFrame(S.ph); }
+    if (el - p.lastFrame >= (p.speed > 1 ? 0.5 : 1)) { p.lastFrame = el; showFrame(S.ph); }
     draw();
     requestAnimationFrame(tick);
   }
   function stopPlay(ended) {
     if (!S.playing) return;
     S.playing = null;
+    playSeq++;
     if (!ended) call('stop_play');
     $('playBtn').textContent = '▶ Play'; $('playBtn').classList.remove('playing');
+    showShuttle(null);
     $('phWhat').textContent = ended ? 'End of the preview.' : 'Stopped.';
     showFrame(S.ph); draw();
   }
   $('playBtn').addEventListener('click', togglePlay);
-  $('backBtn').addEventListener('click', () => stepPlayhead(-5 * SR));
+
+  // ------------------------------------------------------------------ resizable columns and panes
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('ps.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem('ps.' + k, JSON.stringify(v)); } catch (e) { /* no storage */ } },
+  };
+  const COL_MIN = { inc: 40, name: 160, start: 90, length: 70, fps: 56, tracks: 70, status: 120 };
+  const COL_DEF = { inc: 44, name: 420, start: 118, length: 86, fps: 64, tracks: 170, status: 220 };
+  function colWidths() { return Object.assign({}, COL_DEF, store.get('cols', {})); }
+  function applyCols() {
+    const w = colWidths();
+    document.querySelectorAll('#clipCols col').forEach((col) => { col.style.width = w[col.dataset.col] + 'px'; });
+    const total = Object.values(w).reduce((a, b) => a + b, 0);
+    $('clipTable').style.width = total + 'px';
+    $('clipTable').style.minWidth = '100%';
+  }
+  (function colGrips() {
+    const ths = document.querySelectorAll('#clipTable thead th');
+    const cols = [...document.querySelectorAll('#clipCols col')].map((c) => c.dataset.col);
+    ths.forEach((th, i) => {
+      if (i >= ths.length - 1) return;                        // the last column takes what is left
+      const g = document.createElement('i');
+      g.className = 'grip'; g.title = 'Drag to resize';
+      th.appendChild(g);
+      g.addEventListener('mousedown', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const key = cols[i], w0 = colWidths()[key], x0 = e.clientX;
+        document.body.classList.add('col-resizing');
+        const move = (ev) => { const w = colWidths(); w[key] = Math.max(COL_MIN[key], w0 + ev.clientX - x0); store.set('cols', w); applyCols(); };
+        const up = () => { gripUp = performance.now(); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); document.body.classList.remove('col-resizing'); };
+        window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+      });
+      g.addEventListener('click', (e) => e.stopPropagation());
+      g.addEventListener('dblclick', (e) => { e.stopPropagation(); const w = colWidths(); delete w[cols[i]]; store.set('cols', w); applyCols(); });
+    });
+    applyCols();
+  })();
+  function applyPanes() {
+    const tlh = store.get('tlh', null), runw = store.get('runw', null);
+    S.tlh = tlh || null;
+    if (runw) document.querySelector('.grid').style.setProperty('--runw', runw + 'px');
+    draw();
+  }
+  function dragPane(handle, onMove, onEnd) {
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const x0 = e.clientX, y0 = e.clientY;
+      document.body.classList.add('pane-resizing');
+      const move = (ev) => onMove(ev.clientX - x0, ev.clientY - y0);
+      const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); document.body.classList.remove('pane-resizing'); if (onEnd) onEnd(); };
+      window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+    });
+  }
+  {
+    let h0 = 0, w0 = 0;
+    $('vsplit').addEventListener('mousedown', () => { h0 = $('timeline').getBoundingClientRect().height; });
+    dragPane($('vsplit'), (dx, dy) => {
+      const max = $('loaded').getBoundingClientRect().height - 260;
+      const h = Math.max(120, Math.min(max, h0 + dy));
+      S.tlh = Math.round(h); store.set('tlh', S.tlh);
+      draw();
+    });
+    $('vsplit').addEventListener('dblclick', () => { S.tlh = null; store.set('tlh', null); draw(); });
+    $('hsplit').addEventListener('mousedown', () => { w0 = $('run').getBoundingClientRect().width; });
+    dragPane($('hsplit'), (dx) => {
+      const w = Math.max(260, Math.min(window.innerWidth * 0.6, w0 - dx));
+      document.querySelector('.grid').style.setProperty('--runw', w + 'px'); store.set('runw', Math.round(w));
+      draw();
+    });
+    $('hsplit').addEventListener('dblclick', () => { document.querySelector('.grid').style.removeProperty('--runw'); store.set('runw', null); draw(); });
+  }
+  applyPanes();
   function stepPlayhead(ds) {
     if (S.ph == null) { const sp = span(); if (!sp) return; S.ph = sp[0]; }
     setPlayhead(Math.max(0, S.ph + ds));
@@ -626,7 +723,7 @@
   }
   function trackRows(c) {
     const roles = c.roles || [], names = c.track_names || {};
-    return `<tr class="trkrow" data-of="${c.id}"><td></td><td colspan="5"><div class="trklist">` + roles.map((r, i) =>
+    return `<tr class="trkrow" data-of="${c.id}"><td></td><td colspan="6"><div class="trklist">` + roles.map((r, i) =>
       `<span class="trk ${r}"><em>${i + 1}</em>${esc(names[i + 1] || names[String(i + 1)] || 'ch' + (i + 1))}<small>${esc(ROLE_LABEL[r] || r)}</small></span>`).join('') + '</div></td></tr>';
   }
   function renderTable() {
@@ -637,7 +734,8 @@
     // sort inside each group (cameras and sound stay grouped the way they are) by the column you clicked
     const { key: sk, dir: sd } = S.sort;
     const cmp = sk === 'name' ? (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })
-      : sk === 'length' ? (a, b) => (a.length || 0) - (b.length || 0) || byStart(a, b) : byStart;
+      : sk === 'length' ? (a, b) => (a.length || 0) - (b.length || 0) || byStart(a, b)
+      : sk === 'fps' ? (a, b) => (parseFloat(a.fps) || 0) - (parseFloat(b.fps) || 0) || byStart(a, b) : byStart;
     const bySort = (a, b) => sd * cmp(a, b);
     document.querySelectorAll('#clipTable th.sortable').forEach((th) => {
       th.classList.toggle('on', th.dataset.sort === sk); th.classList.toggle('desc', th.dataset.sort === sk && sd < 0);
@@ -647,7 +745,7 @@
       if (!cl.length) continue;
       const closed = S.collapsed.has(ln.key);
       const inc = cl.filter((c) => c.include).length;
-      html.push(`<tr class="grp" data-grp="${esc(ln.key)}"><td colspan="6"><span class="tw">${closed ? '▸' : '▾'}</span>`
+      html.push(`<tr class="grp" data-grp="${esc(ln.key)}"><td colspan="7"><span class="tw">${closed ? '▸' : '▾'}</span>`
         + `<i class="sw" style="background:${laneColor(ln)}"></i><b>${esc(ln.label)}</b>${esc(ln.sub || '')}`
         + `<span class="cnt">${inc === cl.length ? `${cl.length} clip${cl.length === 1 ? '' : 's'}` : `${inc} of ${cl.length} used`}</span></td></tr>`);
       if (closed) continue;
@@ -662,6 +760,7 @@
           <td class="c-inc"><input type="checkbox" ${c.include ? 'checked' : ''} data-inc="${c.id}" aria-label="Use ${esc(c.name)}"></td>
           <td class="file" title="${esc(c.path)}"><div class="fc">${c.kind === 'video' ? `<img class="th" data-thumb="${c.id}" alt="" ${S.thumbs[c.id] ? `src="${S.thumbs[c.id]}"` : ''}>` : '<span class="th aud"></span>'}<span class="fn">${esc(c.name)}${sub2}</span></div></td>
           <td class="num">${tc}</td><td class="num">${c.dur}</td>
+          <td class="num fps ${c.kind === 'video' && S.project && String(c.fps) !== String(S.project.fps) ? 'odd' : ''}">${c.kind === 'video' ? esc(c.fps || '—') : '<span class="dimtxt">—</span>'}</td>
           <td class="tracks">${tracksCell(c)}</td>
           <td class="status">${chipHtml || `<span class="txt">${esc(st.t)}</span>`}</td></tr>`);
         if (c.kind === 'audio' && S.openTracks.has(c.id)) html.push(trackRows(c));
@@ -697,7 +796,6 @@
     if (c.kind === 'video') {
       if (ln && ln.rolls.length > 1) out.push(c.roll);
       out.push([c.camera, c.codec && !/not decodable/.test(c.codec) ? c.codec : (c.flags.includes('raw') || /CRM|BRAW|R3D/i.test(c.name) ? 'RAW' : '')].filter(Boolean).join(' '));
-      if (c.fps && S.project && String(c.fps) !== String(S.project.fps)) out.push(`${c.fps} fps`);
     } else {
       if (c.scene || c.take) out.push(`scene ${c.scene || '–'} take ${c.take || '–'}`);
       if (c.sr && c.sr !== 48000) out.push(`${c.sr / 1000} kHz`);
@@ -714,7 +812,9 @@
     }
     return out;
   }
+  let gripUp = 0;
   document.querySelectorAll('#clipTable th.sortable').forEach((th) => th.addEventListener('click', () => {
+    if (performance.now() - gripUp < 400) return;               // the click that ends a column drag
     const k = th.dataset.sort;
     S.sort = S.sort.key === k ? { key: k, dir: -S.sort.dir } : { key: k, dir: 1 };
     renderTable();
@@ -916,7 +1016,7 @@
       else if (f.has('raw') && !c.channels) out.push(['warn', c, 'is RAW with no proxy beside it, so there’s nothing to read. Put the proxy next to it.']);
     }
     if (multiDay()) {
-      const guessed = dayClips().filter((c) => c.date_note);
+      const guessed = dayClips().filter((c) => c.date_note && !c.day_forced);
       if (guessed.length === 1) out.push(['warn', guessed[0], `${guessed[0].date_note}. Check it’s on the right day.`]);
       else if (guessed.length) out.push(['warn', { name: `${guessed.length} files` }, 'had no recording date, so they were put on this day by their timecode. Check they belong here.']);
     }
@@ -1079,6 +1179,11 @@
       if (fixed) notes.push(`${fixed} timecode${fixed === 1 ? '' : 's'} fixed`);
       const slow = cl.filter((c) => c.slowmo && c.include).length;
       if (slow) notes.push(`${slow} slow motion / other rate, on their own timeline`);
+      const forced = cl.find((c) => c.day_forced);
+      const dayKey = cl[0] && cl[0].day;
+      if (forced && dayKey) notes.push(`${fmtDay(dayKey)} from the folder name ${forced.day_forced}`);
+      const wrongClock = new Set(cl.filter((c) => /camera date says/.test(c.date_note || '')).map((c) => (lanesAll().find((l) => l.key === c.lane) || {}).label || c.roll));
+      if (wrongClock.size) notes.push(`${[...wrongClock].join(', ')}: camera clock is wrong, dated by ${forced ? 'the folder' : 'its timecode'}`);
       $('sumSub').textContent = notes.join(' · ');
     }
     renderAttention();
@@ -1417,9 +1522,9 @@
     ['⌘G', 'These cards are one camera (Tentacle: Create new Sync Group)', 'Edit', K('g', '⌘'), async () => { const pc = pickedClips().filter((c) => c.kind === 'video'); if (pc.length) applyState(await call('group_camera', pc.map((c) => c.id), null)); else toast('Select camera clips first'); }],
     ['Esc', 'Close / clear the selection', 'Edit', (e) => e.key === 'Escape', () => { if (closeSheets() || closeMenu()) return; if (S.playing) { stopPlay(); return; } pick(null); renderTable(); renderInspector(); slateIdle(); draw(); }, true],
     ['Space', 'Play / stop', 'Playback', (e) => e.key === ' ' && !isMod(e), togglePlay],
-    ['L', 'Play', 'Playback', K('l'), () => { if (!S.playing) togglePlay(); }],
+    ['L', 'Play forward · each tap faster, up to 5×', 'Playback', K('l'), () => jkl(1)],
+    ['J', 'Play backwards · each tap faster, up to 5×', 'Playback', K('j'), () => jkl(-1)],
     ['K', 'Stop', 'Playback', K('k'), () => { if (S.playing) stopPlay(); }],
-    ['J', 'Back 5 seconds', 'Playback', K('j'), () => stepPlayhead(-5 * SR)],
     ['← / →', 'Playhead one frame back / on', 'Playback', (e) => !isMod(e) && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => stepPlayhead((e.key === 'ArrowLeft' ? -1 : 1) * frameS())],
     ['⇧← / ⇧→', 'Playhead one second back / on', 'Playback', (e) => !isMod(e) && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => stepPlayhead((e.key === 'ArrowLeft' ? -1 : 1) * SR)],
     ['⌥← / ⌥→', 'Playhead to the previous / next clip edge', 'Playback', (e) => e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => jumpEdge(e.key === 'ArrowLeft' ? -1 : 1)],

@@ -13,12 +13,14 @@ FF = convert.ffmpeg_exe()
 FPS = TC.parse_rate('23.976')
 
 
-def mov(path, rate, secs, tc, created):
+def mov(path, rate, secs, tc, created, audio=True):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    subprocess.run([FF, '-y', '-v', 'error', '-f', 'lavfi', '-i', f'testsrc=size=160x90:rate={rate}',
-                    '-f', 'lavfi', '-i', 'anoisesrc=sample_rate=48000:amplitude=0.1', '-t', str(secs),
-                    '-timecode', tc, '-c:v', 'libx264', '-preset', 'ultrafast', '-metadata', f'creation_time={created}',
-                    '-c:a', 'pcm_s24le', path], check=True)
+    cmd = [FF, '-y', '-v', 'error', '-f', 'lavfi', '-i', f'testsrc=size=160x90:rate={rate}']
+    if audio:
+        cmd += ['-f', 'lavfi', '-i', 'anoisesrc=sample_rate=48000:amplitude=0.1']
+    cmd += ['-t', str(secs), '-timecode', tc, '-c:v', 'libx264', '-preset', 'ultrafast', '-metadata', f'creation_time={created}']
+    cmd += (['-c:a', 'pcm_s24le'] if audio else ['-an']) + [path]
+    subprocess.run(cmd, check=True)
 
 
 def wav(path, tc, secs, ubits):
@@ -41,6 +43,9 @@ if not os.path.exists(D + '/.made'):
     mov(f'{D}/BCAM_C80/B01/CONTENTS/CLIPS001/B_0001C001A250208_232926IE_CANON.MOV', '24000/1001', 3, '23:28:46:00', '2025-02-09T04:29:51.000000Z')
     mov(f'{D}/BCAM_C80/B01/CRM/REEL_0001/B_0001C005X250209_001653ZD_CANON.MOV', '24000/1001', 3, '00:16:13:00', '2025-02-09T05:16:53.000000Z')
     mov(f'{D}/BCAM_C80/B01/XFVC/REEL_0001/B_0001C017H250209_011313RI_CANON.MOV', '24000/1001', 3, '01:12:02:03', '2025-02-09T06:13:13.000000Z')
+    # Canon S&F in XF-AVC: no sound, plays 23.976, name says the take started 00:20:00 and the (end) stamp says
+    # it was over 6 s later, yet the file runs 20 s -> shot faster than it plays
+    mov(f'{D}/BCAM_C80/B01/CONTENTS/CLIPS001/B_0001C040A250209_002000SF_CANON.MOV', '24000/1001', 20, '00:20:00:00', '2025-02-09T05:20:06.000000Z', audio=False)
     # sound: Zaxcom, evening files and one past midnight still stamped 20250208
     wav(f'{D}/SOUND/01LAV/20250208_201748_01LAV_001.WAV', '20:17:48:00', 4, '20250208')
     wav(f'{D}/SOUND/01LAV/20250208_225017_01LAV_003.WAV', '22:50:17:00', 4, '20250208')
@@ -56,13 +61,16 @@ assert all(c['day'] == '2025-02-08' for c in p.clips)
 a = [c for c in p.clips if c['roll'] == 'A01']
 assert len(a) == 6 and all(c.get('date_note') == 'camera date says 2019-04-27' for c in a)
 b = [c for c in p.clips if c['roll'] == 'B01']
-assert len(b) == 3, [c['roll'] for c in p.clips]
+assert len(b) == 4, [c['roll'] for c in p.clips]
+sf = next(c for c in b if 'C040' in c['name'])
+assert sf.get('slowmo') and sf['slowmo']['kind'] == 'clock', sf.get('slowmo')
+assert all(not c.get('slowmo') for c in b if 'C040' not in c['name']), [(c['name'], c.get('slowmo')) for c in b]
 night = next(c for c in p.clips if '002102' in c['name'])
 assert night.get('date_note') == 'recorded after midnight' and night.get('after_midnight')
 cams = [l for l in p.lanes() if l['kind'] == 'camera']
 assert [l['letter'] for l in cams] == ['A', 'B'], cams
 
-# a real two-day load must NOT be merged: camera-only day right after a sound day
+# two real days dropped as separate folders must NOT be merged: camera-only day right after a sound day
 E = '/home/claude/dayshape2'
 if not os.path.exists(E + '/.made'):
     shutil.rmtree(E, ignore_errors=True)
@@ -72,7 +80,40 @@ if not os.path.exists(E + '/.made'):
         mov(f'{E}/CCAM/C01/CONTENTS/CLIPS001/C001C00{i+1}.MOV', '24000/1001', 3, tc, f'2025-02-10T0{1+i}:30:00.000000Z')
     open(E + '/.made', 'w').close()
 q = Project()
-q.add_paths([E])
+q.add_paths([E + '/SOUND', E + '/BCAM_C80', E + '/CCAM'])
 print([(d['key'], d['n'], d['rolls']) for d in q.days()])
 assert [d['key'] for d in q.days()] == ['2025-02-08', '2025-02-09'], q.days()
+
+# ... but the same material dropped as ONE undated folder is one day (the whole day went into one folder)
+q1 = Project()
+q1.add_paths([E])
+print([(d['key'], d['n'], d['rolls']) for d in q1.days()])
+assert [d['key'] for d in q1.days()] == ['2025-02-08'], q1.days()
+assert all(c.get('date_note') == 'camera date says 2025-02-09' for c in q1.clips if c['roll'] == 'C01')
+
+# the dropped folder's name is the master date: every clock in it is overruled, even the sound recorder's
+F = '/home/claude/dayshape_20250301'
+if not os.path.exists(F + '/.made'):
+    shutil.rmtree(F, ignore_errors=True)
+    shutil.copytree(D + '/SOUND', F + '/SOUND')
+    shutil.copytree(D + '/ACAM_C500II', F + '/ACAM_C500II')
+    open(F + '/.made', 'w').close()
+r = Project()
+r.add_paths([F])
+print([(d['key'], d['n'], d['rolls']) for d in r.days()])
+assert [d['key'] for d in r.days()] == ['2025-03-01'], r.days()
+assert all(c.get('day_forced') == 'dayshape_20250301' for c in r.clips)
+notes = {c['roll']: c.get('date_note') for c in r.clips}
+assert notes['A01'] == 'camera date says 2019-04-27' and notes['01LAV'] == 'recorder date says 2025-02-08', notes
+# a dated folder one level under an undated drop counts too, and two of them stay two days
+G = '/home/claude/dayshape_parent'
+if not os.path.exists(G + '/.made'):
+    shutil.rmtree(G, ignore_errors=True)
+    shutil.copytree(D + '/SOUND', G + '/20250208/SOUND')
+    shutil.copytree(E + '/CCAM', G + '/20250210/CCAM')
+    open(G + '/.made', 'w').close()
+g = Project()
+g.add_paths([G])
+print([(d['key'], d['n'], d['rolls']) for d in g.days()])
+assert [d['key'] for d in g.days()] == ['2025-02-08', '2025-02-10'], g.days()
 print('DAYS GOOD')
