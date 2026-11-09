@@ -117,3 +117,22 @@ g.add_paths([G])
 print([(d['key'], d['n'], d['rolls']) for d in g.days()])
 assert [d['key'] for d in g.days()] == ['2025-02-08', '2025-02-10'], g.days()
 print('DAYS GOOD')
+
+# unlabelled bodies are lettered by footage: a C80 with most of the day is B next to a labelled A, a phone with a
+# few clips is C — whichever of them the reference happens to be
+H = '/home/claude/dayshape_letters'
+if not os.path.exists(H + '/.made'):
+    shutil.rmtree(H, ignore_errors=True)
+    for i in range(3):
+        mov(f'{H}/ACAM/A01/CONTENTS/CLIPS001/A001C00{i+1}.MOV', '24000/1001', 3, f'20:{i:02d}:00:00', f'2025-02-09T01:{i:02d}:00.000000Z')
+    for i in range(6):
+        mov(f'{H}/C80 card/CONTENTS/CLIPS001/CLIP_{i:04d}.MOV', '24000/1001', 20, f'20:{10+i:02d}:00:00', f'2025-02-09T01:{10+i:02d}:00.000000Z')
+    for i in range(2):
+        mov(f'{H}/iphone/IMG_447{i}.MP4', '24000/1001', 3, f'20:{20+i:02d}:00:00', f'2025-02-09T01:{20+i:02d}:00.000000Z')
+    open(H + '/.made', 'w').close()
+h = Project()
+h.add_paths([H])
+cams = {l['letter']: l['rolls'] for l in h.lanes() if l['kind'] == 'camera'}
+print(cams)
+assert cams['A'] == ['A01'] and cams['B'] == ['C80 card'] and cams['C'] == ['iphone'], cams
+print('LETTERS GOOD')

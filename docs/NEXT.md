@@ -350,3 +350,7 @@ Nick's notes, all in:
 - Slow lane label: "59.94 fps · 40% speed".
 - On the 20250208 card the clock tell found the two in-camera S&F clips Nick described (C017, C029: XF-HEVC S MP4s, 17 and 14 min, shot in 208 s and 171 s = 5×, i.e. 120 fps → 23.976).
 - **Corrected sound moves to the top level** (Nick, on seeing the first confirm prompt on 20250208): `<date>_SYNCED/SOUND_TC_CORRECTED/` mirrors the folders the sound came in below the dropped folder (`SOUND/01LAV/…`, `SOUND/02LAV/…`), not WORK FILES. WORK FILES keeps the report, plans, caches and logs.
+
+## 2.4.3
+- Timeline stacks cameras like an edit: A CAM sits right above the sound (V1), B CAM above it, C above that — "it moves up from there". The exported XML already had A on V1, B on V2 (checked). The clip list stays A-first (it is a list).
+- Cameras with no letter anywhere (card name, clip names, your ⌘G) are lettered by how much they shot: the body that carried the day gets the next free letter, a phone or GoPro with a few clips falls to the end. The reference pick no longer influences lettering. tests/test_days.py covers it (A labelled + unlabelled C80 with most footage + iPhone → A, B, C).

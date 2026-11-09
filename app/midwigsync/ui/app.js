@@ -81,7 +81,9 @@
     const real = new Set(cl.filter((c) => !isSlow(c)).map((c) => c.lane));
     const slow = new Set(cl.filter(isSlow).map((c) => c.lane));
     const out = [];
-    for (const ln of lanesAll()) {
+    // cameras stack like an edit: A CAM is V1, right above the sound, B CAM above it, and so on up
+    const nle = (lanes) => { const cams = lanes.filter((l) => l.kind === 'camera').reverse(); return cams.concat(lanes.filter((l) => l.kind !== 'camera')); };
+    for (const ln of nle(lanesAll())) {
       if (!real.has(ln.key)) continue;
       const multi = ln.kind === 'audio' && ln.channels > 1;
       const open = multi && S.expanded.has(ln.key);
@@ -91,7 +93,7 @@
     if (slow.size) {
       const n = cl.filter(isSlow).length;
       out.push({ type: 'divider', key: 'slow', label: 'SLOW MOTION', sub: `${n} clip${n === 1 ? '' : 's'} · own timeline, not synced to sound` });
-      for (const ln of lanesAll()) if (slow.has(ln.key)) out.push({ type: 'lane', lane: ln, key: ln.key + '|slow', slow: true, multi: false, open: false });
+      for (const ln of nle(lanesAll())) if (slow.has(ln.key)) out.push({ type: 'lane', lane: ln, key: ln.key + '|slow', slow: true, multi: false, open: false });
     }
     return out;
   }

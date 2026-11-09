@@ -602,7 +602,9 @@ class Project:
             b['ref'] = b['ref'] or r['name'] == ref
             if letter and not b['letter']:
                 b['letter'] = letter
-        order = sorted(bodies.values(), key=lambda b: (not b['ref'], b['letter'] is None, b['letter'] or '', -b['dur']))
+        # bodies with no letter anywhere are lettered by how much they shot: the camera that carried the day comes
+        # first, a phone or GoPro with a few clips falls to the end (Nick's rule) — not by which one is the reference
+        order = sorted(bodies.values(), key=lambda b: (b['letter'] is None, b['letter'] or '', -b['dur']))
         used, lanes = set(), []
         order.sort(key=lambda b: not b['user'])     # letters you gave win over letters read from names
         for b in order:            # explicit letters first (unless taken by another body), then the rest in order
