@@ -360,3 +360,7 @@ Nick's notes, all in:
 
 ## 2.4.5
 - Step through everything waiting for a slow-motion decision without leaving the inspector: "‹ 2 of 3 ›" next to the Yes / No buttons (⇧⌥↓ / ⇧⌥↑), in timeline order; answering Yes or No moves on to the next one. The summary-line link opens the first in timeline order.
+
+## Queue (Nick's notes, 11/09 afternoon, for the next build)
+- Auto-confirm slow motion when two clocks agree (filename start → last write, and timecode gap to the next clip on the same body); ask only when they disagree. (Offered after walking through C017.)
+- Right-click menu on timeline clips and clip-list rows: **Show in Finder** (reveal the original file), plus the existing per-clip actions.
