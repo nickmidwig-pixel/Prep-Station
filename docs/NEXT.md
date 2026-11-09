@@ -337,3 +337,8 @@ Nick's notes, all in:
 - **Two worlds on the timeline.** Real-time lanes on top; under a hatched "SLOW MOTION" divider, a second stack with one lane per camera holding only its off-rate / S&F / marked clips. A clip is in exactly one world, so nothing slow ever sits beside synced sound. Slow lanes show the rate and playback percentage instead of the camera model and have no M/S (nothing synced to hear). The clip list mirrors it: a SLOW MOTION section with its own camera groups. Marking / unmarking a selection moves it between worlds.
 - Hatch overlay and its legend entry dropped (the divider says it). Transport help line shortened. tl-bar tools no longer wrap.
 - tests/shot_day.py: screenshot any day folder; `window.MS.rows()` exposes the row plan for tests.
+
+## 2.4.1
+- **Playback is one player at a time.** A play request renders first (ffmpeg) and only then starts afplay; Space during that render used to fire a second request, and the first one started its player anyway once it finished — an orphan nobody could stop. Now every request takes a generation number, a stop or a newer request retires the old one before it can start, the Play button shows "… Stop" while rendering so Space / K cancel it, and each render writes its own file. The player is killed when the window closes and at process exit (no more sound after quitting).
+- "N to know about" strip shows only what blocks the run (no timecode, unreadable files, failed checks); informational notes stay on the clip rows and the summary line.
+- tests/test_play_race.py.

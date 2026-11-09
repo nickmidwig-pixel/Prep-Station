@@ -329,12 +329,14 @@ class Api:
         With mute / solo set on lanes (ms = {mute: [lane keys], solo: [...]}) every audible lane under the playhead
         is mixed instead (its best channel), 60 s at a time.
         speed (1, 2, 4, 8) and reverse are JKL shuttling: the window is rendered backwards / faster first, so the
-        returned dur is real seconds and the picture side advances the playhead by speed * dur."""
-        self.stop_play()
+        returned dur is real seconds and the picture side advances the playhead by speed * dur.
+        Requests are serialised by a generation number: a request that was overtaken (Space again, K, a newer J/L,
+        or the window closing) while it was still rendering never starts a player."""
+        gen = self._play_begin()
         at = int(at)
         speed = max(1.0, min(16.0, float(speed or 1.0)))
         if ms and (ms.get('mute') or ms.get('solo')):
-            return self._play_mix(at, set(ms.get('mute') or []), set(ms.get('solo') or []), speed=speed, reverse=reverse)
+            return self._play_mix(at, set(ms.get('mute') or []), set(ms.get('solo') or []), speed=speed, reverse=reverse, gen=gen)
         c = self.p.by_id(int(cid)) if cid is not None else None
         if c and not (c['start'] is not None and c['start'] <= at < c['start'] + c['length']):
             c = None
@@ -380,7 +382,7 @@ class Api:
             src = streams[0]['path']
         prev = os.path.join(CACHE, 'preview')
         os.makedirs(prev, exist_ok=True)
-        out = os.path.join(prev, 'play.wav')
+        out = os.path.join(prev, f'play_{gen % 4}.wav')
         cmd = [media.ffmpeg_exe() if hasattr(media, 'ffmpeg_exe') else __import__('midwigsync.convert', fromlist=['x']).ffmpeg_exe(),
                '-y', '-v', 'error', '-ss', f'{off:.3f}', '-t', f'{dur:.3f}', '-i', src, '-map', '0:a:0', '-af', pan,
                '-ar', '48000', '-c:a', 'pcm_s16le', out]
@@ -390,7 +392,8 @@ class Api:
         out = self._shuttle(out, speed, reverse)
         if sys.platform != 'darwin':
             return dict(ok=False, why='Playback works on the Mac.')
-        self._player = subprocess.Popen(['afplay', out])
+        if not self._play_start(gen, out):
+            return dict(ok=False, cancelled=True, why='')
         names = c.get('track_names') or {}
         what = ' + '.join(dict.fromkeys(str(names.get(i + 1) or names.get(str(i + 1)) or f'ch {i + 1}') for i in pick)) \
             if c['kind'] == 'audio' else f"ch {pick[0] + 1}" + (f"–{pick[-1] + 1}" if len(pick) > 1 else '')
@@ -416,7 +419,7 @@ class Api:
                            capture_output=True, text=True)
         return out if r.returncode == 0 and os.path.exists(out) else wav
 
-    def _play_mix(self, at, mute, solo, seconds=60, speed=1.0, reverse=False):
+    def _play_mix(self, at, mute, solo, seconds=60, speed=1.0, reverse=False, gen=None):
         import numpy as np
         from .refpick import _read as rd
         from .bwf import WavWriter
@@ -469,23 +472,58 @@ class Api:
         mix = mix / (float(np.abs(mix).max()) or 1.0) * 0.9
         prev = os.path.join(CACHE, 'preview')
         os.makedirs(prev, exist_ok=True)
-        out = os.path.join(prev, 'mix.wav')
+        out = os.path.join(prev, f'mix_{(gen or 0) % 4}.wav')
         ww = WavWriter(out, n, 1, TC.SR, 16)
         ww.write_float(mix)
         ww.close()
         out = self._shuttle(out, speed, reverse)
         if sys.platform != 'darwin':
             return dict(ok=False, why='Playback works on the Mac.')
-        self._player = subprocess.Popen(['afplay', out])
+        if not self._play_start(gen, out):
+            return dict(ok=False, cancelled=True, why='')
         # from = where the sound starts in timeline terms: the playhead going forward, the window's end going back
         return dict(ok=True, dur=n / TC.SR / speed, speed=speed, reverse=bool(reverse), what=' + '.join(names),
                     **{'from': at + n if reverse else at})
 
-    def stop_play(self):
-        p = getattr(self, '_player', None)
-        if p and p.poll() is None:
-            p.terminate()
+    # -- one player at a time ---------------------------------------------------------------------------------
+    _play_gen = 0
+    _play_lock = threading.Lock()
+    _player = None
+
+    def _play_begin(self):
+        """Claim a new playback generation: whatever was playing or rendering is over."""
+        with self._play_lock:
+            self._play_gen += 1
+            gen = self._play_gen
+            self._kill_player()
+        return gen
+
+    def _play_start(self, gen, path):
+        """Start afplay for this generation unless a newer request or a stop overtook it while it rendered."""
+        with self._play_lock:
+            if gen is not None and gen != self._play_gen:
+                return False
+            self._kill_player()
+            self._player = subprocess.Popen(['afplay', path])
+            return True
+
+    def _kill_player(self):
+        p = self._player
         self._player = None
+        if p and p.poll() is None:
+            try:
+                p.terminate()
+                try:
+                    p.wait(0.3)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+            except OSError:
+                pass
+
+    def stop_play(self):
+        with self._play_lock:
+            self._play_gen += 1        # a render still in flight must not start its player
+            self._kill_player()
         return True
 
     def frame(self, at, cid=None):
@@ -1040,6 +1078,10 @@ def main():
 
     def setup(win):
         win.dom.document.events.drop += DOMEventHandler(on_drop, True, True)
+
+    import atexit
+    atexit.register(api.stop_play)                 # no preview keeps playing after the app is gone
+    window.events.closing += lambda *a, **k: api.stop_play()
 
     webview.start(setup, window, debug='--debug' in sys.argv)
 

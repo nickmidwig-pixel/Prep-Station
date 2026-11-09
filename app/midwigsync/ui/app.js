@@ -535,7 +535,7 @@
   function setPlayhead(s) {
     S.ph = s;
     $('phTc').textContent = samplesToTc(s);
-    if (S.playing) stopPlay();
+    if (S.playing || pending) stopPlay();
     clearTimeout(frameT);
     frameT = setTimeout(() => showFrame(s), 120);
   }
@@ -547,17 +547,25 @@
   }
   // JKL shuttle: L forward, J backwards, each tap one step faster up to 5x, K or Space stops. Space from a stop plays 1x.
   let playSeq = 0;
+  let pending = false;                                      // a play request is rendering; Space / K cancel it
+  function setPlayBtn(state) {
+    const b = $('playBtn');
+    b.textContent = state === 'playing' ? '■ Stop' : state === 'pending' ? '… Stop' : '▶ Play';
+    b.classList.toggle('playing', state !== 'idle');
+  }
   async function shuttle(dir, speed) {
     if (S.ph == null) { const sp = span(); if (!sp) return; S.ph = sp[0]; }
     const seq = ++playSeq;
-    if (S.playing) { S.playing = null; call('stop_play'); }
+    if (S.playing) { S.playing = null; showShuttle(null); }
+    pending = true; setPlayBtn('pending');
     const ms = (S.mute.size || S.solo.size) ? { mute: [...S.mute], solo: [...S.solo] } : null;
-    const r = await call('play', Math.round(S.ph), S.sel, ms, 180, speed, dir < 0);
-    if (seq !== playSeq) return;                              // a newer key press won
-    if (!r || !r.ok) { $('phWhat').textContent = (r && r.why) || 'Nothing to play here.'; showShuttle(null); return; }
+    const r = await call('play', Math.round(S.ph), S.sel, ms, 180, speed, dir < 0);   // the backend stops the old player itself
+    if (seq !== playSeq) return;                              // a newer key press, or a stop, won
+    pending = false;
+    if (!r || !r.ok) { setPlayBtn('idle'); if (!(r && r.cancelled)) $('phWhat').textContent = (r && r.why) || 'Nothing to play here.'; showShuttle(null); return; }
     S.ph = r.from;
     S.playing = { t0: performance.now(), from: r.from, dur: r.dur, lastFrame: 0, dir, speed: r.speed || speed };
-    $('playBtn').textContent = '■ Stop'; $('playBtn').classList.add('playing');
+    setPlayBtn('playing');
     showShuttle(S.playing);
     $('phWhat').textContent = `Playing ${r.what}`;
     requestAnimationFrame(tick);
@@ -569,7 +577,7 @@
     el.textContent = `${p.dir < 0 ? '◀' : '▶'}${p.speed > 1 ? ' ' + p.speed + '×' : ''}`;
   }
   function togglePlay() {
-    if (S.playing) { stopPlay(); return; }
+    if (S.playing || pending) { stopPlay(); return; }
     shuttle(1, 1);
   }
   function jkl(dir) {
@@ -594,11 +602,12 @@
     requestAnimationFrame(tick);
   }
   function stopPlay(ended) {
-    if (!S.playing) return;
+    if (!S.playing && !pending) return;
     S.playing = null;
-    playSeq++;
-    if (!ended) call('stop_play');
-    $('playBtn').textContent = '▶ Play'; $('playBtn').classList.remove('playing');
+    pending = false;
+    playSeq++;                                                // orphans any render still in flight
+    if (!ended) call('stop_play');                            // and tells the backend to drop it
+    setPlayBtn('idle');
     showShuttle(null);
     $('phWhat').textContent = ended ? 'End of the preview.' : 'Stopped.';
     showFrame(S.ph); draw();
@@ -1067,16 +1076,17 @@
       if (guessed.length === 1) out.push(['warn', guessed[0], `${guessed[0].date_note}. Check it’s on the right day.`]);
       else if (guessed.length) out.push(['warn', { name: `${guessed.length} files` }, 'had no recording date, so they were put on this day by their timecode. Check they belong here.']);
     }
-    for (const u of (P.unsupported || [])) out.push(['warn', { name: (u.path || u).split('/').pop() }, u.why || 'can’t be read.']);
+    for (const u of (P.unsupported || [])) out.push(['bad', { name: (u.path || u).split('/').pop() }, u.why || 'can’t be read.']);
     for (const e of (P.errors || [])) out.push(['bad', { name: String(e[0] || '').split('/').pop() }, `couldn’t be read: ${e[1] || ''}`]);
     return out;
   }
   function renderAttention() {
-    const a = attention();
+    // only what blocks or breaks the run; informational notes stay in the clip rows and the summary line
+    const a = attention().filter((x) => x[0] === 'bad');
     const el = $('attn');
     el.hidden = !a.length;
     if (!a.length) return;
-    const bad = a.filter((x) => x[0] === 'bad').length;
+    const bad = a.length;
     el.classList.toggle('only-warn', !bad);
     $('attnSum').innerHTML = bad ? `<b>${bad} need${bad === 1 ? 's' : ''} you</b>${a.length - bad ? `and ${a.length - bad} to know about` : ''}`
       : `<b>${a.length} to know about</b>`;
@@ -1567,11 +1577,11 @@
     ['⌫', 'Leave out / use the selected clips', 'Edit', (e) => !isMod(e) && (e.key === 'Backspace' || e.key === 'Delete'), useOrLeaveOut],
     ['⌘⌫', 'Remove the selected clips from the list (files untouched)', 'Edit', (e) => isMod(e) && (e.key === 'Backspace' || e.key === 'Delete'), removePicked],
     ['⌘G', 'These cards are one camera (Tentacle: Create new Sync Group)', 'Edit', K('g', '⌘'), async () => { const pc = pickedClips().filter((c) => c.kind === 'video'); if (pc.length) applyState(await call('group_camera', pc.map((c) => c.id), null)); else toast('Select camera clips first'); }],
-    ['Esc', 'Close / clear the selection', 'Edit', (e) => e.key === 'Escape', () => { if (closeSheets() || closeMenu()) return; if (S.playing) { stopPlay(); return; } pick(null); renderTable(); renderInspector(); slateIdle(); draw(); }, true],
+    ['Esc', 'Close / clear the selection', 'Edit', (e) => e.key === 'Escape', () => { if (closeSheets() || closeMenu()) return; if (S.playing || pending) { stopPlay(); return; } pick(null); renderTable(); renderInspector(); slateIdle(); draw(); }, true],
     ['Space', 'Play / stop', 'Playback', (e) => e.key === ' ' && !isMod(e), togglePlay],
     ['L', 'Play forward · each tap faster, up to 5×', 'Playback', K('l'), () => jkl(1)],
     ['J', 'Play backwards · each tap faster, up to 5×', 'Playback', K('j'), () => jkl(-1)],
-    ['K', 'Stop', 'Playback', K('k'), () => { if (S.playing) stopPlay(); }],
+    ['K', 'Stop', 'Playback', K('k'), () => stopPlay()],
     ['← / →', 'Playhead one frame back / on', 'Playback', (e) => !isMod(e) && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => stepPlayhead((e.key === 'ArrowLeft' ? -1 : 1) * frameS())],
     ['⇧← / ⇧→', 'Playhead one second back / on', 'Playback', (e) => !isMod(e) && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => stepPlayhead((e.key === 'ArrowLeft' ? -1 : 1) * SR)],
     ['⌥← / ⌥→', 'Playhead to the previous / next clip edge', 'Playback', (e) => e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => jumpEdge(e.key === 'ArrowLeft' ? -1 : 1)],
