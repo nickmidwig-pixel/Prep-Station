@@ -82,6 +82,12 @@ def write_report(path, job, project, sync_report, stamped, aap_info, aligned, ve
         for e in fi.get('evidence', []):
             w(f"   {e['kind']:7s} {e['name']:24s} {e['label']:9s} {'' if e['votes'] else '(not counted) '}{e.get('note', '')}")
         w('')
+    conv = [c for c in project.clips if c.get('rate_convert')]
+    if conv:
+        w(f'CONVERT BEFORE ADDING AGAIN (real time at another frame rate, left out of this run): {len(conv)} clip(s)')
+        for c in sorted(conv, key=lambda c: (c['roll'], c['name'])):
+            w(f"   {c['roll']:10s} {c['name']:40s} {TC.rate_label(c.get('fps'))} fps -> convert to {TC.rate_label(fps)}")
+        w('')
     slow = settings.get('_slow') or []
     if slow:
         w(f'SLOW MOTION + OTHER FRAME RATES (not synced, sound not used): {len(slow)} clip(s) -> TIMELINES/*_SLOW_MOTION.xml')

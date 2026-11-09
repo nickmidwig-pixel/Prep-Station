@@ -575,3 +575,14 @@ body.finished #goBtn { background: none; border: 1px solid var(--line); color: v
 .popmenu .pm-sep { height: 1px; background: var(--line); margin: 6px 2px; }
 #iSlowRow.ask > span:first-child, #iSlowRow > #iSlowText { flex: 1 1 100%; }
 #iSlowRow.ask { padding: 12px 14px; }
+
+#rateSheet .rate-lead, #rateSheet .rate-note { color: var(--muted); line-height: 1.5; margin: 0 0 14px; }
+#rateSheet .rate-note { margin-top: 14px; font-size: 13px; }
+.rate-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.rate-row .who { flex: 1; } .rate-row .who b { color: var(--paper); } .rate-row .who span { color: var(--muted); margin-left: 8px; }
+.rate-row .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.rate-row .seg button { background: none; border: 0; color: var(--muted); padding: 7px 12px; font: inherit; cursor: pointer; }
+.rate-row .seg button + button { border-left: 1px solid var(--line); }
+.rate-row .seg button.on { background: var(--paper); color: #15181B; font-weight: 600; }
+.rate-row .seg button.sug:not(.on) { color: var(--paper); }
+.rate-go { display: flex; justify-content: flex-end; }

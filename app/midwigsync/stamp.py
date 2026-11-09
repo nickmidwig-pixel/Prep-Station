@@ -70,13 +70,15 @@ def stamp_wav(clip, out_path, start_48k, fps, df=False, note=None, pad_to_frame=
     return out_path, start_48k
 
 
-def stamp_video(clip, out_path, start_48k, fps, df=False):
-    """Re-wrap (no re-encode) into .mov with a timecode track at the nearest whole frame."""
+def stamp_video(clip, out_path, start_48k, fps, df=False, keep_container=False):
+    """Re-wrap (no re-encode) with a timecode track at the nearest whole frame: into .mov, or with keep_container
+    into the source's own container (.mp4 stays .mp4) so the file is the same kind of file as the original."""
     frames = TC.samples_to_frames(start_48k, fps)
     tcs = TC.frames_to_tc(frames, fps, df)
-    out_path = os.path.splitext(out_path)[0] + '.mov'
+    ext = os.path.splitext(clip['path'])[1] if keep_container else '.mov'
+    out_path = os.path.splitext(out_path)[0] + ext
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    tmp = os.path.join(os.path.dirname(out_path), '.' + os.path.basename(out_path) + '.partial.mov')
+    tmp = os.path.join(os.path.dirname(out_path), '.' + os.path.basename(out_path) + '.partial' + ext)
     cmd = [ffmpeg_exe(), '-y', '-v', 'error', '-i', clip['path'], '-map', '0:v:0?', '-map', '0:a?',
            '-c', 'copy', '-timecode', tcs, '-metadata', f"reel_name={clip['roll']}"]
     if clip.get('codec') in ('hevc', 'h265'):
@@ -154,8 +156,8 @@ def _mxf_patch(path, old_frames, new_frames):
 
 def copy_with_tc(clip, out_dir, start_48k):
     """A copy of a camera file with only its timecode changed: an exact (cloned) copy of the original bytes with the
-    timecode number rewritten (QuickTime/MP4/CRM/BRAW tmcd, MXF timecode components). If the format can't be patched
-    that way, the streams are copied into a .mov (no re-encode, every frame bit-identical). Returns (path, how)."""
+    timecode number rewritten (QuickTime/MP4/CRM/BRAW tmcd, MXF timecode components). A file that can't be patched
+    in its own container is never rewrapped: ValueError, and the report lists it. Returns (path, how)."""
     from . import safety
     from .media import probe_video, QT_EXT
     src = clip['path']
@@ -196,5 +198,11 @@ def copy_with_tc(clip, out_dir, start_48k):
     except OSError:
         if os.path.exists(tmp):
             os.remove(tmp)
-    path, _ = stamp_video(clip, out, start_48k, fps, df)
-    return path, 'streams copied into .mov, every frame bit-identical'
+    # Never a different container or codec (Nick, 11/09: RAW stays RAW, MXF stays MXF, H.264 stays H.264).
+    # A QuickTime/MP4 file with no timecode track at all (an iPhone clip) gets one by a stream copy into the SAME
+    # container; anything else is left alone.
+    if ext in ('.mov', '.mp4', '.m4v') and not clip.get('raw_picture'):
+        path, _ = stamp_video(clip, out, start_48k, fps, df, keep_container=True)
+        return path, 'same file type, streams copied (no re-encode), timecode track added'
+    raise ValueError(f"its timecode can't be rewritten inside its own {ext0.lstrip('.').upper()} file; "
+                     'left as it is — set its timecode in the NLE')

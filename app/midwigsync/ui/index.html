@@ -259,6 +259,15 @@
   </aside>
 </main>
 <div class="sheet-back" id="sheetBack" hidden></div>
+<section class="sheet" id="rateSheet" hidden role="dialog" aria-modal="true" aria-labelledby="rateTitle">
+  <header><h2 id="rateTitle">Clips at another frame rate</h2><button class="link" data-close>Later</button></header>
+  <div class="sheet-body">
+    <p class="rate-lead">The day is <b id="rateDay"></b>. Prep Station only corrects timecode; it never converts picture. For each camera and rate, say what these clips are.</p>
+    <div id="rateList"></div>
+    <p class="rate-note"><b>Slow motion</b> goes on its own timeline, never synced to sound. <b>Real time</b> clips are left out of this run and listed in the report: convert them to the day’s rate, then add them again.</p>
+    <div class="rate-go"><button class="btn" id="rateGo" disabled>Sync the day</button></div>
+  </div>
+</section>
 <section class="sheet" id="settingsSheet" hidden role="dialog" aria-modal="true" aria-labelledby="setTitle">
   <header><h2 id="setTitle">Settings</h2><button class="link" data-close>Done</button></header>
   <div class="sheet-body">

@@ -68,7 +68,7 @@ class Api:
     # Every edit you make in the window (which clips are used, timecode you set or picked, slow-motion marks,
     # cameras grouped or relettered, frame rate, reference mic, files added, removed or cleared) is one step.
     # Snapshots hold the edit fields of every clip plus the project-level choices; files on disk are never involved.
-    EDIT_KEYS = ('include', 'manual', 'start', 'flags', 'slowmo_user', 'sync')
+    EDIT_KEYS = ('include', 'manual', 'start', 'flags', 'slowmo_user', 'rate_convert', 'sync')
     UNDO_DEPTH = 200
 
     def _snap(self):
@@ -175,7 +175,8 @@ class Api:
                     day_names[d['key']] = self._day_names(d['key'])
                 except Exception:  # noqa: BLE001
                     pass
-        return dict(project=pj, settings=s, running=bool(self.job and self.job_thread and self.job_thread.is_alive()),
+        return dict(project=pj, settings=s, rate_groups=self.rate_groups(),
+                    running=bool(self.job and self.job_thread and self.job_thread.is_alive()),
                     scanning=self.scanning, platform=sys.platform, app=dict(name=APP_NAME, version=APP_VERSION),
                     day_names=day_names, user_named=self.user_named,
                     undo=self.undo_stack[-1][0] if self.undo_stack else None,
@@ -291,6 +292,49 @@ class Api:
         if self._busy():
             return self._state()
         self.p.set_fps(choice)
+        return self._state()
+
+    # ------------------------------------------------------------ clips at another frame rate
+    # Prep Station never converts picture (Nick, 11/09): a clip at another rate is either slow motion (its own
+    # timeline) or real time shot at the wrong rate, which you convert yourself and add again. You say which, per
+    # camera and rate, before the run.
+    def rate_groups(self):
+        lanes = {l['key']: l for l in self.p.lanes()}
+        proj = TC.rate_label(self.p.fps)
+        groups = {}
+        for c in self.p.clips:
+            if c['kind'] != 'video' or not c.get('fps') or TC.rate_label(c['fps']) == proj:
+                continue
+            k = f"{c.get('lane')}|{TC.rate_label(c['fps'])}"
+            g = groups.setdefault(k, dict(key=k, lane=(lanes.get(c.get('lane')) or {}).get('label', c['roll']),
+                                          fps=TC.rate_label(c['fps']), ids=[], choices=set()))
+            g['ids'].append(c['id'])
+            g['choices'].add('convert' if c.get('rate_convert') else 'slow' if c.get('slowmo_user') else None)
+        out = []
+        for g in groups.values():
+            ch = g.pop('choices')
+            g['choice'] = next(iter(ch)) if len(ch) == 1 else None
+            g['n'] = len(g['ids'])
+            g['suggest'] = 'slow' if float(TC.parse_rate(g['fps'])) > float(self.p.fps) * 1.5 else 'convert'
+            out.append(g)
+        return sorted(out, key=lambda g: (g['lane'], g['fps']))
+
+    def set_rate_choice(self, key, choice):
+        return self._edit('a frame-rate choice', lambda: self._set_rate_choice_raw(key, choice))
+
+    def _set_rate_choice_raw(self, key, choice):
+        if self._busy():
+            return self._state()
+        g = next((g for g in self.rate_groups() if g['key'] == key), None)
+        for cid in (g or {}).get('ids', []):
+            c = self.p.by_id(cid)
+            if choice == 'slow':
+                c['slowmo_user'], c['rate_convert'], c['include'] = True, False, True
+            elif choice == 'convert':
+                c['slowmo_user'], c['rate_convert'], c['include'] = None, True, False
+            else:
+                c['slowmo_user'], c['rate_convert'] = None, False
+        self.p.analyze()
         return self._state()
 
     def clip_slowmo(self, cid, value):

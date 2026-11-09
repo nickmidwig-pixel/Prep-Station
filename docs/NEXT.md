@@ -383,6 +383,11 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 ## 2.4.9
 - The timeline is bounded to the day: one hour before the first clip to one hour after the last. Zooming out stops there, scrolling stops there, the playhead can't leave it; the buffer hours are shaded so the day's edges read at a glance.
 
+## 2.5 — Prep Station never converts picture (Nick, 11/09)
+"Files of different frame rates need to be converted before brought into the software … this can only be changing the time code on a file." Some off-rate clips are slow motion (59.94 on a 23.976 day), some are real time shot at the wrong rate by accident (an iPhone at 29.97); only you know which.
+- **Frame-rate sheet before the run.** Sync the day opens "Clips at another frame rate" whenever a camera has clips at another rate that you haven't decided: one row per camera and rate, **Slow motion** (own timeline, never synced) or **Real time · I'll convert** (left out of this run, listed in the report under CONVERT BEFORE ADDING AGAIN). The likely answer is highlighted (≥1.5× the day's rate → slow motion, else real time); Sync the day enables once every row is answered. Also reachable from the summary line ("N clips at another frame rate — decide"). Undoable.
+- **Camera timecode copies never change file type.** The exact-copy patch is unchanged (2–4 bytes differ). The old fallback (streams rewrapped into .mov) is gone: a MOV/MP4 with no timecode track (iPhone) gets one by a stream copy into the same container (.mp4 stays .mp4); anything else that can't be patched in place is left alone and listed.
+- Dropped from the plan: conforming frame rates (no picture is ever converted).
+
 ## Queue
-- **Conform slow motion to 23.976 (copies, picture untouched).** Nick's rules (11/09): always preserve the log image, keep timecode, same format as the source (RAW stays RAW, ProRes stays ProRes, H.264 stays H.264). Plan: rewrite only the playback rate in the header — MOV/MP4/CRM (mdhd timescale / stts), BRAW frame-rate field; MXF to verify per format; R3D impossible → XML interpret only. Assumptions until Nick says otherwise: camera sound dropped from a conformed copy; a file that can't be patched in its own container is skipped and listed (no rewrap to MOV — also change today's timecode-copy fallback to the same rule); offered after the run like the timecode copies.
 - First-run transcript: show "downloading the speech model (1.6 GB)" with its own progress instead of sitting at 0%.

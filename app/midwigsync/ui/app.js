@@ -1145,6 +1145,7 @@
     if (bad && !el.dataset.seen) { el.open = true; el.dataset.seen = '1'; }
   }
   $('sumSub').addEventListener('click', (e) => {
+    if (e.target.closest('[data-rates]')) { renderRates(); openSheet('rateSheet'); return; }
     const b = e.target.closest('[data-ask-slow]'); if (!b) return;
     selectClip(+b.dataset.askSlow, true); renderTable(); renderInspector(); draw();
   });
@@ -1297,6 +1298,8 @@
       const fixed = cl.filter(moved).length;
       if (fixed) notes.push(`${fixed} timecode${fixed === 1 ? '' : 's'} fixed`);
       const slow = cl.filter((c) => c.slowmo && c.include).length;
+      const rg = rateGroups(), rgOpen = rg.filter((g) => !g.choice);
+      if (rg.length) notes.unshift(`<button class="linkbtn" data-rates="1">${rgOpen.length ? `${rgOpen.reduce((a, g) => a + g.n, 0)} clips at another frame rate — decide` : 'Frame rates'}</button>`);
       const ask = cl.filter((c) => c.slowmo && !c.slowmo.sure && c.include).sort((a, b) => (a.start ?? 1e18) - (b.start ?? 1e18));
       if (ask.length) notes.unshift(`<button class="linkbtn" data-ask-slow="${ask[0].id}">${ask.length} to confirm as slow motion</button>`);
       if (slow) notes.push(`${slow} slow motion`);
@@ -1334,6 +1337,7 @@
     const hadClips = S.project && S.project.clips.length;
     S.project = st.project; S.settings = st.settings || {}; S.running = !!st.running; S.scanning = !!st.scanning;
     S.dayNames = st.day_names || {};
+    S.state = { rate_groups: st.rate_groups || [] };
     S.undo = st.undo || null; S.redo = st.redo || null;
     if (st.toast) toast(st.toast);
     { const ids = new Set(S.project.clips.map((c) => c.id)); for (const id of [...S.picked]) if (!ids.has(id)) S.picked.delete(id); if (S.sel != null && !ids.has(S.sel)) S.sel = null; }
@@ -1369,9 +1373,26 @@
   });
   $('keysBtn').addEventListener('click', () => openSheet('keysSheet'));
   $('clearAll').addEventListener('click', async () => { S.done = null; resetRun(); applyState(await call('clear')); });
+  // clips at another frame rate: you say slow motion or real time (convert it yourself) before the run
+  function rateGroups() { return (S.state && S.state.rate_groups) || []; }
+  function renderRates() {
+    const gs = rateGroups();
+    $('rateDay').textContent = `${S.project ? S.project.fps : ''} fps`;
+    $('rateList').innerHTML = gs.map((g) => `<div class="rate-row" data-key="${esc(g.key)}"><div class="who"><b>${esc(g.lane)} · ${esc(g.fps)} fps</b><span>${g.n} clip${g.n === 1 ? '' : 's'}</span></div>`
+      + `<div class="seg"><button data-c="slow" class="${g.choice === 'slow' ? 'on' : ''} ${g.suggest === 'slow' ? 'sug' : ''}">Slow motion</button>`
+      + `<button data-c="convert" class="${g.choice === 'convert' ? 'on' : ''} ${g.suggest === 'convert' ? 'sug' : ''}">Real time · I’ll convert</button></div></div>`).join('');
+    $('rateGo').disabled = gs.some((g) => !g.choice);
+  }
+  $('rateList').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-c]'); if (!b) return;
+    applyState(await call('set_rate_choice', b.closest('.rate-row').dataset.key, b.dataset.c));
+    renderRates();
+  });
+  $('rateGo').addEventListener('click', () => { closeSheets(); go(S.running ? null : (multiDay() ? S.day : null)); });
   async function go(which) {
     if (S.running) { await call('cancel'); return; }
     if (S.scanning || !S.project || !S.project.clips.length) return;
+    if (rateGroups().some((g) => !g.choice)) { renderRates(); openSheet('rateSheet'); return; }
     resetRun();
     const ok = await call('run', which);
     if (ok) { S.running = true; S.done = null; $('checks').hidden = true; renderPanel(); $('progress').hidden = false; }
