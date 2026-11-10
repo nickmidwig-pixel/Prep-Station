@@ -550,8 +550,7 @@ class Api:
         if c.get('raw_picture'):
             img = self._still(c, 608)
             if img:                    # Canon RAW: the picture the camera saved with the clip (its first frame)
-                return dict(ok=True, img=img, label=f'{who} · camera preview, start of clip', preview=True,
-                            why='Canon RAW shows the camera\'s own preview frame; the sound plays as normal.')
+                return dict(ok=True, img=img, label=who, preview=True)
             return dict(ok=False, why=f"{c['name']}: RAW, no picture preview here.")
         off = max(0, at - c['start']) / TC.SR
         key = (src, round(off, 1))
@@ -828,7 +827,8 @@ class Api:
             elif self.job and not self.job.cancelled():
                 PF.notify(APP_NAME, f"Done: {len(outs)} day(s) synced." if len(outs) > 1 else
                           f"Done: {os.path.basename(outs[0]['out']) if outs else 'finished'}")
-            self.emit('state', self._state())
+            # this thread is the job, and it is over: say so (is_alive() is still true in here)
+            self.emit('state', dict(self._state(), running=False))
         self.job_thread = threading.Thread(target=work, daemon=True)
         self.job_thread.start()
         return True
@@ -857,7 +857,8 @@ class Api:
                 self.emit('cameras_done', dict(made=made, out=jobs[0].out if jobs else ''))
             except Exception as e:  # noqa: BLE001
                 self.emit('error', dict(message=f'Camera copies: {e}', trace=traceback.format_exc()[-1500:]))
-            self.emit('state', self._state())
+            # this thread is the job, and it is over: say so (is_alive() is still true in here)
+            self.emit('state', dict(self._state(), running=False))
         self.job_thread = threading.Thread(target=work, daemon=True)
         self.job_thread.start()
         return True

@@ -131,7 +131,7 @@ with sync_playwright() as pw:
     check(bool(api.settings.get('export_otio')) != before, f"timeline chip switches OTIO ({before} -> {api.settings.get('export_otio')})")
     pg.click('#steps label.pick:has(input[data-set="export_otio"])'); pg.wait_for_timeout(300)
     k('Meta+Slash')
-    check(not pg.is_hidden('#keysSheet') and 'Create new Sync Group' in pg.inner_text('#keysSheet'), '⌘/ lists the shortcuts')
+    check(not pg.is_hidden('#keysSheet') and 'These cards are one camera' in pg.inner_text('#keysSheet'), '⌘/ lists the shortcuts')
     k('Escape')
 
     print('remove and bring back')

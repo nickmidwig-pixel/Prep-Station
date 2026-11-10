@@ -404,3 +404,17 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 ## 2.5.3 — Auto-Align never works from the originals
 - **Bug (2.4.8–2.5.2):** with no sound timecode fix, Auto-Align was given the original sound files, and it writes its renders next to its sources: on Nick's 20250208 run (2.5.2) 40 `-AtAlgn-` files landed in the original `SOUND/01LAV/`. The originals themselves were not touched (dates and sizes unchanged), but files were added to the original card folder. Now, whenever Auto-Align is on, the working set (instant clones) is always made in WORK FILES/sound_for_align, fixes or not. tests/test_step_switches.py asserts every Auto-Align source is inside the output folder, including on a run with no fixes.
 - "Press Render again" is hidden while Auto-Align is working; it appears only when Auto-Align goes quiet for 4 minutes (the same moment the hint explains what to do).
+
+## 2.5.4
+- Timeline hover card (Nick: the slow-motion B CAM thumbnail looked sloppy): placed by its real size and flipped left/up at the window edges, no longer clipped by the timeline's edge into a half-empty grey box; thumbnail a clean 16:9 at 240 px; slow-motion clips say "Slow motion · 59.94 fps" in the card.
+- The drag bar now sits directly under the timeline (above the picture box), so the timeline grows and shrinks against everything below it, like the side panel's edge.
+
+### 2.5.4, continued — interface pass (walked at 1440×900 and 1280×800 with tests/walk.py)
+- TIMELINES is sorted by use: `PREMIERE RESOLVE XML`, `PRO TOOLS AAF`, `AVID ALE`, `OTIO`, `CLIP LIST CSV`. No empty folders.
+- Names: `<day>_SYNC_ALIGN.xml` (was _SYNC_ALN), `<day>_SLOWMO.xml` (was _SLOW_MOTION).
+- Slow-motion XML: one track, shot order, clips butted together. The window's own timeline still shows where they were shot.
+- Monitor row: picture + Play + timecode on the left, selected clip beside it, fixed height so the list never jumps.
+- Legend and shortcuts live behind "?"; SYNC REF badge; review card lists file first, per-file prose removed.
+- BUG fixed: after DONE the button said "Stop" (the job thread reported itself as still running).
+- BUG fixed: a camera-only day waited on Auto-Align forever. Now: "No sound files on this day", skips to timelines.
+- While a decision is waiting the side panel shows only the decision.

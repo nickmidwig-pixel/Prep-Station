@@ -99,7 +99,7 @@ with sync_playwright() as pw:
     check(pg.query_selector('#clipTable th[data-sort="fps"]') is not None, 'clip list has an fps column')
     fps_cells = [t.strip() for t in pg.eval_on_selector_all('#clipTable td.fps', 'els => els.map(e => e.textContent)')]
     check(any(t and t != '—' for t in fps_cells), f'camera rows show a frame rate {fps_cells[:4]}')
-    check(pg.query_selector('.legend .sw[style*="D9534F"]') is None and 'Cameras' not in pg.inner_text('.legend'), 'legend has no camera swatches')
+    check(pg.query_selector('.loaded .legend') is None, 'no legend row on the main window (it lives in the shortcuts sheet)')
     check(pg.query_selector('#backBtn') is None, 'no back-5-seconds button')
     g = pg.query_selector('#clipTable th[data-sort="name"] .grip').bounding_box()
     w_before = pg.eval_on_selector('#clipCols col[data-col="name"]', 'e => e.style.width')
@@ -120,6 +120,14 @@ with sync_playwright() as pw:
     pg.keyboard.press('l'); pg.wait_for_timeout(200)
     check(pg.query_selector('#shuttle') is not None, 'shuttle badge present')
     pg.screenshot(path=f'{OUT}/5_resized.png')
+    # hover card: sized by its content, flipped to stay inside the window, never clipped by the timeline
+    tlb = pg.query_selector('#tl').bounding_box()
+    pg.evaluate("window.MS && 0")
+    for fx, fy in ((0.97, 0.95), (0.5, 0.9), (0.98, 0.3)):
+        pg.mouse.move(tlb['x'] + tlb['width'] * fx, tlb['y'] + tlb['height'] * fy); pg.wait_for_timeout(120)
+        if not pg.eval_on_selector('#tip', 'e => e.hidden'):
+            b = pg.query_selector('#tip').bounding_box(); vw, vh = pg.viewport_size['width'], pg.viewport_size['height']
+            check(b['x'] >= 0 and b['y'] >= 0 and b['x'] + b['width'] <= vw and b['y'] + b['height'] <= vh, f'tip stays inside the window {b}')
     # 2.4.9: the view can't leave the day by more than an hour either side, however far you scroll or zoom out
     tl = pg.query_selector('#tl').bounding_box()
     for _ in range(30):

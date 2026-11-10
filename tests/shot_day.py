@@ -41,6 +41,13 @@ with sync_playwright() as pw:
         print('STEP', pg.inner_text('#askStep').replace('\n', ' '), '| hidden:', pg.eval_on_selector('#askStep', 'e => e.hidden'))
         before = pg.evaluate('window.MS.sel ? window.MS.sel() : null')
         pg.click('#askNext'); pg.wait_for_timeout(300)
+        rows = pg.evaluate('window.MS.rows()'); tl = pg.query_selector('#tl').bounding_box()
+        for yy in range(int(tl['y']) + 40, int(tl['y'] + tl['height']) - 5, 12):
+            pg.mouse.move(tl['x'] + tl['width'] * 0.5, yy); pg.wait_for_timeout(60)
+            if not pg.eval_on_selector('#tip', 'e => e.hidden'):
+                b = pg.query_selector('#tip').bounding_box()
+                print('HOVER tip', {k: round(v) for k, v in b.items()}, 'window', pg.viewport_size)
+                pg.screenshot(path=OUT.replace('.png', '_hover.png')); break
         print('NEXT', pg.inner_text('#iName'), pg.inner_text('#askN'), '| header:', pg.inner_text('#iSub'), '| playhead:', pg.inner_text('#phTc'))
         pg.click('#iSlowYes'); pg.wait_for_timeout(500)
         print('AFTER YES', pg.inner_text('#iName'), pg.inner_text('#askN') if not pg.eval_on_selector('#askStep', 'e => e.hidden') else '(done)')

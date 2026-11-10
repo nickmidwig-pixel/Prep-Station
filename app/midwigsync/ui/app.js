@@ -233,10 +233,10 @@
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const rows = laneRows();
-    const base = rows.map((x) => (x.type === 'lane' ? 38 : x.type === 'divider' ? 26 : 24));
+    const base = rows.map((x) => (x.type === 'lane' ? 34 : x.type === 'divider' ? 24 : 22));
     const want = Math.round(RULER_H + 8 + base.reduce((a, b) => a + b, 0));
     const box = cv.parentElement;
-    const maxH = Math.round(window.innerHeight * 0.5);
+    const maxH = Math.round(window.innerHeight * 0.4);
     const h = S.tlh ? Math.max(120, S.tlh) : Math.max(120, Math.min(want, maxH));   // your split height wins
     if (Math.abs(box.getBoundingClientRect().height - h) > 1) { box.style.height = `${h}px`; return layout(); }
     const k = Math.min(S.tlh ? 1.6 : 1, (r.height - RULER_H - 6) / Math.max(1, base.reduce((a, b) => a + b, 0)));
@@ -327,11 +327,18 @@
       const name0 = isTrack ? row.t.name : ln.label;
       const name = name0.length > 15 ? name0.slice(0, 14) + '…' : name0;
       const isRef = !isTrack && !row.slow && rl && rl.key === ln.key && effMode() !== 'audio';
-      const sub = isTrack ? (ROLE_LABEL[row.t.role] || row.t.role || '') : row.slow ? `${ln.sub} · slow motion` : (isRef ? `reference · ${ln.sub}` : ln.sub);
+      const sub = isTrack ? (ROLE_LABEL[row.t.role] || row.t.role || '') : row.slow ? `${ln.sub} · slow motion` : ln.sub;
       ctx.fillStyle = COL.paper; ctx.font = isTrack ? '500 12px Barlow, sans-serif' : '600 13.5px Barlow, sans-serif';
       if (rh >= 28) {
         ctx.fillText(name, x0l, y + rh / 2 - 7);
-        ctx.font = '400 12px Barlow, sans-serif'; ctx.fillStyle = isRef ? COL.led : COL.muted;
+        if (isRef) {                                   // the camera everything syncs to: a small badge after its name
+          const tw = ctx.measureText(name).width;
+          ctx.font = '700 9.5px Barlow, sans-serif';
+          const bw = ctx.measureText('SYNC REF').width + 8;
+          ctx.fillStyle = 'rgba(242,239,230,.14)'; roundRect(x0l + tw + 7, y + rh / 2 - 14, bw, 13, 3); ctx.fill();
+          ctx.fillStyle = COL.paper; ctx.fillText('SYNC REF', x0l + tw + 11, y + rh / 2 - 7);
+        }
+        ctx.font = '400 12px Barlow, sans-serif'; ctx.fillStyle = COL.muted;
         ctx.fillText(sub.length > 24 ? sub.slice(0, 23) + '…' : sub, x0l, y + rh / 2 + 7);
       } else {
         ctx.fillText(name, x0l, y + rh / 2 - 1);
@@ -444,10 +451,14 @@
     if (c) {
       const st = status(c);
       tip.innerHTML = (S.thumbs[c.id] ? `<img class="tip-th" src="${S.thumbs[c.id]}" alt="">` : '') + `<b>${esc(c.name)}</b><br><span class="t">${c.tc} → ${samplesToTc(c.start + c.length)} (${c.dur})</span>` +
-        (st.t ? `<br>${esc(st.t)}` : '');
+        (c.slowmo ? `<br><span class="slowt">${esc(SLOW_LABEL(c))}</span>` : st.t ? `<br>${esc(st.t)}` : '');
       tip.hidden = false;
-      const tx = Math.min(mx + 14, r.width - 370), ty = Math.min(my + 14, r.height - 70);
-      tip.style.left = `${Math.max(4, tx)}px`; tip.style.top = `${Math.max(4, ty)}px`;
+      // place it by its real size, beside the cursor, flipping left / up so it never runs off the window
+      const tw = tip.offsetWidth, th = tip.offsetHeight, ex = e.clientX, ey = e.clientY;
+      let tx = ex + 16, ty = ey + 16;
+      if (tx + tw > window.innerWidth - 8) tx = ex - 16 - tw;
+      if (ty + th > window.innerHeight - 8) ty = ey - 16 - th;
+      tip.style.left = `${Math.max(8, tx)}px`; tip.style.top = `${Math.max(8, ty)}px`;
     } else tip.hidden = true;
     draw();
   });
@@ -579,8 +590,8 @@
   async function showFrame(s) {
     const r = await call('frame', Math.round(s), S.sel);
     const img = $('frame');
-    if (r && r.ok) { img.src = r.img; img.classList.add('on'); $('frameNote').textContent = r.label || ''; img.classList.toggle('pv', !!r.preview); if (r.why) $('phWhat').textContent = r.why; }
-    else { img.classList.remove('on'); $('frameNote').textContent = (r && r.why) || 'No picture here'; }
+    if (r && r.ok) { img.src = r.img; img.classList.add('on'); $('frameNote').textContent = r.label || ''; img.classList.toggle('pv', !!r.preview); $('pvTag').hidden = !r.preview; }
+    else { img.classList.remove('on'); $('pvTag').hidden = true; $('frameNote').textContent = (r && r.why) || 'No picture here'; }
   }
   // JKL shuttle: L forward, J backwards, each tap one step faster up to 5x, K or Space stops. Space from a stop plays 1x.
   let playSeq = 0;
@@ -866,7 +877,7 @@
     } finally { thumbBusy = false; }
     if (S.project.clips.some((c) => c.kind === 'video' && !S.thumbAsked.has(c.id))) askThumbs();
   }
-  // the facts Tentacle shows under each clip, on one line
+  // the facts under each clip, on one line
   function gb(n) { return !n ? '' : n >= 1e9 ? `${(n / 1e9).toFixed(n >= 1e11 ? 0 : 1)} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`; }
   function facts(c, ln) {
     const out = [];
@@ -966,7 +977,7 @@
         applyState(await call('clips_slowmo', vids.map((x) => x.id), !allSlow));
       });
     }
-    $('insp').hidden = !c;
+    $('insp').hidden = !c; $('inspEmpty').hidden = !!c || many;
     if (!c) return;
     const busy = S.running || S.scanning;
     $('iName').textContent = c.name;
@@ -1161,7 +1172,7 @@
     if (c.kind === 'video') {                                 // the picture box says at once which clip it's fetching
       const ln = lanesAll().find((l) => l.key === c.lane) || {};
       $('frameNote').textContent = `${ln.label || c.roll}${c.slowmo ? ' · slow motion' : ''} · ${c.name} · loading…`;
-      $('frame').classList.remove('on');
+      $('frame').classList.remove('on'); $('pvTag').hidden = true;
     }
     if (c.start != null && (S.ph == null || S.ph < c.start || S.ph >= c.start + c.length)) setPlayhead(c.start);
     else if (c.start != null) setPlayhead(S.ph);              // same spot, but the viewer now shows this clip
@@ -1309,9 +1320,10 @@
       const wrongClock = new Set(cl.filter((c) => /camera date says/.test(c.date_note || '')).map((c) => (lanesAll().find((l) => l.key === c.lane) || {}).label || c.roll));
       if (wrongClock.size) notes.push(`${[...wrongClock].join(', ')}: camera clock is wrong, dated by ${forced ? 'the folder' : 'its timecode'}`);
       $('sumSub').innerHTML = notes.map((n) => n.startsWith('<button') ? n : esc(n)).join(' · ');
+      $('sumSub').title = notes.filter((n) => !n.startsWith('<button')).join(' · ');
     }
     renderAttention();
-    $('viewer').hidden = !has;
+    $('monitor').hidden = !has;
     document.querySelector('#viewer .screen').classList.toggle('nocam', !lanesAll().some((l) => l.kind === 'camera'));
     const gb = $('goBtn');
     const ds = days();
@@ -1489,7 +1501,7 @@
     },
     clip_find: (d) => { FIND[d.cid] = d; finding = null; if (d.trace) log(d.trace); renderInspector(); },
     done: (d) => {
-      S.running = false; S.done = d;
+      S.running = false; S.done = d; $('review').hidden = true;
       document.querySelectorAll('#steps li').forEach((li) => { li.classList.remove('active'); if (!li.classList.contains('off')) li.classList.add('done'); });
       $('progFill').style.width = '100%'; $('progText').textContent = 'Finished';
       $('doneRow').hidden = false;
@@ -1517,11 +1529,13 @@
       $('review').hidden = false;
       $('revLead').textContent = `${fx.length} file${fx.length === 1 ? '' : 's'} ${fx.length === 1 ? 'is' : 'are'} off from ${fx.length === 1 ? 'its' : 'their'} own timecode. `
         + 'Nothing has been written yet. Click any of them in the timeline to look closer.';
-      $('revWhy').hidden = !d.decision;
-      $('revWhy').textContent = d.decision ? d.decision.replace(/^Timecode: /, '') + ' (the fewest sources change; the ones that agree are left alone.)' : '';
-      $('revList').innerHTML = fx.map((x) => `<li><b>${esc(x.roll)} · ${esc(x.name)}</b>
+      // the per-file lines are in the list below; keep only the lines about the day as a whole
+      const why = (d.decision || '').replace(/^Timecode: /, '').split('; ').filter((l) => l && !fx.some((x) => l.includes(x.name)));
+      $('revWhy').hidden = !why.length;
+      $('revWhy').textContent = why.join('\n');
+      $('revList').innerHTML = fx.map((x) => `<li title="${esc(x.name)}"><b>${esc(x.name)}</b>
           <span class="tc">${x.old ? `<s>${x.old}</s>` : '<s>no TC</s>'}${x.new}</span>
-          <span class="w">${x.shift_s != null ? signedSec(x.shift_s) + ' · ' : ''}${esc(x.how)}${x.against ? ' against ' + esc(x.against) : ''}${x.score != null ? ` (match ${x.score})` : ''}</span></li>`).join('');
+          <span class="w"><em>${esc(x.roll)}</em> · ${x.shift_s != null ? 'moved ' + signedSec(x.shift_s) : 'placed'}${x.how === 'set by you' ? ' · set by you' : x.against ? ' · matched to ' + esc(x.against) : ''}${x.score != null ? ` · ${Math.round(x.score * 100)}% sure` : ''}</span></li>`).join('');
       $('progText').textContent = 'Waiting for you: confirm the timecode fixes';
       $('review').scrollIntoView({ block: 'nearest' });
     },
@@ -1534,8 +1548,8 @@
     },
     day: (d) => { log(`══ Day ${d.i} of ${d.n}: ${d.label}`); $('progText').textContent = `Day ${d.i} of ${d.n}: ${d.label}`; resetSteps(); },
     notice: (d) => { $('msg').className = 'msg' + (d.ok === false ? ' err' : ''); $('msg').textContent = d.text || ''; },
-    stopped: () => { S.running = false; $('msg').textContent = 'Stopped. Nothing you already have was changed.'; renderPanel(); },
-    error: (d) => { S.running = false; $('msg').className = 'msg err'; $('msg').textContent = d.message; renderPanel(); log(d.trace || ''); },
+    stopped: () => { S.running = false; $('review').hidden = true; $('msg').textContent = 'Stopped. Nothing you already have was changed.'; renderPanel(); },
+    error: (d) => { S.running = false; $('review').hidden = true; $('msg').className = 'msg err'; $('msg').textContent = d.message; renderPanel(); log(d.trace || ''); },
   };
 
   async function decide(choice) { $('review').hidden = true; await call('review_tc', choice); }
@@ -1624,16 +1638,14 @@
     const c = hit(e.clientX - r.left, e.clientY - r.top);
     if (!c) return;
     e.preventDefault();
-    if (!S.picked.has(c.id)) pick(c.id);
-    renderTable(); renderInspector(); draw();
+    if (!S.picked.has(c.id)) selectClip(c.id);
     clipMenu(c, e.clientX, e.clientY);
   });
   $('clipRows').addEventListener('contextmenu', (e) => {
     const tr = e.target.closest('tr[data-id]'); if (!tr) return;
     const c = S.project.clips.find((x) => x.id === +tr.dataset.id); if (!c) return;
     e.preventDefault();
-    if (!S.picked.has(c.id)) pick(c.id);
-    renderTable(); renderInspector(); draw();
+    if (!S.picked.has(c.id)) selectClip(c.id);
     clipMenu(c, e.clientX, e.clientY);
   });
   $('popMenu').addEventListener('click', async (e) => {
@@ -1706,12 +1718,12 @@
     ['⌘Z', 'Undo', 'Edit', K('z', '⌘'), () => doUndo(false), true],
     ['⇧⌘Z', 'Redo', 'Edit', K('z', '⌘⇧'), () => doUndo(true), true],
     ['⌘A', 'Select every clip (this day)', 'Edit', K('a', '⌘'), () => has() && selectWhere(() => true)],
-    ['⌘1', 'Select camera clips (Tentacle: Select Video Files)', 'Edit', K('1', '⌘'), () => has() && selectWhere((c) => c.kind === 'video')],
-    ['⌘2', 'Select sound files (Tentacle: Select Audio Files)', 'Edit', K('2', '⌘'), () => has() && selectWhere((c) => c.kind === 'audio')],
+    ['⌘1', 'Select camera clips', 'Edit', K('1', '⌘'), () => has() && selectWhere((c) => c.kind === 'video')],
+    ['⌘2', 'Select sound files', 'Edit', K('2', '⌘'), () => has() && selectWhere((c) => c.kind === 'audio')],
     ['⌘C', 'Copy timecode (selected clip, or the playhead)', 'Edit', (e) => K('c', '⌘')(e) && !String(window.getSelection() || ''), copyTc],
     ['⌫', 'Leave out / use the selected clips', 'Edit', (e) => !isMod(e) && (e.key === 'Backspace' || e.key === 'Delete'), useOrLeaveOut],
     ['⌘⌫', 'Remove the selected clips from the list (files untouched)', 'Edit', (e) => isMod(e) && (e.key === 'Backspace' || e.key === 'Delete'), removePicked],
-    ['⌘G', 'These cards are one camera (Tentacle: Create new Sync Group)', 'Edit', K('g', '⌘'), async () => { const pc = pickedClips().filter((c) => c.kind === 'video'); if (pc.length) applyState(await call('group_camera', pc.map((c) => c.id), null)); else toast('Select camera clips first'); }],
+    ['⌘G', 'These cards are one camera', 'Edit', K('g', '⌘'), async () => { const pc = pickedClips().filter((c) => c.kind === 'video'); if (pc.length) applyState(await call('group_camera', pc.map((c) => c.id), null)); else toast('Select camera clips first'); }],
     ['Esc', 'Close / clear the selection', 'Edit', (e) => e.key === 'Escape', () => { if (closeSheets() || closeMenu()) return; if (S.playing || pending) { stopPlay(); return; } pick(null); renderTable(); renderInspector(); slateIdle(); draw(); }, true],
     ['Space', 'Play / stop', 'Playback', (e) => e.key === ' ' && !isMod(e), togglePlay],
     ['L', 'Play forward · each tap faster, up to 5×', 'Playback', K('l'), () => jkl(1)],
@@ -1723,14 +1735,14 @@
     ['⌥← / ⌥→', 'Playhead to the previous / next clip edge', 'Playback', (e) => e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'), (e) => jumpEdge(e.key === 'ArrowLeft' ? -1 : 1)],
     ['Home / End', 'Playhead to the start / end of the day', 'Playback', (e) => e.key === 'Home' || e.key === 'End', (e) => { const sp = span(); if (sp) stepPlayhead((e.key === 'Home' ? sp[0] : sp[1]) - (S.ph ?? sp[0])); }],
     ['↑ / ↓', 'Previous / next clip in the list', 'Clips', (e) => !isMod(e) && (e.key === 'ArrowUp' || e.key === 'ArrowDown'), (e) => moveSel(e.key === 'ArrowDown' ? 1 : -1)],
-    ['⌘I', 'Show info for the selected clip (Tentacle: Show Info)', 'Clips', K('i', '⌘'), () => { const c = selClip(); if (c) $('insp').scrollIntoView({ block: 'nearest' }); else toast('Select a clip first'); }],
+    ['⌘I', 'Show info for the selected clip', 'Clips', K('i', '⌘'), () => { const c = selClip(); if (c) $('insp').scrollIntoView({ block: 'nearest' }); else toast('Select a clip first'); }],
     ['T', 'Type a timecode for the selected clip', 'Clips', K('t'), () => { const c = selClip(); if (c && !$('insp').hidden) { $('iTcIn').focus(); $('iTcIn').select(); } }],
     ['⌘F', 'Find the selected clip by waveform', 'Clips', K('f', '⌘'), () => { if (selClip() && !$('iFind').disabled) $('iFind').click(); }],
     ['⇧⌘O', 'Open the selected clip in its own app (Canon RAW: Cinema RAW Development)', 'Clips', K('o', '⌘⇧'), openInApp],
     ['+ / −', 'Zoom in / out', 'View', (e) => !isMod(e) && ['+', '=', '-', '_'].includes(e.key), (e) => zoom(e.key === '+' || e.key === '=' ? 0.5 : 2)],
     ['⌘+ / ⌘−', 'Zoom in / out', 'View', (e) => isMod(e) && ['+', '=', '-', '_'].includes(e.key), (e) => zoom(e.key === '+' || e.key === '=' ? 0.5 : 2)],
     ['⇧Z or \\', 'Fit the day', 'View', (e) => (!isMod(e) && e.shiftKey && e.key.toLowerCase() === 'z') || e.key === '\\', () => { fit(); draw(); }],
-    ['⌘O', 'Add camera cards or sound (Tentacle: Open)', 'File', K('o', '⌘'), () => { if (!S.running) call('choose_folders'); }, true],
+    ['⌘O', 'Add camera cards or sound', 'File', K('o', '⌘'), () => { if (!S.running) call('choose_folders'); }, true],
     ['⌘↩', 'Sync the day', 'File', (e) => isMod(e) && e.key === 'Enter', () => { if (!S.running) go(multiDay() ? S.day : null); }, true],
     ['⌘,', 'Settings', 'File', (e) => isMod(e) && e.key === ',', () => openSheet('settingsSheet'), true],
     ['⌘/ or ?', 'This list', 'File', (e) => (isMod(e) && e.key === '/') || e.key === '?', () => openSheet('keysSheet'), true],

@@ -179,13 +179,13 @@ def write_day_xml(path, name, fps, df, cameras, audio_tracks):
 
 
 def write_slowmo_xml(path, name, fps, df, clips):
-    """Slow motion and other frame rates, in the order they were shot, back to back from 01:00:00:00, one track
-    per camera, picture only, each clip at its own rate (100%) with a marker saying what it is. Interpret / conform
-    them to slow them down; nothing here is synced to sound."""
+    """Slow motion and other frame rates as one simple sequence: every clip in the order it was shot, butted
+    together from 01:00:00:00 on a single track (no gaps, no grouping by camera), picture only, each at its own rate
+    (100%) with a marker saying what it is. Interpret / conform them to slow them down; nothing is synced to sound."""
     xb = XmlBuilder(name, fps, df)
     spf = TC.samples_per_frame(fps)
     hour = TC.frames_to_samples(TC.nominal(fps) * 3600, fps)
-    gap = int(round(float(spf) * TC.nominal(fps)))           # one second between clips
+    gap = 0                                                  # butted together (Nick, 11/09)
     pos = hour
 
     def order(c):
@@ -197,7 +197,7 @@ def write_slowmo_xml(path, name, fps, df, clips):
         what = {'timebase': 'SLOW MO (time base)', 'in_camera': 'SLOW MO (in camera)', 'likely': 'SLOW MO?',
                 'rate': 'OTHER RATE', 'marked': 'SLOW MO'}.get(sm.get('kind'), 'SLOW MO')
         tc = TC.samples_to_tc(c['orig_start'], cfps, bool(c.get('df'))) if c.get('orig_start') is not None else 'no TC'
-        xb.video(label, dict(path=c['path'], start=pos, length=c['length'], kind='video', channels=0,
+        xb.video('SLOWMO', dict(path=c['path'], start=pos, length=c['length'], kind='video', channels=0,
                              width=c.get('width', 0), height=c.get('height', 0), reel=c['roll'], fps=cfps,
                              media_start_frames=TC.samples_to_frames(c['orig_start'], cfps) if c.get('orig_start') is not None else 0,
                              note_name=what, note=f"{c['roll']} {c['name']} at {tc}. {sm.get('why', '')}"))

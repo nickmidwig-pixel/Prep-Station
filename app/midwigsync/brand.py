@@ -3,13 +3,15 @@ output folders don't carry the name, so renaming never changes what you deliver.
 import os
 
 APP_NAME = 'Prep Station'
-APP_VERSION = '2.5.3'
+APP_VERSION = '2.5.4'
 BUNDLE_ID = 'com.midwigproductions.prepstation'
 
 OUT_SUFFIX = '_SYNCED'          # <job>_SYNCED next to the sound folders
 WORK_DIR = 'WORK FILES (not for the edit)'   # report, corrected-TC sound copies, plans, caches, logs; sorts last
 OLD_WORK_DIRS = ('_MIDWIG', '_SYNC_WORK')     # work folders from earlier versions
 TIMELINES_DIR = 'TIMELINES'
+# inside TIMELINES/: one folder per place the file is used
+TL_XML, TL_AAF, TL_ALE, TL_OTIO, TL_CSV = 'PREMIERE RESOLVE XML', 'PRO TOOLS AAF', 'AVID ALE', 'OTIO', 'CLIP LIST CSV'
 TRANSCRIPT_DIR = 'TRANSCRIPT'
 SOUND_REPORT_DIR = 'SOUND REPORT'
 

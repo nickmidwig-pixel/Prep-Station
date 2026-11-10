@@ -59,6 +59,7 @@
           <button class="btn small ghosted" id="addMore" title="Add camera cards or sound (⌘O)">Add more…</button>
           <button class="btn small ghosted" id="clearAll">Clear</button>
           <button class="btn small ghosted" id="settingsBtn" title="Settings (⌘,)">Settings</button>
+          <button class="btn small ghosted icon" id="keysBtn" title="Keyboard shortcuts and colours (⌘/)">?</button>
         </div>
       </div>
       <div class="days" id="days" hidden role="tablist" aria-label="Shoot days"></div>
@@ -66,29 +67,21 @@
         <canvas id="tl"></canvas>
         <div class="tip" id="tip" hidden></div>
       </div>
-      <div class="legend">
-        <span><i class="sw boom"></i>Boom</span>
-        <span><i class="sw lav"></i>Lav</span>
-        <span><i class="sw multi"></i>Multitrack</span>
-        <span><i class="sw mix"></i>Mix / other</span>
-        <span class="sep"></span>
-        <span><i class="sw ov-fix"></i>Timecode fixed</span>
-        <span><i class="sw ov-man"></i>Set by you</span>
-        <span><i class="sw ov-bad"></i>Needs you</span>
-        <button class="keys" id="keysBtn" title="Keyboard shortcuts (⌘/)">Shortcuts ⌘/</button>
-      </div>
-      <div class="viewer" id="viewer" hidden>
-        <div class="screen"><img id="frame" alt=""><span id="frameNote">Click the timeline to see the picture there</span><b class="bigtc" id="phTc">--:--:--:--</b></div>
+      <div class="vsplit" id="vsplit" title="Drag to make the timeline taller or shorter (double-click to reset)" role="separator" aria-orientation="horizontal"></div>
+      <div class="monitor" id="monitor" hidden>
+      <div class="viewer" id="viewer">
+        <div class="screen"><img id="frame" alt=""><span id="frameNote">Click the timeline to see the picture there</span><i class="pvtag" id="pvTag" hidden title="Canon RAW can’t be decoded here: this is the picture the camera stored with the clip, its first frame. The sound plays as normal.">First frame</i></div>
         <div class="transport">
           <div class="row">
             <button class="btn small" id="playBtn" title="Play from the playhead (Space). J plays backwards, L forwards — each tap one step faster, up to 5×. K stops.">▶ Play</button>
+            <b class="tcread" id="phTc">--:--:--:--</b>
             <b class="shuttle" id="shuttle" hidden></b>
           </div>
-          <div class="ptc"><span id="phWhat">Click the ruler to place the playhead · J K L shuttle · ← → a frame · ⇧← ⇧→ a second</span></div>
+          <div class="ptc"><span id="phWhat"></span></div>
           <div class="selline" id="selLine" hidden></div>
         </div>
       </div>
-      <details class="attn" id="attn" hidden><summary id="attnSum"></summary><ul id="attnList"></ul></details>
+        <div class="insp-empty" id="inspEmpty"><b>No clip selected</b><span>Click a clip in the timeline or the list to see its timecode, frame rate and details.</span><span class="keys-hint"><kbd>Space</kbd> play · <kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> shuttle · <kbd>←</kbd><kbd>→</kbd> a frame · <kbd>⇧</kbd>+<kbd>←</kbd><kbd>→</kbd> a second</span></div>
       <section class="insp" id="insp" hidden aria-label="Selected clip">
         <div class="insp-head">
           <div class="insp-title"><strong id="iName"></strong><span id="iSub"></span></div>
@@ -118,8 +111,8 @@
             </div>
           </div>
           <div class="insp-wave">
-            <div class="row">
-              <span class="lbl">Find by waveform against</span>
+            <span class="lbl">Find its place by waveform</span>
+            <div class="row find-row">
               <select id="iAgainst" aria-label="Find by waveform against"></select>
               <button class="btn small" id="iFind">Find</button>
             </div>
@@ -130,7 +123,8 @@
         </div>
         <p class="insp-msg" id="iMsg" aria-live="polite"></p>
       </section>
-      <div class="vsplit" id="vsplit" title="Drag to resize the timeline and the clip list" role="separator" aria-orientation="horizontal"></div>
+      </div>
+      <details class="attn" id="attn" hidden><summary id="attnSum"></summary><ul id="attnList"></ul></details>
       <div class="table-wrap">
         <table class="clips" id="clipTable">
           <colgroup id="clipCols"><col data-col="inc"><col data-col="name"><col data-col="start"><col data-col="length"><col data-col="fps"><col data-col="tracks"><col data-col="status"></colgroup>
@@ -268,10 +262,12 @@
       <label class="opt"><input type="checkbox" data-set="waveform_check"><span><b>Check timecode by waveform</b>Every camera and recorder compared across the day. Catches missed jams, files with no timecode, and timecode that looks right but isn’t in sync.</span></label>
       <label class="opt"><input type="checkbox" data-set="aap_mode" data-on="resolve" data-off="skip"><span><b>Auto-Align Post in Resolve</b><i id="aapDetail">Aligns to the best onboard camera mic, picked by listening. Never to a mix.</i></span></label>
       <label class="opt sub"><input type="checkbox" data-set="aap_auto_press"><span><b>Press Render in Auto-Align for me</b>Uses Accessibility to click Render in the panel. Off: you press it.</span></label>
-      <p class="fixed-note">Always: you confirm every timecode fix before anything is written, then the day’s sound is rewritten with the right timecode (same format, same track names). Originals never change.</p>
+      <label class="opt sub"><input type="checkbox" data-set="review_tc"><span><b>Stop so I confirm the fixes</b>Lists every timecode fix before anything is written. Off: fixes are written straight away and listed in the report.</span></label>
+      <p class="fixed-note">Fixed files are new copies with the right timecode (same format, same track names). Originals never change.</p>
     </fieldset>
     <fieldset>
       <legend>Sound out</legend>
+      <label class="opt"><input type="checkbox" data-set="make_polys"><span><b>Polywavs</b>The day’s sound as multitrack files under 4 GB. Off: ISOs only, and the editing timeline uses the ISOs.</span></label>
       <label class="inline">Polywav length
         <select data-set="chunk_mode"><option value="max">As much as fits in 4 GB</option><option value="hour">Whole hours (under 4 GB)</option></select>
       </label>
@@ -304,8 +300,17 @@
   </div>
 </section>
 <section class="sheet keys-sheet" id="keysSheet" hidden role="dialog" aria-modal="true" aria-labelledby="keysTitle">
-  <header><h2 id="keysTitle">Keyboard shortcuts</h2><button class="link" data-close>Done</button></header>
-  <div class="sheet-body" id="keysBody"></div>
+  <header><h2 id="keysTitle">Shortcuts and colours</h2><button class="link" data-close>Done</button></header>
+  <div class="sheet-body">
+    <fieldset><legend>Colours on the timeline</legend>
+      <div class="keys-legend legend-in">
+        <span><i class="sw" style="background:#D9534F"></i>A cam</span><span><i class="sw" style="background:#4F86D9"></i>B cam</span><span><i class="sw" style="background:#E3C24A"></i>C cam</span>
+        <span><i class="sw boom"></i>Boom</span><span><i class="sw lav"></i>Lav</span><span><i class="sw multi"></i>Multitrack</span><span><i class="sw mix"></i>Mix / other</span>
+        <span><i class="sw ov-fix"></i>Timecode fixed</span><span><i class="sw ov-man"></i>Set by you</span><span><i class="sw ov-bad"></i>Needs you</span>
+      </div>
+    </fieldset>
+    <div id="keysBody"></div>
+  </div>
 </section>
 <div class="toast" id="toast" hidden></div>
 <div class="popmenu" id="popMenu" hidden></div>

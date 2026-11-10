@@ -79,8 +79,8 @@ errs = []
 j = Job(p, s, lambda k, d: errs.append(d) if k == 'error' else None)
 j.run()
 ok &= not errs
-main = open(f'{out}/TIMELINES/SLOWDAY_SYNC_ISO.xml').read() if os.path.exists(f'{out}/TIMELINES/SLOWDAY_SYNC_ISO.xml') else ''
-slow = open(f'{out}/TIMELINES/SLOWDAY_SLOW_MOTION.xml').read()
+main = open(f'{out}/TIMELINES/PREMIERE RESOLVE XML/SLOWDAY_SYNC_ISO.xml').read() if os.path.exists(f'{out}/TIMELINES/PREMIERE RESOLVE XML/SLOWDAY_SYNC_ISO.xml') else ''
+slow = open(f'{out}/TIMELINES/PREMIERE RESOLVE XML/SLOWDAY_SLOWMO.xml').read()
 slow_names = ['B001C002.MOV', 'C0001.MP4', 'C0002.MP4', 'GX010001.MP4', 'E001C002.MOV', 'E001C006.MOV']
 in_main = [n for n in slow_names if n in main]
 in_slow = [n for n in slow_names if n in slow]

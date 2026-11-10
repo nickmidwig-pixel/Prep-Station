@@ -12,7 +12,7 @@ DAY = '/home/claude/testday'
 ok = True
 for name, extra, want_poly, want_iso, xml_tag in (
         ('SW_nopoly', dict(make_polys=False), False, True, 'SYNC_ISO'),     # waveform check off: no fixes at all
-        ('SW_noiso', dict(iso_folder=False), True, False, 'SYNC_ALN')):
+        ('SW_noiso', dict(iso_folder=False), True, False, 'SYNC_ALIGN')):
     p = Project(); p.add_paths([DAY]); p.check_short_clips(20)
     out = default_out_dir(p, name)
     if os.path.exists(out):
@@ -23,7 +23,7 @@ for name, extra, want_poly, want_iso, xml_tag in (
     j.run()
     has_poly = os.path.isdir(os.path.join(out, 'POLY_ALIGNED')) and bool(os.listdir(os.path.join(out, 'POLY_ALIGNED')))
     has_iso = os.path.isdir(os.path.join(out, 'ISO_ALIGNED'))
-    xmls = sorted(os.listdir(os.path.join(out, 'TIMELINES')))
+    xmls = sorted(os.path.join(os.path.relpath(d, os.path.join(out, 'TIMELINES')), f) for d, _, fs in os.walk(os.path.join(out, 'TIMELINES')) for f in fs)
     import json
     plan = json.load(open(os.path.join(out, 'WORK FILES (not for the edit)', 'aap_plan.json')))
     paths = []

@@ -27,6 +27,7 @@ from . import exports as EX
 
 SR = TC.SR
 from .brand import ENV_CACHE, APP_NAME, OUT_SUFFIX, WORK_DIR, TIMELINES_DIR, TRANSCRIPT_DIR, SOUND_REPORT_DIR
+from .brand import TL_XML, TL_AAF, TL_ALE, TL_OTIO, TL_CSV
 
 DEFAULTS = dict(
     job_name='', out_dir='', reference=None,   # reference: dict(roll, channel, auto) - auto: picked by listening
@@ -629,6 +630,12 @@ class Job:
         sources, self._packs, self._passthru = RP.split_sources(files, os.path.join(self.mid, 'split'), fps, df, log=self.log)
         self._names = self.names_mode(files)
         self._ref_windows = {}
+        if not sources:
+            # a camera-only day (or every sound file left out): there is nothing for Auto-Align to line up
+            self._out_names = {}
+            self.log('No sound files on this day: nothing to align. Skipping Auto-Align.')
+            self.aap_info['status'] = 'skipped: no sound files'
+            return
         if self.mode() == 'audio':
             refs, summary = RP.plan_refs(sources, cache_dir=ENV_CACHE, log=self.log)
             self.ref_summary = summary
@@ -999,7 +1006,8 @@ class Job:
                                   media_start_frames=TC.samples_to_frames(media_start, cfps)))
             if clips:
                 cams.append(dict(label=label, clips=clips))
-        xml_dir = os.path.join(self.out, TIMELINES_DIR)
+        tl_dir = os.path.join(self.out, TIMELINES_DIR)
+        xml_dir = os.path.join(tl_dir, TL_XML)
         job = self.s['job_name']
         tracks = []
         if self.polys:
@@ -1024,7 +1032,7 @@ class Job:
                                     for x in ps if tuple(x['channels']) == lay]
             for nm in order:
                 tracks.append(dict(label=nm, clips=sorted(by_name[nm], key=lambda c: c['start'])))
-            tag = 'ALN' if folder == 'POLY_ALIGNED' else 'UNALIGNED'
+            tag = 'ALIGN' if folder == 'POLY_ALIGNED' else 'UNALIGNED'
             if self.s.get('export_xml', True):
                 path = write_day_xml(os.path.join(xml_dir, f'{job}_SYNC_{tag}.xml'), f'{job} SYNC {tag}', p.fps,
                                      p.df, cams, tracks)
@@ -1038,14 +1046,14 @@ class Job:
             path = write_day_xml(os.path.join(xml_dir, f'{job}_CAMERAS.xml'), f'{job} CAMERAS', p.fps, p.df, cams, [])
             self.xmls.append(os.path.relpath(path, self.out))
         if self.slow and self.s.get('export_xml', True):
-            path = write_slowmo_xml(os.path.join(xml_dir, f'{job}_SLOW_MOTION.xml'),
-                                    f'{job} SLOW MOTION + OTHER RATES', p.fps, p.df, self.slow)
+            path = write_slowmo_xml(os.path.join(xml_dir, f'{job}_SLOWMO.xml'),
+                                    f'{job} SLOWMO', p.fps, p.df, self.slow)
             self.xmls.append(os.path.relpath(path, self.out))
             self.log(f'{len(self.slow)} slow-motion / other-rate clip(s) kept off the sync timeline, in their own XML.')
         for x in self.xmls:
             self.log(f'  wrote {x}')
         self._cams = cams
-        self.do_exports(xml_dir, cams, tracks)
+        self.do_exports(tl_dir, cams, tracks)
 
     def _aaf_tracks(self):
         """One track per mic from the aligned ISOs (Pro Tools sessions want ISOs), else None."""
@@ -1079,22 +1087,27 @@ class Job:
             tracks = [dict(label=roll if ss[0]['channels'] == 1 else f'{roll}_{ch + 1}', clips=[
                 dict(path=s['path'], start=s['start'], length=s['length'], kind='audio', channels=s['channels'],
                      src_track=ch + 1, reel=roll) for s in ss]) for roll, ss in by.items() for ch in range(ss[0]['channels'])]
-        jobs = [('export_otio', f'{job}.otio', 'OpenTimelineIO timeline',
+        jobs = [('export_otio', f'{TL_OTIO}/{job}.otio', 'OpenTimelineIO timeline',
                  lambda path: EX.write_otio(path, job, p.fps, cams, tracks)),
-                ('export_aaf', f'{job}_AUDIO.aaf', 'AAF for Pro Tools / audio post (sound tracks, linked to the WAVs)',
+                ('export_aaf', f'{TL_AAF}/{job}_AUDIO.aaf', 'AAF for Pro Tools / audio post (sound tracks, linked to the WAVs)',
                  lambda path: EX.write_aaf(path, job, p.fps, p.df, self._aaf_tracks() or tracks)),
-                ('export_ale', f'{job}.ale', 'Avid Log Exchange', lambda path: EX.write_ale(path, p, by_src)),
-                ('export_csv', f'{job}_CLIPS.csv', 'clip list', lambda path: EX.write_csv(path, p, by_src))]
+                ('export_ale', f'{TL_ALE}/{job}.ale', 'Avid Log Exchange', lambda path: EX.write_ale(path, p, by_src)),
+                ('export_csv', f'{TL_CSV}/{job}_CLIPS.csv', 'clip list', lambda path: EX.write_csv(path, p, by_src))]
         for key, fn, what, write in jobs:
             if not self.s.get(key):
                 continue
             path = os.path.join(xml_dir, fn)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             try:
                 if write(path):
                     self.xmls.append(os.path.relpath(path, self.out))
                     self.log(f'  wrote {os.path.relpath(path, self.out)} ({what})')
             except Exception as e:  # noqa: BLE001
                 self.log(f'  could not write {fn}: {e}')
+            try:                        # nothing to export (say, an AAF on a day with no sound): leave no empty folder
+                os.rmdir(os.path.dirname(path))
+            except OSError:
+                pass
 
     def _transcript_bg(self):
         t0 = time.time()

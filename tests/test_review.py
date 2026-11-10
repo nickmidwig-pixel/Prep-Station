@@ -52,7 +52,7 @@ ok &= not early and not errs and len(files) == n_fixed_audio and same == len(aud
 done = next(d for k, d in ev if k == 'done')
 print('camera fixes offered after the run:', [(x['name'], x['new']) for x in done['camera_fixes']])
 made = j.rewrite_cameras()
-xml = open(os.path.join(out, 'TIMELINES', 'REVIEW_write_SYNC_UNALIGNED.xml')).read()
+xml = open(os.path.join(out, 'TIMELINES', 'PREMIERE RESOLVE XML', 'REVIEW_write_SYNC_UNALIGNED.xml')).read()
 print('camera copies:', [os.path.relpath(m, out) for m in made], '| XML points at them:', all(os.path.basename(m) in xml and 'CAMERA_TC_CORRECTED' in xml for m in made))
 for m in made:
     c = next(c for c in p.clips if c.get('stamped_path') == m)
