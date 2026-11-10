@@ -194,10 +194,11 @@
     <div class="block steps-block">
       <h2>What happens <button class="link" id="stepsSettings">Settings…</button></h2>
       <ol class="steps" id="steps">
-        <li data-step="Checking timecode" data-key="waveform_check"><span class="t">Check timecode by waveform</span><span class="state"></span></li>
-        <li data-step="Writing corrected sound"><span class="t">You confirm the fixes, then corrected sound</span><span class="state always">always</span></li>
-        <li data-step="Auto-Align Post" data-key="aap_mode" data-on="resolve"><span class="t">Auto-Align Post in Resolve</span><span class="state"></span></li>
-        <li data-step="Polywav"><span class="t">Aligned polywavs, under 4 GB</span><span class="state" id="polyState">always</span></li>
+        <li data-step="Checking timecode" data-key="waveform_check"><span class="t">Check timecode by waveform</span><span class="sw" aria-hidden="true"></span></li>
+        <li data-step="Writing corrected sound" data-key="review_tc" data-needs="waveform_check"><span class="t">Stop so you confirm the fixes</span><span class="sw" aria-hidden="true"></span></li>
+        <li data-step="Auto-Align Post" data-key="aap_mode" data-on="resolve"><span class="t">Auto-Align Post in Resolve</span><span class="sw" aria-hidden="true"></span></li>
+        <li data-step="Polywav" data-key="make_polys"><span class="t">Polywavs, under 4 GB</span><span class="sw" aria-hidden="true"></span></li>
+        <li data-step="ISO" data-key="iso_folder"><span class="t">ISOs, one file per mic</span><span class="sw" aria-hidden="true"></span></li>
         <li data-step="XML" class="tl-step"><span class="t">Timelines for editorial</span><span class="state" id="xmlState">XML</span>
           <div class="picks" role="group" aria-label="Which timelines">
             <label class="pick"><input type="checkbox" data-set="export_xml"><span>Premiere / Resolve XML</span></label>
@@ -206,7 +207,7 @@
             <label class="pick"><input type="checkbox" data-set="export_ale"><span>Avid ALE</span></label>
             <label class="pick"><input type="checkbox" data-set="export_csv"><span>Clip list CSV</span></label>
           </div></li>
-        <li data-step="Transcript" data-key="transcribe"><span class="t">Transcript of the day</span><span class="state"></span></li>
+        <li data-step="Transcript" data-key="transcribe"><span class="t">Transcript of the day <em class="state"></em></span><span class="sw" aria-hidden="true"></span></li>
         <li data-step="Report"><span class="t">Report</span><span class="state always">always</span></li>
       </ol>
     </div>

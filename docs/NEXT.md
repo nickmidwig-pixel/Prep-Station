@@ -395,3 +395,8 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 ## 2.5.1 (Nick, 11/09 evening: "simplify")
 - Frame-rate sheet removed. Rule: **anything not at the day's rate goes on the slow-motion timeline, automatically** — 59.94, 29.97, 25, whatever. No choice to make. The only question the app still asks is for clips at the day's rate that look shot faster by the clocks (one tell alone: "confirm?").
 - The report's CONVERT BEFORE ADDING AGAIN section is gone with it. Camera timecode copies keep the 2.5 rule (never change file type).
+
+## 2.5.2 — every step is a switch
+- "What happens" is a list of on/off switches: Check timecode by waveform · Stop so you confirm the fixes · Auto-Align Post · Polywavs · ISOs · Timelines (pick formats) · Transcript; Report always. A switch that can't apply is greyed with the reason (confirm needs the timecode check; ISOs need Auto-Align). Choices are remembered between launches.
+- New: **Polywavs off** (make_polys) → no POLY_ALIGNED; the editorial XML is built on the aligned ISOs instead (`<job>_SYNC_ISO.xml`). **Confirm the fixes off** → fixes are written without stopping (originals still untouched; the report lists every fix).
+- tests/test_step_switches.py (polywavs off → ISO XML; ISOs off → polywav XML).

@@ -1272,14 +1272,17 @@
       if (el.type === 'checkbox') el.checked = el.dataset.on ? v === el.dataset.on : !!v;
       else if (v != null) el.value = v;
     });
+    const isOn = (k) => (k === 'make_polys' ? st[k] !== false : k === 'aap_mode' ? st[k] === 'resolve' : !!st[k]);
+    // steps that can't happen because another one is off
+    const blocked = { review_tc: !st.waveform_check && 'needs the timecode check', iso_folder: st.aap_mode !== 'resolve' && 'needs Auto-Align' };
     document.querySelectorAll('#steps li[data-key]').forEach((li) => {
-      const v = st[li.dataset.key], on = li.dataset.on ? v === li.dataset.on : !!v;
-      li.classList.toggle('off', !on);
-      li.querySelector('.state').textContent = on ? 'on' : 'off';
-      li.title = `${on ? 'On' : 'Off'}: click to turn it ${on ? 'off' : 'on'}`;
+      const k = li.dataset.key, on = isOn(k), why = blocked[k];
+      li.classList.toggle('off', !on || !!why);
+      li.classList.toggle('blocked', !!why);
+      li.setAttribute('role', 'switch'); li.setAttribute('aria-checked', String(on && !why));
+      li.title = why ? `Off: ${why}` : `${on ? 'On' : 'Off'}: click to turn it ${on ? 'off' : 'on'}`;
     });
     $('isoOpt').classList.toggle('dim', st.aap_mode !== 'resolve');     // aligned ISOs need Auto-Align
-    $('polyState').textContent = st.iso_folder && st.aap_mode === 'resolve' ? '+ ISOs' : 'always';
     { const n = ['export_xml', 'export_otio', 'export_aaf', 'export_ale', 'export_csv'].filter((k) => k === 'export_xml' ? st[k] !== false : st[k]).length;
       $('xmlState').textContent = n ? `${n} of 5` : 'none';
       document.querySelector('#steps li.tl-step').classList.toggle('off', !n); }
@@ -1361,9 +1364,9 @@
   $('settingsBtn').addEventListener('click', () => openSheet('settingsSheet'));
   $('stepsSettings').addEventListener('click', () => openSheet('settingsSheet'));
   $('steps').addEventListener('click', async (e) => {          // steps that can be on or off switch right here
-    const li = e.target.closest('li[data-key]'); if (!li || S.running) return;
+    const li = e.target.closest('li[data-key]'); if (!li || S.running || li.classList.contains('blocked')) return;
     const k = li.dataset.key, v = S.settings[k];
-    const on = li.dataset.on ? v === li.dataset.on : !!v;
+    const on = li.dataset.on ? v === li.dataset.on : k === 'make_polys' ? v !== false : !!v;
     const nv = li.dataset.on ? (on ? (k === 'aap_mode' ? 'skip' : '') : li.dataset.on) : !on;
     applyState(await call('set_setting', k, nv));
   });

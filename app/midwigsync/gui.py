@@ -22,7 +22,7 @@ from . import media
 from .brand import CACHE, APP_NAME, APP_VERSION, SETTINGS_FILE, OUT_SUFFIX
 
 
-PREF_KEYS = ('chunk_mode', 'poly_style', 'poly_layout', 'aap_auto_press', 'waveform_check', 'iso_folder', 'aap_mode', 'mode', 'export_xml', 'export_otio',
+PREF_KEYS = ('chunk_mode', 'poly_style', 'poly_layout', 'aap_auto_press', 'waveform_check', 'iso_folder', 'make_polys', 'review_tc', 'aap_mode', 'mode', 'export_xml', 'export_otio',
              'export_aaf', 'export_ale', 'export_csv', 'aligned_names', 'transcribe', 'transcribe_language')
 OLD_PREFS = ('poly_unaligned', 'stamp_corrected_video', 'xml_iso', 'xml_poly', 'poly_aligned', 'synced_clips',
              'poly_per_take')
@@ -51,10 +51,10 @@ class Api:
         self.p = Project()
         prefs = load_prefs()
         self.settings = dict(DEFAULTS)
+        self.settings['review_tc'] = True      # the window shows the timecode fixes before writing (you can switch it off)
         for k in PREF_KEYS:
             if k in prefs:
                 self.settings[k] = prefs[k]
-        self.settings['review_tc'] = True      # the window always shows the timecode fixes before writing
         self.jobs = []
         self.job = None
         self.lock = threading.Lock()

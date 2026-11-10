@@ -35,6 +35,7 @@ DEFAULTS = dict(
     aap_mode='resolve',            # 'resolve' | 'skip'
     aap_auto_press=True, render_dir='',
     iso_folder=True,               # aligned ISO files (each mic on its own, no mix) in ISO_ALIGNED/
+    make_polys=True,               # polywavs in POLY_ALIGNED/ (off: ISOs only; the XML then uses the ISOs)
     chunk_mode='max',              # polywavs: largest whole TC minutes under 4 GB ('hour': whole hours)
     poly_layout='per_layout',      # day polywavs when takes use different track layouts: one set per layout, or
                                    # 'merged': one wide layout with every mic name of the day
@@ -851,7 +852,8 @@ class Job:
                 def name_for(stem):
                     return stem if self._names == 'same' else stem + '_ALN'
                 per_take = self.poly_style() == 'per_take'
-                dest = os.path.join(self.out, 'POLY_ALIGNED') if per_take else os.path.join(self.mid, 'repacked')
+                dest = (os.path.join(self.out, 'POLY_ALIGNED') if per_take and self.s.get('make_polys', True)
+                        else os.path.join(self.mid, 'repacked'))
                 packed = RP.repack(self._packs, by_mono, dest, name_for, note, log=self.log, cancel=self.cancelled)
                 for r in packed:
                     r['repacked'] = per_take      # per-take polywavs stay as they are; on ISO days they join the day polywav
@@ -925,6 +927,9 @@ class Job:
                                            size=os.path.getsize(s['path'])))
                 srcs = []
             sets.append(('POLY_UNALIGNED', srcs, 'RAW', 'unaligned ISOs'))
+        if not self.s.get('make_polys', True):
+            self.log('Polywavs: off (Settings). The sound goes out as ISOs only.')
+            sets = []
         for folder, srcs, tag, note in sets:
             if not srcs:
                 continue
@@ -1022,6 +1027,11 @@ class Job:
                 path = write_day_xml(os.path.join(xml_dir, f'{job}_SYNC_{tag}.xml'), f'{job} SYNC {tag}', p.fps,
                                      p.df, cams, tracks)
                 self.xmls.append(os.path.relpath(path, self.out))
+        elif self._aaf_tracks() and self.s.get('export_xml', True):
+            tracks = self._aaf_tracks()                  # polywavs off: the editorial XML carries the aligned ISOs
+            path = write_day_xml(os.path.join(xml_dir, f'{job}_SYNC_ISO.xml'), f'{job} SYNC ISO', p.fps, p.df,
+                                 cams, tracks)
+            self.xmls.append(os.path.relpath(path, self.out))
         elif cams and self.s.get('export_xml', True):
             path = write_day_xml(os.path.join(xml_dir, f'{job}_CAMERAS.xml'), f'{job} CAMERAS', p.fps, p.df, cams, [])
             self.xmls.append(os.path.relpath(path, self.out))

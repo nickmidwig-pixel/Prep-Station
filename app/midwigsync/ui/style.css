@@ -576,3 +576,13 @@ body.finished #goBtn { background: none; border: 1px solid var(--line); color: v
 #iSlowRow.ask > span:first-child, #iSlowRow > #iSlowText { flex: 1 1 100%; }
 #iSlowRow.ask { padding: 12px 14px; }
 
+
+/* What happens: every optional step is a switch */
+#steps li[data-key] { cursor: pointer; }
+#steps li .sw { flex: none; width: 34px; height: 20px; border-radius: 10px; background: #4FB86A; position: relative; transition: background .15s; margin-left: 10px; }
+#steps li .sw::after { content: ''; position: absolute; top: 2px; left: 16px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+#steps li.off .sw { background: #3A4148; }
+#steps li.off .sw::after { left: 2px; }
+#steps li.blocked { opacity: .45; cursor: default; }
+#steps li[data-key]:hover .sw { filter: brightness(1.12); }
+#steps li .t em.state { font-style: normal; color: var(--fix); margin-left: 6px; font-variant-numeric: tabular-nums; }
