@@ -971,7 +971,7 @@ class Project:
                 has_audio=media.total_audio_channels(c) > 0 and not (c.get('ltc') and c.get('listen_ch') is None),
                 source_path=c.get('source_path'), opatom=c.get('opatom', False),
                 day=c.get('day') or 'unknown', after_midnight=c.get('after_midnight', False), date_note=c.get('date_note'),
-                day_forced=c.get('day_forced'), rate_convert=bool(c.get('rate_convert')),
+                day_forced=c.get('day_forced'),
                 duplicate_of=os.path.basename(c['duplicate_of']) if c.get('duplicate_of') else None,
                 roles=self.clip_roles(c), track_names=c.get('track_names') or {}, scene=c.get('scene', ''), take=c.get('take', ''),
                 size=c.get('size', 0), width=c.get('width', 0), height=c.get('height', 0), sr=c.get('sr') or c.get('source_sr'),

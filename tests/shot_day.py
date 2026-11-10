@@ -33,14 +33,6 @@ with sync_playwright() as pw:
     rows = pg.evaluate("window.MS && window.MS.rows ? window.MS.rows() : null")
     print('ROWS', json.dumps(rows))
     pg.screenshot(path=OUT)
-    if pg.query_selector('#sumSub [data-rates]'):
-        pg.click('#goBtn'); pg.wait_for_timeout(300)
-        print('RATES sheet open:', not pg.eval_on_selector('#rateSheet', 'e => e.hidden'), '| rows:', pg.eval_on_selector_all('#rateList .rate-row', 'els => els.map(e => e.innerText.replace(/\\n/g, " "))'), '| go disabled:', pg.eval_on_selector('#rateGo', 'e => e.disabled'))
-        pg.screenshot(path=OUT.replace('.png', '_rates.png'))
-        for i in range(len(pg.query_selector_all('#rateList .rate-row'))):
-            pg.query_selector_all('#rateList .rate-row')[i].query_selector('button.sug').click(); pg.wait_for_timeout(300)
-        print('RATES after picking suggestions: go disabled:', pg.eval_on_selector('#rateGo', 'e => e.disabled'))
-        pg.click('[data-close]', strict=False) if False else pg.evaluate("document.querySelectorAll('.sheet').forEach(s => s.hidden = true); document.getElementById('sheetBack').hidden = true")
     ask = pg.query_selector('#sumSub [data-ask-slow]')
     if ask:
         ask.click(); pg.wait_for_timeout(400)

@@ -391,3 +391,7 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 
 ## Queue
 - First-run transcript: show "downloading the speech model (1.6 GB)" with its own progress instead of sitting at 0%.
+
+## 2.5.1 (Nick, 11/09 evening: "simplify")
+- Frame-rate sheet removed. Rule: **anything not at the day's rate goes on the slow-motion timeline, automatically** — 59.94, 29.97, 25, whatever. No choice to make. The only question the app still asks is for clips at the day's rate that look shot faster by the clocks (one tell alone: "confirm?").
+- The report's CONVERT BEFORE ADDING AGAIN section is gone with it. Camera timecode copies keep the 2.5 rule (never change file type).
