@@ -521,9 +521,11 @@ class Job:
         aud = [c for c in p.clips if c['kind'] == 'audio' and c['include'] and c['start'] is not None]
         fixed = {c['id'] for c in self.fixes() if c['kind'] == 'audio'}
         conv = [c for c in aud if c.get('converted')]
-        if not fixed and not conv:
+        if not fixed and not conv and self.s.get('aap_mode') != 'resolve':
             self.log('Sound timecode: nothing to fix, working from the originals (read-only).')
             return
+        # With Auto-Align on, the working set is always made, fixes or not: Auto-Align writes its renders next to its
+        # sources, and the sources must never be the originals (20250208, 2.5.2: 40 renders landed in SOUND/01LAV).
         # The working set Auto-Align reads lives in WORK FILES (it writes its renders next to its sources, and those
         # must never land beside the originals). The editor-facing SOUND_TC_CORRECTED/ gets only the files whose
         # timecode changed, in the folders they came in (SOUND/03_LAV/...).

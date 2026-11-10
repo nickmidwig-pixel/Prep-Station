@@ -1447,7 +1447,7 @@
       $('aapRef').textContent = d.ref_track || 'Audio 1';
       $('aapSrc').textContent = d.sources || '';
       $('aapSet').hidden = !!d.error;
-      $('aapPress').hidden = !!d.error || S.platform !== 'darwin' && false;
+      $('aapPress').hidden = true;                  // shown by aap_hint once Auto-Align goes quiet
       if (d.error) {
         $('aapTitle').textContent = 'Resolve didn’t respond';
         $('aapLead').textContent = `${d.error} You can open Resolve and run Sync the day again, or continue without alignment.`;
@@ -1471,7 +1471,8 @@
       $('aapLead').textContent = d.ok ? 'Render pressed. Auto-Align is working; files are picked up as they land.'
         : 'Couldn’t set up the panel by itself (the log says why). In Auto-Align Post set Reference Track to REF, tick every source track and press Render; files are picked up as they land.';
     },
-    aap_hint: (d) => { const el = $('aapLead'); if (el) el.textContent = d.text; toast(d.text.split('\n')[0]); },
+    // "Press Render again" only when Auto-Align has gone quiet (crashed or stopped): not while it is working
+    aap_hint: (d) => { const el = $('aapLead'); if (el) el.textContent = d.text; $('aapPress').hidden = false; toast(d.text.split('\n')[0]); },
     aap_done: () => { $('aapCard').hidden = true; },
     side_progress: (d) => {         // the transcript runs alongside Auto-Align: its own line in the step list
       const li = document.querySelector('#steps li[data-key="transcribe"]');
