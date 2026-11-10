@@ -418,3 +418,12 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 - BUG fixed: after DONE the button said "Stop" (the job thread reported itself as still running).
 - BUG fixed: a camera-only day waited on Auto-Align forever. Now: "No sound files on this day", skips to timelines.
 - While a decision is waiting the side panel shows only the decision.
+
+## 2.5.5 — what Nick caught on the real Mac window (the app is WebKit; tests run Chromium)
+- "N without timecode" was drawn over the clips. Now "N no timecode" sits under the lane name.
+- Leftover `-AtAlgn-` renders beside the sound are never read as source files (that was the "49 sound files / 40 without timecode").
+- Clip labels are fitted with an ellipsis, never cut mid-letter; a rate tag shows whole or not at all.
+- Undo/redo are drawn icons (the ↶ ↷ glyphs rendered as hooks on the Mac); zoom slider and dropdowns are styled explicitly, no native controls.
+- Summary line shows whole notes only (short forms: 20:17 – 02:32 · 25 slow-mo), never "slow mo…".
+- Sync to: "Change…" is a real button; clicking a camera's name in the timeline offers "Sync everything to B CAM's mic".
+- RULE for me: anything drawn by the browser's defaults (glyph characters, range inputs, selects, scrollbars) will differ on the Mac. Draw it explicitly, and check the real window on Nick's Mac after a build when he allows it.

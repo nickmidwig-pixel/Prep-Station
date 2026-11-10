@@ -328,6 +328,7 @@
       const name = name0.length > 15 ? name0.slice(0, 14) + '…' : name0;
       const isRef = !isTrack && !row.slow && rl && rl.key === ln.key && effMode() !== 'audio';
       const sub = isTrack ? (ROLE_LABEL[row.t.role] || row.t.role || '') : row.slow ? `${ln.sub} · slow motion` : ln.sub;
+      const unplaced = isTrack ? 0 : rowClips(row).filter((c) => c.start == null).length;
       ctx.fillStyle = COL.paper; ctx.font = isTrack ? '500 12px Barlow, sans-serif' : '600 13.5px Barlow, sans-serif';
       if (rh >= 28) {
         ctx.fillText(name, x0l, y + rh / 2 - 7);
@@ -339,7 +340,14 @@
           ctx.fillStyle = COL.paper; ctx.fillText('SYNC REF', x0l + tw + 11, y + rh / 2 - 7);
         }
         ctx.font = '400 12px Barlow, sans-serif'; ctx.fillStyle = COL.muted;
-        ctx.fillText(sub.length > 24 ? sub.slice(0, 23) + '…' : sub, x0l, y + rh / 2 + 7);
+        const subMax = (row.slow ? LABEL_W - 10 : MS_X - 8) - x0l;
+        if (unplaced) {                               // files with no timecode: said here, beside the name, not over the clips
+          const note = `${unplaced} no timecode`;
+          const nw = ctx.measureText(note).width;
+          const st = fitText(sub, subMax - nw - 10);
+          if (st) ctx.fillText(st, x0l, y + rh / 2 + 7);
+          ctx.fillStyle = COL.fix; ctx.fillText(note, x0l + (st ? ctx.measureText(st).width + 8 : 0), y + rh / 2 + 7);
+        } else ctx.fillText(fitText(sub, subMax), x0l, y + rh / 2 + 7);
       } else {
         ctx.fillText(name, x0l, y + rh / 2 - 1);
         if (isTrack && sub) { const tw = ctx.measureText(name).width; ctx.fillStyle = COL.muted; ctx.font = '400 10px Barlow, sans-serif'; ctx.fillText(sub, x0l + tw + 6, y + rh / 2 - 1); }
@@ -388,27 +396,23 @@
         }
         const label = isTrack ? row.t.name : c.name;
         const rateTag = row.slow ? blockRate(c) : '';        // slow lane: each block says its own rate up front
-        if (x1 - x0 > (rateTag ? 34 : 60) && h >= 12) {
-          ctx.save(); ctx.beginPath(); ctx.rect(x0 + 5, yy, x1 - x0 - 10, h); ctx.clip();
-          let tx = x0 + 6;
+        const room = x1 - x0 - 12;                           // text never touches the block's edges
+        if (room > 14 && h >= 12) {
+          let tx = x0 + 6, left = room;
           if (rateTag) {
             ctx.font = '700 11.5px Barlow, sans-serif';
             const tw = ctx.measureText(rateTag).width;
-            ctx.fillStyle = 'rgba(21,24,27,.82)'; roundRect(tx - 2, yy + 3, tw + 10, h - 6, 3); ctx.fill();
-            ctx.fillStyle = COL.paper; ctx.fillText(rateTag, tx + 3, yy + h / 2 + 0.5);
-            tx += tw + 14;
+            if (tw + 6 <= left) {                              // the whole tag or none of it
+              ctx.fillStyle = 'rgba(21,24,27,.82)'; roundRect(tx - 2, yy + 3, tw + 8, h - 6, 3); ctx.fill();
+              ctx.fillStyle = COL.paper; ctx.fillText(rateTag, tx + 2, yy + h / 2 + 0.5);
+              tx += tw + 12; left -= tw + 12;
+            } else left = 0;
           }
-          ctx.fillStyle = '#15181B'; ctx.font = `500 ${isTrack ? 11 : 12}px Barlow, sans-serif`;
-          ctx.fillText(label, tx, yy + h / 2 + 0.5); ctx.restore();
+          ctx.font = `500 ${isTrack ? 11 : 12}px Barlow, sans-serif`;
+          const txt = fitText(label, left);
+          if (txt) { ctx.fillStyle = '#15181B'; ctx.fillText(txt, tx, yy + h / 2 + 0.5); }
         }
         if (S.picked.has(c.id)) { ctx.strokeStyle = S.sel === c.id ? '#fff' : 'rgba(255,255,255,.7)'; ctx.lineWidth = 1.5; roundRect(x0 - 1, yy - 1, Math.max(2, x1 - x0) + 2, h + 2, 3); ctx.stroke(); }
-      }
-      if (!isTrack) {
-        const unplaced = rowClips(row).filter((c) => c.start == null).length;
-        if (unplaced) {
-          ctx.fillStyle = COL.fix; ctx.font = '500 11px Barlow, sans-serif';
-          ctx.fillText(`${unplaced} without timecode`, LABEL_W + 8, y + rh / 2);
-        }
       }
     });
     // hover line and playhead
@@ -423,6 +427,14 @@
       }
     }
     syncZoomUI();
+  }
+  // text cut to a width with an ellipsis; '' when not even a few letters fit (uses the current ctx.font)
+  function fitText(t, w) {
+    if (!t || w <= 0) return '';
+    if (ctx.measureText(t).width <= w) return t;
+    let lo = 0, hi = t.length;
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (ctx.measureText(t.slice(0, m) + '…').width <= w) lo = m; else hi = m - 1; }
+    return lo >= 3 ? t.slice(0, lo).replace(/[\s_.\-]+$/, '') + '…' : '';
   }
   function roundRect(x, y, w, h, r) {
     ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
@@ -1307,19 +1319,23 @@
       $('sumLine').textContent = parts.join(', ') || 'Nothing on this day';
       const sp = span();
       const notes = [];
-      if (sp) notes.push(`${samplesToTc(sp[0], false)} to ${samplesToTc(sp[1], false)}`);
+      if (sp) notes.push(`${samplesToTc(sp[0], false).slice(0, 5)} – ${samplesToTc(sp[1], false).slice(0, 5)}`);
       const fixed = cl.filter(moved).length;
-      if (fixed) notes.push(`${fixed} timecode${fixed === 1 ? '' : 's'} fixed`);
+      if (fixed) notes.push(`${fixed} TC fixed`);
       const slow = cl.filter((c) => c.slowmo && c.include).length;
       const ask = cl.filter((c) => c.slowmo && !c.slowmo.sure && c.include).sort((a, b) => (a.start ?? 1e18) - (b.start ?? 1e18));
       if (ask.length) notes.unshift(`<button class="linkbtn" data-ask-slow="${ask[0].id}">${ask.length} to confirm as slow motion</button>`);
-      if (slow) notes.push(`${slow} slow motion`);
+      if (slow) notes.push(`${slow} slow-mo`);
       const forced = cl.find((c) => c.day_forced);
       const dayKey = cl[0] && cl[0].day;
       if (forced && dayKey) notes.push(`${fmtDay(dayKey)} from the folder name ${forced.day_forced}`);
       const wrongClock = new Set(cl.filter((c) => /camera date says/.test(c.date_note || '')).map((c) => (lanesAll().find((l) => l.key === c.lane) || {}).label || c.roll));
       if (wrongClock.size) notes.push(`${[...wrongClock].join(', ')}: camera clock is wrong, dated by ${forced ? 'the folder' : 'its timecode'}`);
-      $('sumSub').innerHTML = notes.map((n) => n.startsWith('<button') ? n : esc(n)).join(' · ');
+      // whole notes only: when the line is too long the last notes drop off (they stay in the tooltip), nothing is cut mid-word
+      const el = $('sumSub'); let shown = notes.slice();
+      const put = () => { el.innerHTML = shown.map((n) => n.startsWith('<button') ? n : esc(n)).join(' · '); };
+      put();
+      while (shown.length > 1 && el.scrollWidth > el.clientWidth + 1) { shown.pop(); put(); }
       $('sumSub').title = notes.filter((n) => !n.startsWith('<button')).join(' · ');
     }
     renderAttention();
@@ -1606,14 +1622,16 @@
   document.querySelectorAll('.sheet [data-close]').forEach((b) => b.addEventListener('click', closeSheets));
 
   function closeMenu() { const m = $('popMenu'); const was = !m.hidden; m.hidden = true; return was; }
+  function isRefLane(ln) { const rl = refLane(); return !!(rl && rl.key === ln.key && effMode() !== 'audio'); }
   function laneMenu(ln, x, y) {
     const m = $('popMenu');
     const taken = new Map(lanesAll().filter((l) => l.kind === 'camera').map((l) => [l.letter, l]));
     m.innerHTML = `<div class="pm-h">${esc(ln.label)} · ${esc(ln.sub)}</div><div class="pm-l">Camera letter</div><div class="pm-letters">` +
       'ABCDEFGH'.split('').map((L) => `<button data-letter="${L}" class="${L === ln.letter ? 'on' : ''}" title="${taken.has(L) && L !== ln.letter ? 'Swaps with ' + esc(taken.get(L).label) : ''}">${L}</button>`).join('') +
-      `</div><button class="pm-i" data-selall="${esc(ln.key)}">Select every clip on ${esc(ln.label)}</button>`;
+      `</div>` + (isRefLane(ln) ? `<div class="pm-l">Everything syncs to this camera’s mic</div>` : `<button class="pm-i" data-syncto="${esc(ln.key)}">Sync everything to ${esc(ln.label)}’s mic</button>`)
+      + `<button class="pm-i" data-selall="${esc(ln.key)}">Select every clip on ${esc(ln.label)}</button>`;
     m.hidden = false;
-    m.style.left = `${Math.min(x, window.innerWidth - 260)}px`; m.style.top = `${Math.min(y, window.innerHeight - 160)}px`;
+    m.style.left = `${Math.min(x, window.innerWidth - 260)}px`; m.style.top = `${Math.min(y, window.innerHeight - 200)}px`;
     m.dataset.lane = ln.key;
   }
   // right-click a clip (timeline or list): the source file and the everyday per-clip actions
@@ -1665,6 +1683,7 @@
     }
     closeMenu();
     if (b.dataset.letter) applyState(await call('set_lane_letter', key, b.dataset.letter));
+    else if (b.dataset.syncto) { if (!S.running) applyState(await call('set_sync_to', b.dataset.syncto)); }
     else if (b.dataset.selall) { S.picked = new Set(laneClips(key).map((c) => c.id)); S.sel = [...S.picked][0] ?? null; renderTable(); renderInspector(); draw(); }
   });
   document.addEventListener('mousedown', (e) => { if (!e.target.closest('#popMenu')) closeMenu(); });

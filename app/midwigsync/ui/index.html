@@ -53,8 +53,8 @@
             <b id="zoomPct">100%</b>
           </span>
           <span class="tsep"></span>
-          <button class="btn small ghosted icon" id="undoBtn" title="Undo (⌘Z)" aria-label="Undo" disabled>↶</button>
-          <button class="btn small ghosted icon" id="redoBtn" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
+          <button class="btn small ghosted icon" id="undoBtn" title="Undo (⌘Z)" aria-label="Undo" disabled><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M6 3.5 2.5 7 6 10.5M3 7h6.5a4 4 0 0 1 0 8H7" transform="translate(0 -2)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button class="btn small ghosted icon" id="redoBtn" title="Redo (⇧⌘Z)" aria-label="Redo" disabled><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M10 3.5 13.5 7 10 10.5M13 7H6.500a4 4 0 0 0 0 8H9" transform="translate(0 -2)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           <span class="tsep"></span>
           <button class="btn small ghosted" id="addMore" title="Add camera cards or sound (⌘O)">Add more…</button>
           <button class="btn small ghosted" id="clearAll">Clear</button>
@@ -162,7 +162,7 @@
 
     <div class="block">
       <h2>Sync to</h2>
-      <p class="syncline"><span id="syncText">Drop a shoot day to see what it syncs to.</span> <button class="linkbtn" id="syncChange" hidden>Change</button></p>
+      <p class="syncline"><span id="syncText">Drop a shoot day to see what it syncs to.</span> <button class="btn small ghosted chg" id="syncChange" hidden title="Pick the camera (or sound only) that everything syncs to. Also: click a camera’s name in the timeline.">Change…</button></p>
       <div class="chooser" id="syncChooser" hidden role="radiogroup" aria-label="What to sync to"></div>
       <p class="refnote" id="refNote" hidden></p>
     </div>

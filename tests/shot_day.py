@@ -23,7 +23,7 @@ def dispatch(name, args):
 BRIDGE = "window.pywebview = { api: new Proxy({}, { get: (_, k) => async (...a) => window.pycall(k, a) }) };"
 with sync_playwright() as pw:
     b = pw.chromium.launch()
-    pg = b.new_page(viewport={'width': 1440, 'height': 900})
+    pg = b.new_page(viewport={'width': int(os.environ.get('W', 1440)), 'height': 900}, device_scale_factor=2)
     errs = []
     pg.on('pageerror', lambda e: errs.append(str(e)))
     pg.expose_function('pycall', dispatch)
