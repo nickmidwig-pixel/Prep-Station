@@ -13,7 +13,7 @@ FLAG_TEXT = {
     'no_tc': 'no timecode', 'zero_tc': 'timecode at 00:00:00:00', 'tc_far': 'timecode hours away from the rest',
     'tc_overlap': 'timecode overlaps another clip on the same card (TC jump)', 'sample_rate': 'not 48 kHz',
     'fps_mismatch': 'different frame rate', 'no_audio': 'no audio', 'ubits': 'user bits differ',
-    'short_silent': 'short accidental clip, skipped', 'false_take': 'in the recorder\'s False Takes folder, left out', 'sync_corrected': 'timecode corrected by waveform',
+    'short_silent': 'short accidental clip, skipped', 'false_record': 'false record (short, no timecode), left out, not deleted', 'false_take': 'in the recorder\'s False Takes folder, left out', 'sync_corrected': 'timecode corrected by waveform',
     'sync_found': 'placed by waveform', 'sync_failed': 'could not be placed (left out)',
     'sync_manual': 'timecode set by hand', 'ltc': 'timecode read from LTC audio', 'converted': 'converted to 48 kHz WAV',
     'raw': 'RAW camera file (audio + timecode only)', 'duplicate': 'duplicate of another file (left out)',

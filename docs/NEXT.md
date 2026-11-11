@@ -441,3 +441,12 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
   - Status chip "Moved +1:57.32" (was "Fixed +117.320 s"); every shift reads +7.47 s or +1:57.32.
   - Inspector: one "Timecode … from the camera" row when nothing changed; "In the file / In the edit" when it moved. No "(container)".
   - Slow-motion reason says the length once and matches the Length column (both round down): "Shot at about 120 fps, plays at 23.976. The camera took 2:52 to record it but it plays 14:14; the next clip on this card started 2:59 later."
+
+## 2.5.7 — false records, iPhone day (20261110, F002), looked at on Nick's Mac
+- False records (Nick's call 11/11): a sound file under 20 s, or a camera clip under 3 s, with no timecode or 00:00:00:00 is left out on its own; never deleted or renamed. Shown dimmed in a FALSE RECORDS group at the bottom of the list, off the timeline; tick one to use it, and that choice survives rescans (user_include). Report line: "false record (short, no timecode), left out, not deleted".
+- 24.000 on a 23.976 day (and 30/29.97, 60/59.94: within 0.2%) is real time, not slow motion. The 20261110 day had all 89 iPhone clips (Blackmagic app at 24) on the slow-motion timeline. Chip: "24 fps · real time".
+- Finder / Photos copies ("IMG_8602 2.MOV", "… copy.MOV", "… (1).MOV") of the same size and length are duplicates: the plain name is kept, the copy goes to a DUPLICATES group, left out, never deleted.
+- Multi-select gets a proper card where the clip details go: "56 clips selected · 56 on C CAM · all used" with Leave them out / Mark as slow motion / Same camera / Clear selection. Before, the panel went blank and the line hid under the list header.
+- Clicking a clip only re-marks rows (no rebuild of 200 rows) and nudges WebKit to repaint: the list no longer goes blank until you scroll.
+- The viewer never asks for a frame past a clip's last one ("couldn't read the picture" at the clip's end).
+- Still open from this day: C CAM (iPhone camera app) has no timecode; its clips are placed by waveform during the run. Seeding them from the iPhone's clock (com.apple.quicktime.creationdate) would put them on the timeline before the run.

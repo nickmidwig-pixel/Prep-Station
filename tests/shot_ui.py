@@ -83,7 +83,7 @@ with sync_playwright() as pw:
     x0, y0 = box['x'] + 250, box['y'] + 55          # starts ON a clip: a drag from a clip must still draw the box
     pg.mouse.move(x0, y0); pg.mouse.down(); pg.mouse.move(x0 + 500, y0 + 120, steps=8); pg.mouse.up()
     pg.wait_for_timeout(200)
-    sel = pg.inner_text('#selLine') if not pg.is_hidden('#selLine') else ''
+    sel = pg.inner_text('#inspMany') if not pg.is_hidden('#inspMany') else ''
     print('  drag-select ->', sel.split('⌫')[0].strip())
     check('clips selected' in sel, 'dragging a box on the timeline selects the clips it touches')
     check('slow motion' in sel.lower(), 'the selection offers Mark as slow motion for the cameras in it')
@@ -139,7 +139,7 @@ with sync_playwright() as pw:
     # 2.4: two worlds — mark the selection as slow motion and it moves under the SLOW MOTION divider, in list and timeline
     rows0 = pg.evaluate('window.MS.rows()')
     check(not any(r['type'] == 'divider' for r in rows0), 'no slow-motion world before anything is marked')
-    pg.evaluate("document.querySelector('#selLine button, #selLine .linkbtn') && document.querySelector('#selLine button, #selLine .linkbtn').click()")
+    pg.evaluate("document.getElementById('mSlow').click()")
     pg.wait_for_timeout(400)
     rows1 = pg.evaluate('window.MS.rows()')
     check(any(r['type'] == 'divider' for r in rows1) and any(r['slow'] for r in rows1), f'marking adds the slow-motion world {[(r["type"], r["key"]) for r in rows1]}')

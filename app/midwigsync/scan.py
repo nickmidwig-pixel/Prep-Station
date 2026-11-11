@@ -347,11 +347,18 @@ class Project:
                 size = os.path.getsize(c.get('source_path') or c['path'])
             except OSError:
                 size = None
-            key = (c['name'].lower(), size, c['orig_start'], c['length'])
-            if key in seen and seen[key] is not c:
-                if c in new:
-                    c['duplicate_of'] = seen[key]['path']
-                    c['include'] = False
+            # a Finder / Photos copy is the same clip: "IMG_8602 2.MOV", "IMG_8602 copy.MOV", "IMG_8602 (1).MOV"
+            base = re.sub(r'(?: \d+| copy(?: \d+)?| \(\d+\))(?=\.[^.]+$)', '', c['name']).lower()
+            key = (base, size, c['orig_start'], c['length'])
+            o = seen.get(key)
+            if o is not None and o is not c:
+                if c in new or o in new:
+                    # keep the one with the plain name; the copy is the duplicate
+                    keep, dup = (c, o) if c['name'].lower() == base and o['name'].lower() != base and o in new else (o, c)
+                    dup['duplicate_of'] = keep['path']
+                    dup['include'] = False
+                    keep.pop('duplicate_of', None)
+                    seen[key] = keep
             else:
                 seen.setdefault(key, c)
 
@@ -784,7 +791,11 @@ class Project:
                 continue
             fps = c.get('fps')
             cap = c.get('capture_fps')
-            if fps and TC.rate_label(fps) != TC.rate_label(self.fps):
+            # 24 on a 23.976 day (30 / 29.97, 60 / 59.94) is the same speed, 0.1% apart: real time, not slow motion
+            near = bool(fps) and abs(float(fps) / pf - 1) < 0.002
+            if near and TC.rate_label(fps) != TC.rate_label(self.fps) and 'rate_near' not in c['flags']:
+                c['flags'].append('rate_near')
+            if fps and not near and TC.rate_label(fps) != TC.rate_label(self.fps):
                 ratio = float(fps) / pf
                 if ratio > 1.5:
                     c['slowmo'] = dict(kind='timebase', speed=round(pf / float(fps), 3), shot=TC.rate_label(fps),
@@ -880,9 +891,22 @@ class Project:
                         c['flags'].append('tc_overlap')
 
     def check_short_clips(self, max_len_s=20, quiet_db=-40.0):
-        """Mark very short accidental audio clips (lav auto-record on power-up) as excluded."""
+        """Leave out accidental records, never delete or rename them. Two kinds:
+        - false records: a recorder (Zaxcom set to record on boot) or a camera rolled for a moment before its
+          timecode bit: a sound file shorter than max_len_s, or a camera clip under 3 s, with no timecode or 00:00:00:00;
+        - short accidental audio that is under 2 s or silent.
+        A clip you used or left out by hand keeps your choice."""
         for c in self.clips:
-            if c['kind'] != 'audio' or c['length'] > max_len_s * TC.SR or c.get('manual'):
+            if c.get('user_include') is not None or c.get('manual'):
+                continue
+            no_tc = c.get('orig_start') is None or c['orig_start'] < TC.SR
+            short = c['length'] < (max_len_s if c['kind'] == 'audio' else 3) * TC.SR
+            if no_tc and short:
+                if 'false_record' not in c['flags']:
+                    c['flags'].append('false_record')
+                c['include'] = False
+                continue
+            if c['kind'] != 'audio' or c['length'] > max_len_s * TC.SR:
                 continue
             try:
                 w = WavInfo(c['path'])
@@ -972,7 +996,7 @@ class Project:
                 source_path=c.get('source_path'), opatom=c.get('opatom', False),
                 day=c.get('day') or 'unknown', after_midnight=c.get('after_midnight', False), date_note=c.get('date_note'),
                 day_forced=c.get('day_forced'),
-                duplicate_of=os.path.basename(c['duplicate_of']) if c.get('duplicate_of') else None,
+                duplicate_of=os.path.basename(c['duplicate_of']) if c.get('duplicate_of') else None, user_include=c.get('user_include'),
                 roles=self.clip_roles(c), track_names=c.get('track_names') or {}, scene=c.get('scene', ''), take=c.get('take', ''),
                 size=c.get('size', 0), width=c.get('width', 0), height=c.get('height', 0), sr=c.get('sr') or c.get('source_sr'),
                 bits=c.get('bits'), serial=c.get('serial'), model=c.get('model', ''),

@@ -536,7 +536,8 @@ class Api:
         if c and c['kind'] == 'video' and c['start'] is not None and c['include'] and c not in cams:
             # the selected clip always wins, even when the playhead sits just outside it: show its first frame
             cams.insert(0, c)
-            at = min(max(at, c['start']), c['start'] + c['length'] - 1)
+            # never ask for a frame past the clip's last one (decoders give nothing there): stay two frames inside
+            at = min(max(at, c['start']), c['start'] + max(0, c['length'] - int(2 * TC.SR / float(self.p.fps))))
         if not (c and c in cams):
             lanes = {l['key']: l for l in self.p.lanes()}
             cams.sort(key=lambda x: (lanes.get(x.get('lane'), {}).get('letter') or 'Z', x['name']))
@@ -675,6 +676,7 @@ class Api:
         c = self.p.by_id(int(cid))
         if c:
             c['include'] = bool(include)
+            c['user_include'] = bool(include)      # your choice outlasts the false-record check on the next scan
         return self._state()
 
     def _cname(self, cid):
@@ -697,6 +699,7 @@ class Api:
                 c = self.p.by_id(i)
                 if c:
                     c['include'] = bool(include)
+                    c['user_include'] = bool(include)
             return self._state()
         return self._edit(label, go)
 

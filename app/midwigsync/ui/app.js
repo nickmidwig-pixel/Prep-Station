@@ -49,7 +49,13 @@
   const days = () => (S.project && S.project.days) || [];
   const multiDay = () => days().length > 1;
   const inDay = (c) => !multiDay() || !S.day || c.day === S.day;
-  const dayClips = () => (S.project ? S.project.clips.filter(inDay) : []);
+  // false records (a recorder that rolled before its timecode bit, accidental short clips, the recorder's False Takes)
+  // sit in their own group at the bottom of the list, off the timeline, until you use one
+  const FALSE_FLAGS = ['false_record', 'short_silent', 'false_take'];
+  const isDup = (c) => !c.include && (c.flags || []).includes('duplicate') && c.user_include == null;
+  const isFalseRec = (c) => (!c.include && (c.flags || []).some((f) => FALSE_FLAGS.includes(f))) || isDup(c);
+  const allDayClips = () => (S.project ? S.project.clips.filter(inDay) : []);
+  const dayClips = () => allDayClips().filter((c) => !isFalseRec(c));
   function rolls() {
     if (!S.project) return [];
     const ref = S.settings.reference && S.settings.reference.roll;
@@ -151,6 +157,7 @@
       const how = { typed: 'Timecode typed in by you', nudged: 'Nudged by you', waveform: 'Placed by waveform (you picked it)' }[c.manual.how] || 'Set by you';
       return { t: `${how}${c.manual.note ? ' · ' + c.manual.note : ''}`, k: 'fix', old: c.orig_tc };
     }
+    if (f.has('false_record')) return { t: c.include ? 'False record (short, no timecode), used by you' : `False record: ${c.kind === 'audio' ? 'the recorder' : 'the camera'} rolled for ${Math.max(1, Math.round(c.length / SR))} s before its timecode was set. Left out, not deleted.`, k: '' };
     if (f.has('short_silent')) return { t: 'Short accidental clip, left out', k: '' };
     if (f.has('false_take')) return { t: c.include ? 'False take (recorder marked it), added back by you' : 'False take (recorder marked it), left out', k: '' };
     if (f.has('sync_failed')) return { t: 'Couldn’t be placed by waveform, so it’s left out. Check it by hand.', k: 'bad' };
@@ -506,7 +513,7 @@
     // a click on a clip never leaves the playhead outside that clip (a near miss on a sliver snaps in)
     if (!(e.shiftKey || e.metaKey || e.ctrlKey) || !c) setPlayhead(c ? Math.max(c.start, Math.min(c.start + c.length - 1, sOf(mx, L))) : sOf(mx, L));
     if (my > RULER_H) { if (c) pick(c.id, howFrom(e)); else if (!(e.metaKey || e.ctrlKey || e.shiftKey)) pick(null); }
-    renderTable(); renderInspector(); draw();
+    markRows(); renderInspector(); draw();
     if (c) showRow(c.id);
   });
   // Drag on an empty part of the timeline to draw a box; every clip it touches is selected (⇧ / ⌘ add to what
@@ -794,12 +801,14 @@
     if (f.has('sync_manual')) out.push(['man', c.manual && c.manual.how === 'waveform' ? 'Picked by you' : 'Set by you']);
     else if (f.has('sync_corrected')) out.push(['fix', `Moved ${signedSec((c.start - c.orig_start) / SR)}`]);
     else if (f.has('sync_found')) out.push(['fix', 'Placed by waveform']);
-    else if (f.has('no_tc')) out.push(['fix', 'No timecode']);
+    else if (f.has('no_tc') && !f.has('false_record')) out.push(['fix', 'No timecode']);
     if (f.has('zero_tc') && !moved(c)) out.push(['fix', 'TC 00:00']);
     if (f.has('tc_far') && !moved(c)) out.push(['fix', 'TC far off']);
     if (f.has('tc_overlap') && !moved(c)) out.push(['fix', 'TC jump']);
-    if (f.has('duplicate')) out.push(['bad', `Duplicate`]);
-    if (f.has('short_silent')) out.push(['', 'Accidental, left out']);
+    if (f.has('duplicate')) out.push(['', 'Duplicate']);
+    if (f.has('rate_near')) out.push(['info', `${c.fps} fps · real time`]);
+    if (f.has('false_record')) out.push(['', 'False record']);
+    else if (f.has('short_silent')) out.push(['', 'Accidental, left out']);
     if (f.has('false_take')) out.push(['', 'False take']);
     if (c.ltc) out.push(['info', `LTC ch ${c.ltc.channel + 1}`]);
     if (f.has('raw')) out.push(['info', 'RAW']);
@@ -857,8 +866,8 @@
       const cl = g.clips.slice().sort(bySort);
       const closed = S.collapsed.has(key);
       const inc = cl.filter((c) => c.include).length;
-      html.push(`<tr class="grp ${g.slow ? 'slow' : ''}" data-grp="${esc(key)}"><td colspan="7"><span class="tw">${closed ? '▸' : '▾'}</span>`
-        + `<i class="sw" style="background:${laneColor(ln)}"></i><b>${esc(ln.label)}</b>${esc(g.slow ? slowSub({ lane: ln, type: 'lane', slow: true }) : (ln.sub || ''))}`
+      html.push(`<tr class="grp ${g.slow ? 'slow' : ''} ${g.falseRec ? 'falserec' : ''}" data-grp="${esc(key)}"><td colspan="7"><span class="tw">${closed ? '▸' : '▾'}</span>`
+        + `<i class="sw" style="background:${g.falseRec ? 'var(--dim)' : laneColor(ln)}"></i><b>${esc(ln.label)}</b>${esc(g.slow ? slowSub({ lane: ln, type: 'lane', slow: true }) : (ln.sub || ''))}`
         + `<span class="cnt">${inc === cl.length ? `${cl.length} clip${cl.length === 1 ? '' : 's'}` : `${inc} of ${cl.length} used`}</span></td></tr>`);
       if (closed) continue;
       for (const c of cl) {
@@ -867,7 +876,8 @@
         const tc = c.tc ? (st.old && st.old !== c.tc ? `<span class="tcnew">${c.tc}</span><span class="was">was ${st.old}</span>` : c.tc) : '—';
         const ch = chips(c);
         const chipHtml = ch.map(([kk, t]) => `<span class="chip s ${kk}">${esc(t)}</span>`).join('');
-        const sub2 = `<span class="sub2">${esc(facts(c, ln))}</span>`;
+        const rl = g.falseRec ? (lanesAll().find((l) => l.key === c.lane) || ln) : ln;
+        const sub2 = `<span class="sub2">${esc((g.falseRec ? rl.label + ' · ' : '') + facts(c, rl))}</span>`;
         html.push(`<tr class="${cls}" data-id="${c.id}">
           <td class="c-inc"><input type="checkbox" ${c.include ? 'checked' : ''} data-inc="${c.id}" aria-label="Use ${esc(c.name)}"></td>
           <td class="file" title="${esc(c.path)}"><div class="fc">${c.kind === 'video' ? `<img class="th" data-thumb="${c.id}" alt="" ${S.thumbs[c.id] ? `src="${S.thumbs[c.id]}"` : ''}>` : '<span class="th aud"></span>'}<span class="fn">${esc(c.name)}${sub2}</span></div></td>
@@ -931,6 +941,12 @@
         if (cl.length) out.push({ type: 'lane', lane: ln, key: ln.key + '|slow', slow: true, clips: cl });
       }
     }
+    const fr = allDayClips().filter((c) => isFalseRec(c) && !isDup(c));
+    if (fr.length) out.push({ type: 'lane', key: '_false', falseRec: true, clips: fr,
+      lane: { key: '_false', label: 'FALSE RECORDS', sub: 'short, no timecode · left out, never deleted · tick one to use it' } });
+    const dp = allDayClips().filter(isDup);
+    if (dp.length) out.push({ type: 'lane', key: '_dup', falseRec: true, clips: dp,
+      lane: { key: '_dup', label: 'DUPLICATES', sub: 'the same file twice (e.g. "IMG_8602 2.MOV") · left out, never deleted' } });
     return out;
   }
   function tableOrder() {
@@ -992,19 +1008,24 @@
   function renderInspector() {
     const many = S.picked.size > 1;
     const c = many ? null : selClip();
-    const sl = $('selLine');
-    sl.hidden = !many;
+    $('selLine').hidden = true;
+    $('inspMany').hidden = !many;
     if (many) {
-      const pc = pickedClips(), cams = pc.filter((x) => x.kind === 'video').length;
+      const pc = pickedClips();
       const vids = pc.filter((x) => x.kind === 'video');
       const allSlow = vids.length && vids.every((x) => x.slowmo);
-      sl.innerHTML = `<b>${pc.length} clips selected</b> ⌫ ${pc.every((x) => x.include) ? 'leave them out' : 'use them'}` +
-        (cams > 1 ? ' · ⌘G one camera' : '') + ' · Esc clear' +
-        (vids.length ? ` <button class="linkbtn" id="selSlow">${allSlow ? 'Not slow motion' : 'Mark as slow motion'} (${vids.length})</button>` : '');
-      const sb = document.getElementById('selSlow');
-      if (sb) sb.addEventListener('click', async () => {
-        applyState(await call('clips_slowmo', vids.map((x) => x.id), !allSlow));
-      });
+      const used = pc.filter((x) => x.include).length;
+      const byLane = {};
+      pc.forEach((x) => { const l = (lanesAll().find((ll) => ll.key === x.lane) || {}).label || x.roll; byLane[l] = (byLane[l] || 0) + 1; });
+      $('mTitle').textContent = `${pc.length} clips selected`;
+      $('mSub').textContent = Object.entries(byLane).map(([l, n]) => `${n} on ${l}`).join(' · ')
+        + ` · ${used === pc.length ? 'all used' : used ? `${used} used, ${pc.length - used} left out` : 'all left out'}`;
+      $('mUse').textContent = used === pc.length ? 'Leave them out (⌫)' : 'Use them (⌫)';
+      $('mSlow').hidden = !vids.length;
+      $('mSlow').textContent = `${allSlow ? 'Not slow motion' : 'Mark as slow motion'} (${vids.length})`;
+      $('mSlow').onclick = async () => applyState(await call('clips_slowmo', vids.map((x) => x.id), !allSlow));
+      $('mGroup').hidden = new Set(vids.map((x) => x.roll)).size < 2;
+      [$('mUse'), $('mSlow'), $('mGroup')].forEach((b) => { b.disabled = S.running || S.scanning; });
     }
     $('insp').hidden = !c; $('inspEmpty').hidden = !!c || many;
     if (!c) return;
@@ -1202,7 +1223,9 @@
     const c = S.project && S.project.clips.find((x) => x.id === id);
     if (!c) return;
     pick(id);
+    const wasClosed = S.collapsed.has(c.lane) || S.collapsed.has(c.lane + '|slow') || S.collapsed.has('_false') || S.collapsed.has('_dup');
     if (c.lane) S.collapsed.delete(c.lane), S.collapsed.delete(c.lane + '|slow');
+    S.collapsed.delete('_false'); S.collapsed.delete('_dup');
     if (zoom && c.start != null) { const L = c.length || SR * 10, pad = Math.max(L * 0.6, SR * 20); S.view = [c.start - pad, c.start + L + pad]; }
     if (c.kind === 'video') {                                 // the picture box says at once which clip it's fetching
       const ln = lanesAll().find((l) => l.key === c.lane) || {};
@@ -1211,8 +1234,16 @@
     }
     if (c.start != null && (S.ph == null || S.ph < c.start || S.ph >= c.start + c.length)) setPlayhead(c.start);
     else if (c.start != null) setPlayhead(S.ph);              // same spot, but the viewer now shows this clip
-    renderTable(); renderInspector(); slateIdle(); draw();
+    if (wasClosed || !document.querySelector(`tr[data-id="${id}"]`)) renderTable(); else markRows();
+    renderInspector(); slateIdle(); draw();
     showRow(id, true);
+  }
+  function markRows() {
+    if (!document.querySelector('#clipRows tr[data-id]')) return renderTable();
+    document.querySelectorAll('#clipRows tr[data-id]').forEach((tr) => {
+      const id = +tr.dataset.id;
+      tr.classList.toggle('sel', S.picked.has(id)); tr.classList.toggle('primary', S.sel === id);
+    });
   }
   // Bring a clip's row into view by moving the list's own scroll position (scrollIntoView left the list blank
   // in the Mac app's WebKit until the next scroll). Does nothing when the row is already fully visible.
@@ -1232,7 +1263,12 @@
     else return;
     to = Math.max(0, Math.min(box.scrollHeight - view, Math.round(to)));
     box.scrollTop = to;
-    requestAnimationFrame(() => { if (box.scrollTop !== to) box.scrollTop = to; });
+    // WebKit can leave a long scrolled table unpainted until the next wheel event: nudge a repaint
+    requestAnimationFrame(() => {
+      if (box.scrollTop !== to) box.scrollTop = to;
+      box.style.transform = 'translateZ(0)';
+      requestAnimationFrame(() => { box.style.transform = ''; });
+    });
   }
 
   // Sync to (2.0): one sentence saying what the day syncs to, and a Change link with only the real choices:
@@ -1369,6 +1405,10 @@
       const ask = cl.filter((c) => c.slowmo && !c.slowmo.sure && c.include).sort((a, b) => (a.start ?? 1e18) - (b.start ?? 1e18));
       if (ask.length) notes.unshift(`<button class="linkbtn" data-ask-slow="${ask[0].id}">${ask.length} to confirm as slow motion</button>`);
       if (slow) notes.push(`${slow} slow-mo`);
+      const nFalse = allDayClips().filter(isFalseRec).length;
+      const nDup = allDayClips().filter(isDup).length;
+      if (nFalse - nDup) notes.push(`${nFalse - nDup} false record${nFalse - nDup === 1 ? '' : 's'} left out`);
+      if (nDup) notes.push(`${nDup} duplicate${nDup === 1 ? '' : 's'} left out`);
       const forced = cl.find((c) => c.day_forced);
       const dayKey = cl[0] && cl[0].day;
       if (forced && dayKey) notes.push(`${fmtDay(dayKey)} from the folder name ${forced.day_forced}`);
@@ -1753,6 +1793,9 @@
     if (redo ? !S.redo : !S.undo) { toast(redo ? 'Nothing to redo' : 'Nothing to undo'); return; }
     applyState(await call(redo ? 'redo' : 'undo'));
   }
+  $('mUse').addEventListener('click', () => useOrLeaveOut());
+  $('mGroup').addEventListener('click', async () => { const pc = pickedClips().filter((c) => c.kind === 'video'); if (pc.length) applyState(await call('group_camera', pc.map((c) => c.id), null)); });
+  $('mClear').addEventListener('click', () => { pick(null); markRows(); renderInspector(); draw(); });
   async function useOrLeaveOut() {
     const pc = pickedClips(); if (!pc.length || S.running) return;
     const all = pc.every((c) => c.include);

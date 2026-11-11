@@ -82,6 +82,15 @@
         </div>
       </div>
         <div class="insp-empty" id="inspEmpty"><b>No clip selected</b><span>Click a clip in the timeline or the list to see its timecode, frame rate and details.</span><span class="keys-hint"><kbd>Space</kbd> play · <kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> shuttle · <kbd>←</kbd><kbd>→</kbd> a frame · <kbd>⇧</kbd>+<kbd>←</kbd><kbd>→</kbd> a second</span></div>
+      <section class="insp-empty multi" id="inspMany" hidden aria-label="Selected clips">
+        <b id="mTitle"></b><span id="mSub"></span>
+        <div class="row mbtns">
+          <button class="btn small" id="mUse"></button>
+          <button class="btn small" id="mSlow" hidden></button>
+          <button class="btn small" id="mGroup" hidden>Same camera (⌘G)</button>
+          <button class="btn small ghosted" id="mClear">Clear selection</button>
+        </div>
+      </section>
       <section class="insp" id="insp" hidden aria-label="Selected clip">
         <div class="insp-head">
           <div class="insp-title"><strong id="iName"></strong><span id="iSub"></span></div>

@@ -56,7 +56,7 @@ with sync_playwright() as pw:
 
     print('select and leave out')
     k('Meta+a')
-    check('4 clips selected' in pg.inner_text('#selLine'), pg.inner_text('#selLine'))
+    check('4 clips selected' in pg.inner_text('#inspMany'), pg.inner_text('#inspMany'))
     k('Backspace')
     check(inc() == [False] * 4, f'⌫ left all out: {inc()}')
     k('Meta+z')
@@ -78,7 +78,7 @@ with sync_playwright() as pw:
     k('Meta+z')
     check(lanes()[1][0] == 'C CAM', f'⌘Z puts it back: {lanes()}')
     k('Meta+1')
-    check('4 clips selected' in pg.inner_text('#selLine'), '⌘1 picks the camera clips')
+    check('4 clips selected' in pg.inner_text('#inspMany'), '⌘1 picks the camera clips')
     k('Meta+g')
     check(lanes() == [('A CAM', ['Card1', 'Card2', 'Card3', 'Card4'])], f'⌘G one camera: {lanes()}')
     k('Meta+z')

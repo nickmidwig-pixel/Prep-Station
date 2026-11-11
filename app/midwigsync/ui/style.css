@@ -674,3 +674,6 @@ td.num .tcnew { display: block; }
 td.num .was { display: block; font-size: 11.5px; color: var(--dim); margin-top: 1px; }
 .slate-meta #tcWhat { max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 dd[hidden], dt[hidden] { display: none; }
+tr.grp.falserec td { border-top: 1px solid var(--line); }
+tr.grp.falserec b { color: var(--muted); letter-spacing: .04em; }
+.insp-empty.multi .mbtns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
