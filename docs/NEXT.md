@@ -457,3 +457,10 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 - Camera clips with no timecode (iPhone camera app) show as dashed outlines where the phone's clock says they were shot ("N no timecode · by its clock"); the sync still places them by sound. Never used as timecode. Only when the creation date carries a local offset.
 - Pictures ffmpeg can't decode (ProRes RAW from the iPhone in the Blackmagic app) go through macOS: AVFoundation, then Quick Look's poster frame (macframe.py). UNTESTED on a Mac at the time of writing. Message when nothing works names the codec.
 - Codec truth: the bundled ffmpeg covers H.264, HEVC, ProRes, DNx, XAVC, XF-AVC, MPEG-2, AV1 etc. Camera RAW (Canon CRM, BRAW, R3D, ARRIRAW, ProRes RAW) has no ffmpeg decoder in the bundled build: CRM uses the embedded preview, the rest fall to macOS. BRAW / R3D pictures would need the makers' SDKs.
+
+## 2.5.9 — RAW pictures through whatever can decode them (Nick: "I want this universal")
+- Viewer chain for a picture ffmpeg can't decode: macOS (AVFoundation: ProRes RAW natively; BRAW / RED / others when a media extension is installed) → Quick Look → the maker's command-line tool (REDline for .R3D, art-cmd for ARRIRAW/ARRICORE MXF and .ari) → Canon's stored preview → a message naming what to install. rawtools.py; stills go to our own temp folder, never beside the clip.
+- Arguments are from RED's argument legend and ARRI's art-cmd 1.0 manual; plumbing is tested with stand-in tools. NOT tested on real R3D / ARRIRAW / BRAW or on a Mac.
+- Still missing for RED: loading an .R3D at all (timecode, rate, sound) needs an R3D header reader or REDline --printMeta; needs a real clip.
+- BRAW has no maker CLI. Options: Blackmagic's SDK (C++ glue, needs a Mac build) or a still through Resolve.
+- Timecode at 24.000 vs 23.976: a label converts at the clip's own rate, so the same label sits 0.1% of the time-of-day apart (about 32 s at 9 am, growing 3.6 s an hour). The waveform check is what lines them up.

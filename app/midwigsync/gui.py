@@ -554,12 +554,25 @@ class Api:
         lane = next((l for l in self.p.lanes() if l['key'] == c.get('lane')), None)
         who = f"{lane['label'] if lane else c['roll']}{' · slow motion' if c.get('slowmo') else ''} · {c['name']}"
         src = c['path']
+        off = max(0, at - c['start']) / TC.SR
         if c.get('raw_picture'):
+            key = (src, round(off, 1))
+            cache = self.__dict__.setdefault('_frames', {})
+            if key not in cache:
+                data = self._raw_frame(c, off, 608)    # the real frame: macOS, then the maker's own tool
+                if data:
+                    if len(cache) > 200:
+                        cache.clear()
+                    cache[key] = _data_uri(data)
+            if key in cache:
+                return dict(ok=True, img=cache[key], label=who)
             img = self._still(c, 608)
             if img:                    # Canon RAW: the picture the camera saved with the clip (its first frame)
                 return dict(ok=True, img=img, label=who, preview=True)
-            return dict(ok=False, why=f"{c['name']}: RAW, no picture preview here.")
-        off = max(0, at - c['start']) / TC.SR
+            need = __import__('midwigsync.rawtools', fromlist=['x']).tool_for(src, 'arriraw' if src.lower().endswith('.mxf') else '')
+            return dict(ok=False, why=f"{c['name']}: RAW picture. " + (
+                f"To see it here, install {need[0]}." if need and not need[1] else "This Mac couldn't decode it.")
+                + " Sound and timecode work as normal.")
         key = (src, round(off, 1))
         cache = self.__dict__.setdefault('_frames', {})
         if key not in cache:
@@ -577,6 +590,23 @@ class Api:
                 cache.clear()
             cache[key] = _data_uri(data)
         return dict(ok=True, img=cache[key], label=who)
+
+    def _raw_frame(self, c, off, width):
+        """JPEG/PNG bytes of a RAW clip's frame `off` seconds in, or None: macOS first (ProRes RAW natively; Blackmagic
+        RAW, RED and others when their media extension is installed), then the maker's command-line tool."""
+        src = c['path']
+        if src.lower().endswith('.crm'):
+            return None                 # Canon RAW: nothing on the Mac decodes it outside Canon's app; use the stored preview
+        data = __import__('midwigsync.macframe', fromlist=['x']).frame_jpeg(src, off, width)
+        if data:
+            return data
+        rt = __import__('midwigsync.rawtools', fromlist=['x'])
+        codec = 'arriraw' if src.lower().endswith('.mxf') else (c.get('codec') or '')    # a RAW picture in MXF is ARRI's
+        fp, d = rt.frame_file(src, int(off * float(c.get('fps') or self.p.fps)), width, codec)
+        try:
+            return self._jpeg_scaled(fp, width) if fp else None
+        finally:
+            rt.cleanup(d)
 
     # ------------------------------------------------------------ thumbnails (read-only; cached in the app's cache)
     def _jpeg_scaled(self, data_or_path, width, seek=None):
@@ -614,6 +644,8 @@ class Api:
             src = media.embedded_preview(c['path']) or media.embedded_preview(c['path'], 'thmb')
             if src:
                 data = self._jpeg_scaled(src, width)
+            elif c.get('raw_picture'):
+                data = self._raw_frame(c, min(1.0, c['length'] / TC.SR / 2), width)
             elif not c.get('raw_picture'):
                 data = self._jpeg_scaled(c['path'], width, seek=min(1.0, c['length'] / TC.SR / 2))
                 if not data:
