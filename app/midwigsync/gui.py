@@ -45,6 +45,13 @@ def save_prefs(d):
         pass
 
 
+def _data_uri(data):
+    """data: URI with the right type (Quick Look hands back PNG, everything else is JPEG)."""
+    import base64
+    mime = 'image/png' if data[:8] == b'\x89PNG\r\n\x1a\n' else 'image/jpeg'
+    return f'data:{mime};base64,' + base64.b64encode(data).decode()
+
+
 class Api:
     def __init__(self):
         self.window = None
@@ -560,12 +567,15 @@ class Api:
             r = subprocess.run([ff, '-v', 'error', '-ss', f'{off:.3f}', '-i', src, '-frames:v', '1',
                                 '-vf', 'scale=480:-2', '-q:v', '5', '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1'],
                                capture_output=True)
-            if r.returncode != 0 or not r.stdout:
-                return dict(ok=False, why=f"{c['name']}: couldn't read the picture.")
+            data = r.stdout if r.returncode == 0 and r.stdout else None
+            if not data:               # ProRes RAW (iPhone, Blackmagic app) and the like: let macOS decode it
+                data = __import__('midwigsync.macframe', fromlist=['x']).frame_jpeg(src, off, 480)
+            if not data:
+                return dict(ok=False, why=f"{c['name']}: this Mac can't show this file's picture here "
+                                          f"({c.get('codec') or 'unknown format'}). Its sound still plays.")
             if len(cache) > 200:
                 cache.clear()
-            import base64
-            cache[key] = 'data:image/jpeg;base64,' + base64.b64encode(r.stdout).decode()
+            cache[key] = _data_uri(data)
         return dict(ok=True, img=cache[key], label=who)
 
     # ------------------------------------------------------------ thumbnails (read-only; cached in the app's cache)
@@ -606,11 +616,14 @@ class Api:
                 data = self._jpeg_scaled(src, width)
             elif not c.get('raw_picture'):
                 data = self._jpeg_scaled(c['path'], width, seek=min(1.0, c['length'] / TC.SR / 2))
+                if not data:
+                    data = __import__('midwigsync.macframe', fromlist=['x']).frame_jpeg(
+                        c['path'], min(1.0, c['length'] / TC.SR / 2), width)
             if data:
                 os.makedirs(d, exist_ok=True)
                 with open(fp, 'wb') as f:
                     f.write(data)
-        return 'data:image/jpeg;base64,' + base64.b64encode(data).decode() if data else None
+        return _data_uri(data) if data else None
 
     # ------------------------------------------------------------ RAW viewing copies (Resolve renders; app cache only)
     def thumbs(self, ids):

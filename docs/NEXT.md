@@ -450,3 +450,10 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 - Clicking a clip only re-marks rows (no rebuild of 200 rows) and nudges WebKit to repaint: the list no longer goes blank until you scroll.
 - The viewer never asks for a frame past a clip's last one ("couldn't read the picture" at the clip's end).
 - Still open from this day: C CAM (iPhone camera app) has no timecode; its clips are placed by waveform during the run. Seeding them from the iPhone's clock (com.apple.quicktime.creationdate) would put them on the timeline before the run.
+
+## 2.5.8 — Nick's notes on 2.5.7 with the iPhone day open
+- False records are SOUND ONLY (Nick). A short camera clip is a shot.
+- Anything within 2% of the day's rate is the same rate for the edit (23.5–24.5 on a 23.976 day): the iPhone's wandering 23.837 / 23.924 went to slow motion in 2.5.7. No picture is converted (standing rule); positions are real time, the XML carries each clip's own rate.
+- Camera clips with no timecode (iPhone camera app) show as dashed outlines where the phone's clock says they were shot ("N no timecode · by its clock"); the sync still places them by sound. Never used as timecode. Only when the creation date carries a local offset.
+- Pictures ffmpeg can't decode (ProRes RAW from the iPhone in the Blackmagic app) go through macOS: AVFoundation, then Quick Look's poster frame (macframe.py). UNTESTED on a Mac at the time of writing. Message when nothing works names the codec.
+- Codec truth: the bundled ffmpeg covers H.264, HEVC, ProRes, DNx, XAVC, XF-AVC, MPEG-2, AV1 etc. Camera RAW (Canon CRM, BRAW, R3D, ARRIRAW, ProRes RAW) has no ffmpeg decoder in the bundled build: CRM uses the embedded preview, the rest fall to macOS. BRAW / R3D pictures would need the makers' SDKs.

@@ -213,6 +213,7 @@
     if (!cl.length) return null;
     let a = Infinity, b = -Infinity;
     for (const c of cl) { a = Math.min(a, c.start, c.orig_start ?? c.start); b = Math.max(b, c.start + c.length); }
+    for (const c of dayClips()) if (c.start == null && c.approx_start != null && c.include) { a = Math.min(a, c.approx_start); b = Math.max(b, c.approx_start + c.length); }
     return [a, b];
   }
   // the timeline only goes an hour past the first and last clip: you can't scroll off into empty day
@@ -349,7 +350,7 @@
         ctx.font = '400 12px Barlow, sans-serif'; ctx.fillStyle = COL.muted;
         const subMax = (row.slow ? LABEL_W - 10 : MS_X - 8) - x0l;
         if (unplaced) {                               // files with no timecode: said here, beside the name, not over the clips
-          const note = `${unplaced} no timecode`;
+          const note = rowClips(row).some((c) => c.start == null && c.approx_start != null) ? `${unplaced} no timecode · by its clock` : `${unplaced} no timecode`;
           const nw = ctx.measureText(note).width;
           const st = fitText(sub, subMax - nw - 10);
           if (st) ctx.fillText(st, x0l, y + rh / 2 + 7);
@@ -373,7 +374,22 @@
       }
       // clips
       for (const c of rowClips(row)) {
-        if (c.start == null) continue;
+        if (c.start == null) {
+          // no timecode: a dashed outline where the camera's own clock says it was shot, until the sync places it by sound
+          if (!isTrack && c.approx_start != null) {
+            const gx0 = Math.max(LABEL_W, xOf(c.approx_start, L)), gx1 = xOf(c.approx_start + c.length, L);
+            if (gx1 > LABEL_W) {
+              ctx.save();
+              ctx.globalAlpha = c.include ? 1 : 0.4;
+              ctx.fillStyle = laneColor(ln); ctx.globalAlpha *= 0.22; roundRect(gx0, y + 4, Math.max(3, gx1 - gx0), rh - 10, 2); ctx.fill();
+              ctx.globalAlpha = c.include ? 0.9 : 0.4; ctx.setLineDash([3, 3]); ctx.strokeStyle = laneColor(ln); ctx.lineWidth = 1;
+              roundRect(gx0 + 0.5, y + 4.5, Math.max(3, gx1 - gx0) - 1, rh - 11, 2); ctx.stroke();
+              if (S.picked.has(c.id)) { ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.strokeStyle = COL.paper; ctx.lineWidth = 2; roundRect(gx0, y + 4, Math.max(3, gx1 - gx0), rh - 10, 2); ctx.stroke(); }
+              ctx.restore();
+            }
+          }
+          continue;
+        }
         const h = rh - (isTrack ? 6 : 10), yy = y + (isTrack ? 2 : 4);
         if (!isTrack && moved(c) && c.orig_start != null) {
           const gx0 = xOf(c.orig_start, L), gx1 = xOf(c.orig_start + c.length, L);
@@ -459,6 +475,8 @@
     const cs = rowClips(row).filter((c) => c.start != null);
     const inside = cs.filter((c) => s >= c.start && s < c.start + c.length);
     if (inside.length) return inside[inside.length - 1];
+    const ghost = row.type !== 'track' && rowClips(row).filter((c) => c.start == null && c.approx_start != null && s >= c.approx_start - tol && s <= c.approx_start + c.length + tol);
+    if (ghost && ghost.length) return ghost[ghost.length - 1];
     const near = cs.filter((c) => s >= c.start - tol && s <= c.start + c.length + tol);
     near.sort((x, y) => Math.min(Math.abs(s - x.start), Math.abs(s - x.start - x.length)) - Math.min(Math.abs(s - y.start), Math.abs(s - y.start - y.length)));
     return near[0] || null;
@@ -511,7 +529,7 @@
     S.band = null;
     const c = my > RULER_H ? hit(mx, my) : null;
     // a click on a clip never leaves the playhead outside that clip (a near miss on a sliver snaps in)
-    if (!(e.shiftKey || e.metaKey || e.ctrlKey) || !c) setPlayhead(c ? Math.max(c.start, Math.min(c.start + c.length - 1, sOf(mx, L))) : sOf(mx, L));
+    if (!(e.shiftKey || e.metaKey || e.ctrlKey) || !c) setPlayhead(c && c.start != null ? Math.max(c.start, Math.min(c.start + c.length - 1, sOf(mx, L))) : sOf(mx, L));
     if (my > RULER_H) { if (c) pick(c.id, howFrom(e)); else if (!(e.metaKey || e.ctrlKey || e.shiftKey)) pick(null); }
     markRows(); renderInspector(); draw();
     if (c) showRow(c.id);
@@ -801,12 +819,13 @@
     if (f.has('sync_manual')) out.push(['man', c.manual && c.manual.how === 'waveform' ? 'Picked by you' : 'Set by you']);
     else if (f.has('sync_corrected')) out.push(['fix', `Moved ${signedSec((c.start - c.orig_start) / SR)}`]);
     else if (f.has('sync_found')) out.push(['fix', 'Placed by waveform']);
-    else if (f.has('no_tc') && !f.has('false_record')) out.push(['fix', 'No timecode']);
+    else if (f.has('no_tc') && !f.has('false_record') && !(c.start == null && c.approx_start != null)) out.push(['fix', 'No timecode']);
     if (f.has('zero_tc') && !moved(c)) out.push(['fix', 'TC 00:00']);
     if (f.has('tc_far') && !moved(c)) out.push(['fix', 'TC far off']);
     if (f.has('tc_overlap') && !moved(c)) out.push(['fix', 'TC jump']);
     if (f.has('duplicate')) out.push(['', 'Duplicate']);
     if (f.has('rate_near')) out.push(['info', `${c.fps} fps · real time`]);
+    if (c.start == null && c.approx_start != null) out.push(['fix', 'Placed by sound at sync']);
     if (f.has('false_record')) out.push(['', 'False record']);
     else if (f.has('short_silent')) out.push(['', 'Accidental, left out']);
     if (f.has('false_take')) out.push(['', 'False take']);

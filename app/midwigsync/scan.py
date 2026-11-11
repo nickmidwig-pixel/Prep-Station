@@ -791,8 +791,9 @@ class Project:
                 continue
             fps = c.get('fps')
             cap = c.get('capture_fps')
-            # 24 on a 23.976 day (30 / 29.97, 60 / 59.94) is the same speed, 0.1% apart: real time, not slow motion
-            near = bool(fps) and abs(float(fps) / pf - 1) < 0.002
+            # anything within 2% of the day's rate (23.5 to 24.5 on a 23.976 day; 30 / 29.97; 60 / 59.94) is the same
+            # speed for the edit: real time, not slow motion
+            near = bool(fps) and abs(float(fps) / pf - 1) < 0.02     # also an iPhone's wandering 23.84 / 23.92
             if near and TC.rate_label(fps) != TC.rate_label(self.fps) and 'rate_near' not in c['flags']:
                 c['flags'].append('rate_near')
             if fps and not near and TC.rate_label(fps) != TC.rate_label(self.fps):
@@ -900,8 +901,8 @@ class Project:
             if c.get('user_include') is not None or c.get('manual'):
                 continue
             no_tc = c.get('orig_start') is None or c['orig_start'] < TC.SR
-            short = c['length'] < (max_len_s if c['kind'] == 'audio' else 3) * TC.SR
-            if no_tc and short:
+            short = c['length'] < max_len_s * TC.SR
+            if c['kind'] == 'audio' and no_tc and short:      # sound only (Nick, 11/11): a short camera clip is a shot
                 if 'false_record' not in c['flags']:
                     c['flags'].append('false_record')
                 c['include'] = False
@@ -925,6 +926,19 @@ class Project:
                 if 'short_silent' not in c['flags']:
                     c['flags'].append('short_silent')
                 c['include'] = False
+
+    def _clock_place(self, c):
+        """Where a camera clip with no timecode roughly sits, from the time of day its own clock wrote
+        (an iPhone's creation date with its time-zone offset). Only for showing it on the timeline before
+        a sync; never used as timecode. Samples since midnight, or None."""
+        if c['kind'] != 'video' or c.get('orig_start') is not None or c.get('start') is not None:
+            return None
+        cr = str(c.get('created') or '')
+        m = re.match(r'^\d{4}-\d\d-\d\dT(\d\d):(\d\d):(\d\d)(?:\.\d+)?[+-]\d\d:?\d\d$', cr)
+        if not m:                       # no local offset (plain UTC): the time of day can't be trusted
+            return None
+        h, mi, se = (int(x) for x in m.groups())
+        return (h * 3600 + mi * 60 + se) * TC.SR
 
     # ------------------------------------------------------------ helpers
     def day_span(self, include_only=True):
@@ -995,7 +1009,7 @@ class Project:
                 has_audio=media.total_audio_channels(c) > 0 and not (c.get('ltc') and c.get('listen_ch') is None),
                 source_path=c.get('source_path'), opatom=c.get('opatom', False),
                 day=c.get('day') or 'unknown', after_midnight=c.get('after_midnight', False), date_note=c.get('date_note'),
-                day_forced=c.get('day_forced'),
+                day_forced=c.get('day_forced'), approx_start=self._clock_place(c),
                 duplicate_of=os.path.basename(c['duplicate_of']) if c.get('duplicate_of') else None, user_include=c.get('user_include'),
                 roles=self.clip_roles(c), track_names=c.get('track_names') or {}, scene=c.get('scene', ''), take=c.get('take', ''),
                 size=c.get('size', 0), width=c.get('width', 0), height=c.get('height', 0), sr=c.get('sr') or c.get('source_sr'),

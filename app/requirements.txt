@@ -4,3 +4,5 @@ imageio-ffmpeg>=0.5
 pywebview>=5.3
 pyobjc-framework-ApplicationServices>=10.0; sys_platform == "darwin"
 pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+pyobjc-framework-AVFoundation>=10.0; sys_platform == "darwin"
+pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
