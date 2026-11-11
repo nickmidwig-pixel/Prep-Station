@@ -349,6 +349,10 @@ class Api:
         if ms and (ms.get('mute') or ms.get('solo')):
             return self._play_mix(at, set(ms.get('mute') or []), set(ms.get('solo') or []), speed=speed, reverse=reverse, gen=gen)
         c = self.p.by_id(int(cid)) if cid is not None else None
+        c0 = c
+        c = self._stand_in(c, at)
+        if c is not c0 and c is not None:      # a selected clip with no timecode: play it from where the playhead falls in it
+            at = min(max(at, c['start']), c['start'] + max(0, c['length'] - TC.SR // 2))
         if c and not (c['start'] is not None and c['start'] <= at < c['start'] + c['length']):
             c = None
         if c is None:
@@ -537,12 +541,22 @@ class Api:
             self._kill_player()
         return True
 
+    def _stand_in(self, c, at):
+        """A selected clip with no timecode isn't on the timeline yet, but you can still look at it and hear it:
+        for the viewer and for Play it is treated as sitting where its own clock says (else at the playhead).
+        A copy; the project is not touched."""
+        if c is None or c.get('start') is not None:
+            return c
+        vs = self.p._clock_place(c) if c['kind'] == 'video' else None
+        return dict(c, start=int(at) if vs is None else vs)
+
     def frame(self, at, cid=None):
         """A still of the picture at the playhead (the selected camera clip, else A camera, else any camera)."""
         at = int(at)
         cams = [x for x in self.p.clips if x['kind'] == 'video' and x['include'] and x['start'] is not None
                 and x['start'] <= at < x['start'] + x['length']]
         c = self.p.by_id(int(cid)) if cid is not None else None
+        c = self._stand_in(c, at)
         if c and c['kind'] == 'video' and c['start'] is not None and c['include'] and c not in cams:
             # the selected clip always wins, even when the playhead sits just outside it: show its first frame
             cams.insert(0, c)

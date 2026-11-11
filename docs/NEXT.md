@@ -477,3 +477,6 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 
 ## 2.5.13
 - Seen on the Mac (20261110, B CAM iPhone): clips whose measured rate wanders (23.944 / 23.924 / 23.837, dropped frames) had their timecode converted at the measured rate and landed up to ~4 min late, out of order, tagged TC jump. Now the rate used for timecode is the timecode track's own rate, else the nearest standard rate within 2%; the measured rate is kept as fps_measured and still sets the real length. test_wander_rate.py.
+
+## 2.5.14
+- Seen on the Mac: selecting a C CAM iPhone clip with no timecode (IMG_8611.MOV) left the viewer on another camera's picture (B CAM C025), because frame() and play() only knew clips that have a position. A selected no-timecode clip now shows and plays itself (_stand_in: a copy placed at its clock time, else the playhead; the project is untouched). Play path untested off the Mac.
