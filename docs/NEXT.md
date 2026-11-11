@@ -474,3 +474,6 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 
 ## 2.5.12
 - Lane note ("28 no timecode · by its clock") ran under the M / S buttons. It now uses the longest wording that fits whole ("N no timecode · by clock" → "N by clock" → "N no timecode" → "N no TC"), and the model name gives way to it. RULE: every canvas string gets a measured max width; nothing is drawn unmeasured.
+
+## 2.5.13
+- Seen on the Mac (20261110, B CAM iPhone): clips whose measured rate wanders (23.944 / 23.924 / 23.837, dropped frames) had their timecode converted at the measured rate and landed up to ~4 min late, out of order, tagged TC jump. Now the rate used for timecode is the timecode track's own rate, else the nearest standard rate within 2%; the measured rate is kept as fps_measured and still sets the real length. test_wander_rate.py.

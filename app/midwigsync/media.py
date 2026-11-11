@@ -472,7 +472,10 @@ def probe_video(path, _audio_from=None):
             out['model'] = qi['model']
         if qi.get('serial') and not out.get('serial'):
             out['serial'] = qi['serial']
-        q = None if tcs else qt_timecode(qi)
+        q_any = qt_timecode(qi)
+        if q_any:
+            out['_tmcd_fps'] = q_any[1]
+        q = None if tcs else q_any
         if q:
             tcs, tfps, tdf = q
             if not out['fps']:
@@ -484,6 +487,16 @@ def probe_video(path, _audio_from=None):
                 out['tc_rate'] = TC.rate_label(tfps)
     if out['fps'] and out['nframes']:
         out['length'] = TC.frames_to_samples(out['nframes'], out['fps'])
+    # A phone's measured rate wanders (23.84, 23.92, 23.94 for a 24 fps recording with a few dropped frames). The
+    # length above uses what was measured; everything about timecode uses the rate the camera was SET to: the
+    # timecode track's own rate, else the nearest standard rate within 2%. (Converting 09:04:37 at 23.837 put a
+    # clip almost four minutes late.)
+    tm = out.pop('_tmcd_fps', None)
+    known = set(TC.KNOWN_RATES.values())
+    if out['fps'] and out['fps'] not in known:
+        best = tm if tm in known else min(known, key=lambda r: abs(float(r) - float(out['fps'])))
+        if abs(float(best) / float(out['fps']) - 1) < 0.02:
+            out['fps_measured'], out['fps'] = out['fps'], best
     if tcs and out['fps'] and out.get('tc_source') != 'qt-tmcd':
         try:
             out['df'] = out['df'] or (';' in tcs)
