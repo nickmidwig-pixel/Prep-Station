@@ -483,3 +483,9 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 
 ## 2.5.15
 - 2.5.14 fixed the Python side only: clicking a no-timecode clip in the file list never asked for a picture at all (the list click and selectClip only refreshed the viewer for clips with a position). Both paths now ask; test_notc_click.py clicks and double-clicks the row and reads the viewer.
+
+## 2.5.16 — no timecode AND no sound match (Nick's call, 11/11)
+- Before: such a camera clip was left out (sync_failed), or, with no sound at all, never tried and left unplaced.
+- Now: it is placed at the time of day its own clock wrote (sync_clock; creation date with a local offset only), as a timecode label at the day's rate. Tagged 'By clock · approx.' in the list, the confirm step and the report. Never a sync reference.
+- Timecode copies: offered after the run with the other camera fixes (CAMERA_TC_CORRECTED), never automatic, never the originals.
+- Sound files with no timecode and no match are unchanged: left out, listed for placing by hand (a recorder has no trustworthy clock: Zaxcom bext date is 0000-00-00).

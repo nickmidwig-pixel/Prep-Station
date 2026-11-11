@@ -937,8 +937,8 @@ class Project:
         m = re.match(r'^\d{4}-\d\d-\d\dT(\d\d):(\d\d):(\d\d)(?:\.\d+)?[+-]\d\d:?\d\d$', cr)
         if not m:                       # no local offset (plain UTC): the time of day can't be trusted
             return None
-        h, mi, se = (int(x) for x in m.groups())
-        return (h * 3600 + mi * 60 + se) * TC.SR
+        # as a timecode label at the day's rate, so it sits beside cameras whose timecode reads the same time of day
+        return TC.tc_to_samples('%s:%s:%s:00' % m.groups(), self.fps, False)
 
     # ------------------------------------------------------------ helpers
     def day_span(self, include_only=True):

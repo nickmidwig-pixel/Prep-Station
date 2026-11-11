@@ -134,7 +134,7 @@
     }
     return ROLE_COL[r.role] || COL.aud;
   }
-  const moved = (c) => c.flags.includes('sync_corrected') || c.flags.includes('sync_found') || c.flags.includes('sync_manual');
+  const moved = (c) => c.flags.includes('sync_corrected') || c.flags.includes('sync_found') || c.flags.includes('sync_clock') || c.flags.includes('sync_manual');
   const failed = (c) => c.flags.includes('sync_failed') || ['sample_rate'].some((f) => c.flags.includes(f));
   function clipColor(c) {
     if (!c.include) return COL.off;
@@ -162,6 +162,7 @@
     if (f.has('false_take')) return { t: c.include ? 'False take (recorder marked it), added back by you' : 'False take (recorder marked it), left out', k: '' };
     if (f.has('sync_failed')) return { t: 'Couldn’t be placed by waveform, so it’s left out. Check it by hand.', k: 'bad' };
     if (f.has('sample_rate')) return { t: 'Not 48 kHz, left out of alignment and polywav', k: 'bad' };
+    if (f.has('sync_clock')) return { t: 'No timecode and its sound didn’t match anything: placed at the time of day the camera’s own clock recorded. Approximate; nudge it or type a timecode if it matters.', k: 'fix' };
     if (f.has('sync_found')) return { t: `No timecode, placed by waveform (match ${s.score ?? '?'} against ${s.against || '?'})`, k: 'fix' };
     if (f.has('sync_corrected')) {
       const sec = (c.start - (c.orig_start ?? c.start)) / SR;
@@ -825,6 +826,7 @@
     if (f.has('sync_failed')) out.push(['bad', 'Not placed']);
     if (f.has('sync_manual')) out.push(['man', c.manual && c.manual.how === 'waveform' ? 'Picked by you' : 'Set by you']);
     else if (f.has('sync_corrected')) out.push(['fix', `Moved ${signedSec((c.start - c.orig_start) / SR)}`]);
+    else if (f.has('sync_clock')) out.push(['fix', 'By clock · approx.']);
     else if (f.has('sync_found')) out.push(['fix', 'Placed by waveform']);
     else if (f.has('no_tc') && !f.has('false_record') && !(c.start == null && c.approx_start != null)) out.push(['fix', 'No timecode']);
     if (f.has('zero_tc') && !moved(c)) out.push(['fix', 'TC 00:00']);
@@ -1693,7 +1695,7 @@
       $('revWhy').textContent = why.join('\n');
       $('revList').innerHTML = fx.map((x) => `<li title="${esc(x.name)}"><b>${esc(x.name)}</b>
           <span class="tc">${x.old ? `<s>${x.old}</s>` : '<s>no TC</s>'}${x.new}</span>
-          <span class="w"><em>${esc(x.roll)}</em> · ${x.shift_s != null ? 'moved ' + signedSec(x.shift_s) : 'placed'}${x.how === 'set by you' ? ' · set by you' : x.against ? ' · matched to ' + esc(x.against) : ''}${x.score != null ? ` · ${Math.round(x.score * 100)}% sure` : ''}</span></li>`).join('');
+          <span class="w"><em>${esc(x.roll)}</em> · ${x.shift_s != null ? 'moved ' + signedSec(x.shift_s) : 'placed'}${x.how === 'set by you' ? ' · set by you' : x.how === 'clock' ? ' · by its own clock, approximate' : x.against ? ' · matched to ' + esc(x.against) : ''}${x.score != null ? ` · ${Math.round(x.score * 100)}% sure` : ''}</span></li>`).join('');
       $('progText').textContent = 'Waiting for you: confirm the timecode fixes';
       $('review').scrollIntoView({ block: 'nearest' });
     },

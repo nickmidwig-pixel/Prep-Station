@@ -416,6 +416,25 @@ class Job:
                         env, off = item_envelope(c, ref['channel'], None, None, sink=s)
                         s.close(off)
                         an.env[c['id']] = (env, off)
+        # Camera clips with no timecode that sound couldn't place (or that have no sound): put them at the time of
+        # day their own clock recorded (Nick, 11/11). Approximate, said so everywhere; never used as a sync reference.
+        n_clock = 0
+        for c in p.clips:
+            if c['kind'] != 'video' or not c['include'] or c.get('manual') or c.get('orig_start') is not None:
+                continue
+            if c['start'] is not None and 'sync_failed' not in c['flags']:
+                continue
+            was, c['start'] = c['start'], None
+            cp = p._clock_place(c)
+            if cp is None:
+                c['start'] = was
+                continue
+            c['start'] = cp
+            c['flags'] = [f for f in c['flags'] if f != 'sync_failed'] + ['sync_clock']
+            c['sync'] = dict(method='clock', found=True)
+            n_clock += 1
+        if n_clock:
+            self.log(f'{n_clock} camera clip(s) with no timecode placed by their own clock (approximate; sound did not match).')
         n_fix = sum(1 for c in p.clips if {'sync_corrected', 'sync_found'} & set(c['flags']))
         n_man = sum(1 for c in p.clips if c.get('manual'))
         if n_man:
@@ -465,7 +484,7 @@ class Job:
         for c in self.p.clips:
             if not c['include'] or c['start'] is None:
                 continue
-            moved = bool({'sync_corrected', 'sync_found'} & set(c['flags']))
+            moved = bool({'sync_corrected', 'sync_found', 'sync_clock'} & set(c['flags']))
             if c.get('manual') and c['manual']['start'] != c['orig_start']:
                 moved = True
             if moved:
