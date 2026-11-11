@@ -480,3 +480,6 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 
 ## 2.5.14
 - Seen on the Mac: selecting a C CAM iPhone clip with no timecode (IMG_8611.MOV) left the viewer on another camera's picture (B CAM C025), because frame() and play() only knew clips that have a position. A selected no-timecode clip now shows and plays itself (_stand_in: a copy placed at its clock time, else the playhead; the project is untouched). Play path untested off the Mac.
+
+## 2.5.15
+- 2.5.14 fixed the Python side only: clicking a no-timecode clip in the file list never asked for a picture at all (the list click and selectClip only refreshed the viewer for clips with a position). Both paths now ask; test_notc_click.py clicks and double-clicks the row and reads the viewer.

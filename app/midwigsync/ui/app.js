@@ -1013,7 +1013,14 @@
     }
     const how = howFrom(e);
     { const c0 = S.project.clips.find((x) => x.id === +tr.dataset.id); if (how === 'one' && c0 && c0.start != null) setPlayhead(c0.start); }
-    pick(+tr.dataset.id, how); renderTable(); renderInspector(); slateIdle(); draw();
+    pick(+tr.dataset.id, how);
+    { // a camera clip with no timecode has no place on the timeline yet: still show ITS picture
+      const c0 = S.project.clips.find((x) => x.id === +tr.dataset.id);
+      if (how === 'one' && c0 && c0.kind === 'video' && c0.start == null) {
+        if (c0.approx_start != null) setPlayhead(c0.approx_start); else { clearTimeout(frameT); showFrame(S.ph != null ? S.ph : 0); }
+      }
+    }
+    renderTable(); renderInspector(); slateIdle(); draw();
   });
 
   // ------------------------------------------------------------------ selected clip: timecode by hand + waveform
@@ -1260,6 +1267,10 @@
     }
     if (c.start != null && (S.ph == null || S.ph < c.start || S.ph >= c.start + c.length)) setPlayhead(c.start);
     else if (c.start != null) setPlayhead(S.ph);              // same spot, but the viewer now shows this clip
+    else if (c.kind === 'video') {                            // no timecode yet: still show ITS picture, at its clock time if it has one
+      if (c.approx_start != null) setPlayhead(c.approx_start);
+      else { clearTimeout(frameT); showFrame(S.ph != null ? S.ph : 0); }
+    }
     if (wasClosed || !document.querySelector(`tr[data-id="${id}"]`)) renderTable(); else markRows();
     renderInspector(); slateIdle(); draw();
     showRow(id, true);
