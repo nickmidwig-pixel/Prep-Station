@@ -635,7 +635,10 @@
   let frameSeq = 0;
   async function showFrame(s) {
     const seq = ++frameSeq;
+    // a RAW frame can take a few seconds to decode: say so instead of sitting on the old picture
+    const slow = setTimeout(() => { if (seq === frameSeq) { $('frame').classList.remove('on'); $('pvTag').hidden = true; $('frameNote').textContent = 'Reading the picture…'; } }, 500);
     const r = await call('frame', Math.round(s), S.sel);
+    clearTimeout(slow);
     if (seq !== frameSeq) return;                           // a newer request is on its way: this picture is stale
     const img = $('frame');
     if (r && r.ok) { img.src = r.img; img.classList.add('on'); $('frameNote').textContent = r.label || ''; img.classList.toggle('pv', !!r.preview); $('pvTag').hidden = !r.preview; }
@@ -1281,12 +1284,17 @@
     else if (rr.bottom > br.bottom) to = top + h - view;
     else return;
     to = Math.max(0, Math.min(box.scrollHeight - view, Math.round(to)));
+    // The Mac's WebKit scrolls this list on its own thread; a scroll set from here can leave that thread at the old
+    // place with nothing painted (rows there, list blank, next wheel tick jumps to the top). Taking the box out of
+    // scrolling for the move, then putting it back, makes both sides agree.
+    box.style.overflowY = 'hidden';
+    void box.offsetHeight;
     box.scrollTop = to;
-    // WebKit can leave a long scrolled table unpainted until the next wheel event: nudge a repaint
+    void box.offsetHeight;
     requestAnimationFrame(() => {
+      box.style.overflowY = '';
+      void box.offsetHeight;
       if (box.scrollTop !== to) box.scrollTop = to;
-      box.style.transform = 'translateZ(0)';
-      requestAnimationFrame(() => { box.style.transform = ''; });
     });
   }
 

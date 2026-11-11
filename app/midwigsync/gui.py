@@ -579,11 +579,16 @@ class Api:
         key = (src, round(off, 1))
         cache = self.__dict__.setdefault('_frames', {})
         if key not in cache:
-            ff = __import__('midwigsync.convert', fromlist=['x']).ffmpeg_exe()
-            r = subprocess.run([ff, '-v', 'error', '-ss', f'{off:.3f}', '-i', src, '-frames:v', '1',
-                                '-vf', 'scale=480:-2', '-q:v', '5', '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1'],
-                               capture_output=True)
-            data = r.stdout if r.returncode == 0 and r.stdout else None
+            data = None
+            if 'raw' not in (c.get('codec') or ''):      # the ffmpeg program can't read ProRes RAW: don't wait on it
+                ff = __import__('midwigsync.convert', fromlist=['x']).ffmpeg_exe()
+                try:
+                    r = subprocess.run([ff, '-v', 'error', '-ss', f'{off:.3f}', '-i', src, '-frames:v', '1',
+                                        '-vf', 'scale=480:-2', '-q:v', '5', '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1'],
+                                       capture_output=True, timeout=20)
+                    data = r.stdout if r.returncode == 0 and r.stdout else None
+                except (OSError, subprocess.SubprocessError):
+                    data = None
             if not data:               # ProRes RAW (iPhone, Blackmagic app) and the like
                 data = self._any_frame(c, off, 480)
             if not data:
@@ -662,7 +667,7 @@ class Api:
             st = os.stat(c['path'])
         except OSError:
             return None
-        key = hashlib.sha1(f"{c['path']}|{st.st_size}|{st.st_mtime_ns}|{width}".encode()).hexdigest()
+        key = hashlib.sha1(f"{c['path']}|{st.st_size}|{st.st_mtime_ns}|{width}|v2".encode()).hexdigest()   # v2: RAW levels
         d = os.path.join(CACHE, 'thumbs')
         fp = os.path.join(d, key + '.jpg')
         data = None

@@ -464,3 +464,10 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 - Still missing for RED: loading an .R3D at all (timecode, rate, sound) needs an R3D header reader or REDline --printMeta; needs a real clip.
 - BRAW has no maker CLI. Options: Blackmagic's SDK (C++ glue, needs a Mac build) or a still through Resolve.
 - Timecode at 24.000 vs 23.976: a label converts at the clip's own rate, so the same label sits 0.1% of the time-of-day apart (about 32 s at 9 am, growing 3.6 s an hour). The waveform check is what lines them up.
+
+## 2.5.10 / 2.5.11 — iPhone ProRes RAW pictures, seen on Nick's Mac
+- PyAV (bundled, ffmpeg 8 libraries) decodes ProRes RAW; the ffmpeg program doesn't. avframe.py is tried before macOS. CONFIRMED on the Mac in 2.5.10: thumbnails and the viewer show the iPhone clips.
+- 2.5.10's pictures were washed out and took 10–30 s with no sign of life. 2.5.11: per-channel black/white points + a gamma that puts the median at middle grey (_levels); ffmpeg is skipped for *raw codecs; the viewer says "Reading the picture…" after half a second; thumbnail cache key bumped (v2).
+- The blank clip list after a timeline click: rows are in the DOM at the right place but WebKit's scrolling thread is left at the old offset (next wheel tick jumps to the top). 2.5.11 takes the box out of scrolling (overflow hidden) for the programmatic move. NOT yet confirmed on the Mac.
+- Picture misses go to ~/Library/Logs/Prep Station/picture.log.
+- A second copy unzipped beside the first becomes "Prep Station 2.app" (same bundle id).

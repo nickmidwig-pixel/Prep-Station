@@ -27,16 +27,25 @@ def frame_jpeg(path, sec=0.0, width=480):
             if got is None:
                 return None
             h = max(2, int(round(got.height * width / max(1, got.width) / 2)) * 2)
-            raw = got.format.name.startswith('bayer')
+            raw = got.format.name.startswith('bayer') or 'raw' in (v.codec_context.name or '')
             rgb = got.reformat(width=width, height=h, format='rgb48le' if raw else 'rgb24').to_ndarray()
-            if raw:                                   # sensor data is linear and dark: lift it into a viewable picture
-                x = rgb.astype(np.float32)
-                hi = float(np.percentile(x, 99.5)) or 1.0
-                x = np.clip(x / hi, 0, 1) ** (1 / 2.2)
-                rgb = (x * 255 + 0.5).astype(np.uint8)
+            if raw:
+                rgb = _levels(rgb)
             return _jpeg(rgb)
     except Exception:  # noqa: BLE001
         return None
+
+
+def _levels(x16):
+    """Sensor data (linear or log, no white balance, raised blacks) into a picture you can judge a shot by:
+    per-channel black and white points, then a gamma that puts the middle of the picture at middle grey."""
+    x = x16.astype(np.float32)
+    lo = np.percentile(x, 1.0, axis=(0, 1))
+    hi = np.percentile(x, 99.5, axis=(0, 1))
+    x = np.clip((x - lo) / np.maximum(hi - lo, 1.0), 0, 1)
+    med = float(np.clip(np.median(x), 0.02, 0.98))
+    g = float(np.clip(np.log(0.42) / np.log(med), 0.4, 2.4))      # <1 lifts a dark (linear) frame, >1 pulls down a washed one
+    return (x ** g * 255 + 0.5).astype(np.uint8)
 
 
 def _jpeg(rgb):
