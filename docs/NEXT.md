@@ -427,3 +427,17 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 - Summary line shows whole notes only (short forms: 20:17 – 02:32 · 25 slow-mo), never "slow mo…".
 - Sync to: "Change…" is a real button; clicking a camera's name in the timeline offers "Sync everything to B CAM's mic".
 - RULE for me: anything drawn by the browser's defaults (glyph characters, range inputs, selects, scrollbars) will differ on the Mac. Draw it explicitly, and check the real window on Nick's Mac after a build when he allows it.
+
+## 2.5.6 — from looking at 2.5.5 on Nick's real window (he opened it for me)
+- 2.5.5's fixes hold on the Mac: slider, undo/redo, summary, labels, "9 sound files".
+- BUG: clicking a clip in the timeline left the clip list blank until the next scroll (WebKit + scrollIntoView). The list now moves its own scrollTop (showRow).
+- BUG: clicking a sliver could select one clip and show another's picture (near-miss hit, playhead left outside the clip, and frame() only let the selected clip win within 2 s). Hit-test prefers the clip really under the cursor; the playhead snaps into the clicked clip; the selected clip always wins; stale pictures are dropped.
+- Settings: "Stop so I confirm the fixes" sits under the timecode check, not under Auto-Align.
+- From watching a real 20250208 run on the Mac (11/11, 1 AM):
+  - While running, the step that is working is lit and pulses, with a live line under it ("Getting the sound ready · 20250208_202339_03_LAV_003.WAV"); the bottom shows the step's name over the bar. Before, the active step was a hidden one (confirm switched off), so nothing was lit and the bar showed a bare file name. A switched-off step hands "active" to the next step that runs.
+  - The faint text showing through above the Stop button is gone (the fade gradient was removed).
+  - The big red clock is the playhead, always (with the camera · clip it's on), like an editor. It used to show the selected clip's start ("B_0001C029H250209_ starts") while the viewer showed the playhead: two different numbers.
+  - Clip list Start: a moved clip shows its new timecode, with "was 20:32:26:11" underneath. Before, the struck-out old one pushed the new one to "2…".
+  - Status chip "Moved +1:57.32" (was "Fixed +117.320 s"); every shift reads +7.47 s or +1:57.32.
+  - Inspector: one "Timecode … from the camera" row when nothing changed; "In the file / In the edit" when it moved. No "(container)".
+  - Slow-motion reason says the length once and matches the Length column (both round down): "Shot at about 120 fps, plays at 23.976. The camera took 2:52 to record it but it plays 14:14; the next clip on this card started 2:59 later."

@@ -235,6 +235,7 @@
         <div class="sub" id="doneSub"></div>
       </div>
       <div class="progress" id="progress" hidden>
+        <b id="progStep"></b>
         <div class="bar"><div id="progFill"></div></div>
         <span id="progText"></span>
       </div>
@@ -258,11 +259,11 @@
   <header><h2 id="setTitle">Settings</h2><button class="link" data-close>Done</button></header>
   <div class="sheet-body">
     <fieldset>
-      <legend>Synchronisation</legend>
+      <legend>Sync</legend>
       <label class="opt"><input type="checkbox" data-set="waveform_check"><span><b>Check timecode by waveform</b>Every camera and recorder compared across the day. Catches missed jams, files with no timecode, and timecode that looks right but isn’t in sync.</span></label>
+      <label class="opt sub"><input type="checkbox" data-set="review_tc"><span><b>Stop so I confirm the fixes</b>Lists every timecode fix before anything is written. Off: fixes are written straight away and listed in the report.</span></label>
       <label class="opt"><input type="checkbox" data-set="aap_mode" data-on="resolve" data-off="skip"><span><b>Auto-Align Post in Resolve</b><i id="aapDetail">Aligns to the best onboard camera mic, picked by listening. Never to a mix.</i></span></label>
       <label class="opt sub"><input type="checkbox" data-set="aap_auto_press"><span><b>Press Render in Auto-Align for me</b>Uses Accessibility to click Render in the panel. Off: you press it.</span></label>
-      <label class="opt sub"><input type="checkbox" data-set="review_tc"><span><b>Stop so I confirm the fixes</b>Lists every timecode fix before anything is written. Off: fixes are written straight away and listed in the report.</span></label>
       <p class="fixed-note">Fixed files are new copies with the right timecode (same format, same track names). Originals never change.</p>
     </fieldset>
     <fieldset>

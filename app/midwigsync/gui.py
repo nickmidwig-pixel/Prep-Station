@@ -535,9 +535,8 @@ class Api:
         c = self.p.by_id(int(cid)) if cid is not None else None
         if c and c['kind'] == 'video' and c['start'] is not None and c['include'] and c not in cams:
             # the selected clip always wins, even when the playhead sits just outside it: show its first frame
-            if c['start'] - 2 * TC.SR <= at < c['start'] + c['length'] + 2 * TC.SR:
-                cams.insert(0, c)
-                at = min(max(at, c['start']), c['start'] + c['length'] - 1)
+            cams.insert(0, c)
+            at = min(max(at, c['start']), c['start'] + c['length'] - 1)
         if not (c and c in cams):
             lanes = {l['key']: l for l in self.p.lanes()}
             cams.sort(key=lambda x: (lanes.get(x.get('lane'), {}).get('letter') or 'Z', x['name']))

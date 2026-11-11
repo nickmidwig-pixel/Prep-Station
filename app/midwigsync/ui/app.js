@@ -448,7 +448,13 @@
     const s = sOf(mx, L);
     const tol = (S.view[1] - S.view[0]) / (L.W - LABEL_W) * 3;
     if (row.type === 'divider') return null;
-    return rowClips(row).find((c) => c.start != null && s >= c.start - tol && s <= c.start + c.length + tol) || null;
+    // the clip really under the cursor first (the last drawn, i.e. the one on top, when two overlap); a near miss second
+    const cs = rowClips(row).filter((c) => c.start != null);
+    const inside = cs.filter((c) => s >= c.start && s < c.start + c.length);
+    if (inside.length) return inside[inside.length - 1];
+    const near = cs.filter((c) => s >= c.start - tol && s <= c.start + c.length + tol);
+    near.sort((x, y) => Math.min(Math.abs(s - x.start), Math.abs(s - x.start - x.length)) - Math.min(Math.abs(s - y.start), Math.abs(s - y.start - y.length)));
+    return near[0] || null;
   }
 
   cv.addEventListener('mousemove', (e) => {
@@ -497,10 +503,11 @@
     if (S.band && S.band.moved) { S.band = null; return; }   // a drag-select just ended; not a click
     S.band = null;
     const c = my > RULER_H ? hit(mx, my) : null;
-    if (!(e.shiftKey || e.metaKey || e.ctrlKey) || !c) setPlayhead(sOf(mx, L));
+    // a click on a clip never leaves the playhead outside that clip (a near miss on a sliver snaps in)
+    if (!(e.shiftKey || e.metaKey || e.ctrlKey) || !c) setPlayhead(c ? Math.max(c.start, Math.min(c.start + c.length - 1, sOf(mx, L))) : sOf(mx, L));
     if (my > RULER_H) { if (c) pick(c.id, howFrom(e)); else if (!(e.metaKey || e.ctrlKey || e.shiftKey)) pick(null); }
     renderTable(); renderInspector(); draw();
-    if (c) { const row = document.querySelector(`tr[data-id="${c.id}"]`); if (row) row.scrollIntoView({ block: 'nearest' }); }
+    if (c) showRow(c.id);
   });
   // Drag on an empty part of the timeline to draw a box; every clip it touches is selected (⇧ / ⌘ add to what
   // was selected). Shift-click selects a range, ⌘-click toggles, as before.
@@ -595,12 +602,16 @@
     const b = bounds(); if (b) s = Math.max(b[0], Math.min(b[1], s));
     S.ph = s;
     $('phTc').textContent = samplesToTc(s);
+    if (hoverX == null) slateIdle();
     if (S.playing || pending) stopPlay();
     clearTimeout(frameT);
     frameT = setTimeout(() => showFrame(s), 120);
   }
+  let frameSeq = 0;
   async function showFrame(s) {
+    const seq = ++frameSeq;
     const r = await call('frame', Math.round(s), S.sel);
+    if (seq !== frameSeq) return;                           // a newer request is on its way: this picture is stale
     const img = $('frame');
     if (r && r.ok) { img.src = r.img; img.classList.add('on'); $('frameNote').textContent = r.label || ''; img.classList.toggle('pv', !!r.preview); $('pvTag').hidden = !r.preview; }
     else { img.classList.remove('on'); $('pvTag').hidden = true; $('frameNote').textContent = (r && r.why) || 'No picture here'; }
@@ -755,9 +766,10 @@
 
   function slateIdle() {
     const sp = S.project && span();
-    if (S.sel) {
-      const c = S.project.clips.find((x) => x.id === S.sel);
-      if (c && c.start != null) return setSlate(c.start, `${c.name.slice(0, 18)} starts`);
+    if (S.ph != null && sp) {
+      const c = S.sel && S.project.clips.find((x) => x.id === S.sel);
+      const ln = c && lanesAll().find((l) => l.key === c.lane);
+      return setSlate(S.ph, c ? `${ln ? ln.label + ' · ' : ''}${c.name}` : 'playhead');
     }
     setSlate(sp ? sp[0] : null, sp ? 'day starts' : 'no clips yet');
   }
@@ -780,7 +792,7 @@
     }
     if (f.has('sync_failed')) out.push(['bad', 'Not placed']);
     if (f.has('sync_manual')) out.push(['man', c.manual && c.manual.how === 'waveform' ? 'Picked by you' : 'Set by you']);
-    else if (f.has('sync_corrected')) out.push(['fix', `Fixed ${((c.start - c.orig_start) / SR >= 0 ? '+' : '−')}${Math.abs((c.start - c.orig_start) / SR).toFixed(3)} s`]);
+    else if (f.has('sync_corrected')) out.push(['fix', `Moved ${signedSec((c.start - c.orig_start) / SR)}`]);
     else if (f.has('sync_found')) out.push(['fix', 'Placed by waveform']);
     else if (f.has('no_tc')) out.push(['fix', 'No timecode']);
     if (f.has('zero_tc') && !moved(c)) out.push(['fix', 'TC 00:00']);
@@ -852,7 +864,7 @@
       for (const c of cl) {
         const st = status(c);
         const cls = [c.include ? '' : 'off', S.picked.has(c.id) ? 'sel' : '', S.sel === c.id ? 'primary' : ''].join(' ');
-        const tc = c.tc ? (st.old && st.old !== c.tc ? `<span class="old">${st.old}</span>${c.tc}` : c.tc) : '—';
+        const tc = c.tc ? (st.old && st.old !== c.tc ? `<span class="tcnew">${c.tc}</span><span class="was">was ${st.old}</span>` : c.tc) : '—';
         const ch = chips(c);
         const chipHtml = ch.map(([kk, t]) => `<span class="chip s ${kk}">${esc(t)}</span>`).join('');
         const sub2 = `<span class="sub2">${esc(facts(c, ln))}</span>`;
@@ -971,7 +983,12 @@
     el.textContent = m && m.text ? m.text : '';
     el.className = 'insp-msg' + (m && !m.ok ? ' err' : '');
   }
-  function signedSec(s) { return `${s >= 0 ? '+' : '−'}${Math.abs(s).toFixed(3)} s`; }
+  function signedSec(s) {
+    const a = Math.abs(s), sg = s >= 0 ? '+' : '−';
+    if (a < 60) return `${sg}${a.toFixed(2)} s`;
+    const m = Math.floor(a / 60), r = a - 60 * m;
+    return `${sg}${m}:${r.toFixed(2).padStart(5, '0')}`;
+  }
   function renderInspector() {
     const many = S.picked.size > 1;
     const c = many ? null : selClip();
@@ -1000,8 +1017,14 @@
     const who = c.kind === 'video' ? [lnk.label, c.roll, c.camera] : [lnk.label || c.roll];
     const sub = [...who, c.kind === 'video' ? (c.codec || '') : `${c.channels} ch`, rate, c.dur].filter(Boolean);
     $('iSub').innerHTML = sub.map((x, i) => (x === rate && rate ? `<b class="rate${c.slowmo ? ' slow' : ''}">${esc(x)}</b>` : esc(x))).join(' · ');
-    const src = c.tc_source ? ` <span class="why">(${esc(c.tc_source)})</span>` : '';
+    const SRC = { bext: 'from the sound file', tmcd: 'from the camera', container: 'from the camera', ixml: 'from the sound file' };
+    const srcTxt = c.tc_source ? (SRC[String(c.tc_source).toLowerCase()] || (/^LTC/.test(c.tc_source) ? 'read from the timecode audio' : '')) : '';
+    const src = srcTxt ? ` <span class="why">${esc(srcTxt)}</span>` : '';
     $('iFileTc').innerHTML = c.orig_tc ? `${c.orig_tc}${src}` : '<span class="why">No timecode in the file</span>';
+    const changed = c.start != null && c.orig_start != null && c.start !== c.orig_start;
+    $('iFileTc').previousElementSibling.textContent = changed || !c.orig_tc ? 'In the file' : 'Timecode';
+    $('iNowTc').hidden = $('iNowTc').previousElementSibling.hidden = !(changed || !c.orig_tc);
+    $('iNowTc').previousElementSibling.textContent = 'In the edit';
     let now = c.tc || '—';
     if (c.start != null && c.orig_start != null && c.start !== c.orig_start) now += ` <span class="fix">${signedSec((c.start - c.orig_start) / SR)}</span>`;
     const st = status(c);
@@ -1189,7 +1212,27 @@
     if (c.start != null && (S.ph == null || S.ph < c.start || S.ph >= c.start + c.length)) setPlayhead(c.start);
     else if (c.start != null) setPlayhead(S.ph);              // same spot, but the viewer now shows this clip
     renderTable(); renderInspector(); slateIdle(); draw();
-    const row = document.querySelector(`tr[data-id="${id}"]`); if (row) row.scrollIntoView({ block: 'center' });
+    showRow(id, true);
+  }
+  // Bring a clip's row into view by moving the list's own scroll position (scrollIntoView left the list blank
+  // in the Mac app's WebKit until the next scroll). Does nothing when the row is already fully visible.
+  function showRow(id, center) {
+    const row = document.querySelector(`tr[data-id="${id}"]`);
+    if (!row) return;
+    let box = row.parentElement;
+    while (box && box !== document.body && !(/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight + 1)) box = box.parentElement;
+    if (!box || box === document.body) return;
+    const head = box.querySelector('thead'); const hh = head ? head.offsetHeight : 0;
+    const br = box.getBoundingClientRect(), rr = row.getBoundingClientRect();
+    const top = rr.top - br.top + box.scrollTop, h = rr.height, view = box.clientHeight;
+    let to = box.scrollTop;
+    if (center) to = top - hh - (view - hh - h) / 2;
+    else if (rr.top < br.top + hh) to = top - hh;
+    else if (rr.bottom > br.bottom) to = top + h - view;
+    else return;
+    to = Math.max(0, Math.min(box.scrollHeight - view, Math.round(to)));
+    box.scrollTop = to;
+    requestAnimationFrame(() => { if (box.scrollTop !== to) box.scrollTop = to; });
   }
 
   // Sync to (2.0): one sentence saying what the day syncs to, and a Change link with only the real choices:
@@ -1437,13 +1480,30 @@
     const target = STEP_MAP[name] || name;
     let seen = false;
     const lis = [...document.querySelectorAll('#steps li')];
-    const idx = lis.findIndex((li) => li.dataset.step === target);
+    let idx = lis.findIndex((li) => li.dataset.step === target);
     if (idx < 0) return;
+    while (idx < lis.length - 1 && (lis[idx].classList.contains('off') || lis[idx].hidden || lis[idx].offsetParent === null)) idx++;
     lis.forEach((li, i) => {
-      li.classList.toggle('done', i < idx);
+      li.classList.toggle('done', i < idx && !li.classList.contains('off'));
       li.classList.toggle('active', i === idx);
+      const nw = li.querySelector('.now'); if (nw && i !== idx) nw.remove();
     });
+    const t = lis[idx].querySelector('.t');
+    $('progStep').textContent = t ? t.firstChild.textContent.trim() : name;
+    const PHRASE = { 'Writing corrected sound': 'Getting the sound ready', 'Choosing the alignment track': 'Choosing the alignment track',
+      'Building aligned ISOs': 'Building the aligned ISOs', 'Checking alignment': 'Checking the alignment' };
+    S.phrase = name === target && !PHRASE[name] ? '' : (PHRASE[name] || name);
+    nowLine(S.phrase);
     void seen;
+  }
+  // the live line under the running step: what it is doing right now
+  function nowLine(msg) {
+    const li = document.querySelector('#steps li.active');
+    if (!li) return;
+    let nw = li.querySelector('.now');
+    if (!nw) { nw = document.createElement('span'); nw.className = 'now'; li.querySelector('.t').after(nw); }
+    nw.textContent = msg || '';
+    nw.hidden = !msg;
   }
   function log(line) {
     const el = $('log');
@@ -1465,8 +1525,8 @@
       renderPanel();
     },
     log: (line) => log(line),
-    step: (name) => { markStep(name); $('progText').textContent = name; $('progFill').style.width = '0'; },
-    progress: (d) => { $('progFill').style.width = `${Math.min(100, 100 * (d.frac || 0)).toFixed(1)}%`; if (d.msg) $('progText').textContent = d.msg; },
+    step: (name) => { markStep(name); $('progFill').style.width = '0'; },
+    progress: (d) => { $('progFill').style.width = `${Math.min(100, 100 * (d.frac || 0)).toFixed(1)}%`; if (d.msg) { const m = S.phrase && /^\S+\.\w{2,4}$/.test(d.msg) ? `${S.phrase} · ${d.msg}` : d.msg; $('progText').textContent = m; nowLine(m); } },
     aap_wait: (d) => {
       $('aapCard').hidden = false;
       $('aapDir').textContent = d.render_dir.split('/').slice(-2).join('/');
@@ -1602,7 +1662,7 @@
     applyState(await call('clip_slowmo', c.id, true));
     askAdvance(c.id);
   });
-  window.MS = { event: (kind, data) => { const h = handlers[kind]; if (h) h(data); }, rows: () => laneRows().map((r) => ({ type: r.type, key: r.key, slow: !!r.slow })), view: () => ({ view: S.view, bounds: bounds() }) };
+  window.MS = { state: () => ({ sel: S.sel, ph: S.ph, project: S.project }), event: (kind, data) => { const h = handlers[kind]; if (h) h(data); }, rows: () => laneRows().map((r) => ({ type: r.type, key: r.key, slow: !!r.slow })), view: () => ({ view: S.view, bounds: bounds() }) };
 
   // ------------------------------------------------------------------ sheets, toast, menus
   let toastT = null;

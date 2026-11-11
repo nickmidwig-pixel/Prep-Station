@@ -180,7 +180,7 @@ def _shot_rate(play_fps, speed):
 
 
 def _mmss(sec):
-    sec = int(round(sec))
+    sec = int(sec)                      # floor, the same as the clip list's Length column
     return f'{sec // 60}:{sec % 60:02d}' if sec >= 60 else f'{sec} s'
 
 
@@ -846,15 +846,15 @@ class Project:
                 parts = []
                 for t, v in tells:
                     if t == 'clock':
-                        parts.append(f'the camera took {_mmss(v)} to record a clip that plays {_mmss(L)}')
+                        parts.append(f'the camera took {_mmss(v)} to record it but it plays {_mmss(L)}')
                     else:
-                        parts.append(f'the next clip on this card started {_mmss(v)} after this one, '
-                                     f'yet this one plays {_mmss(L)}')
+                        parts.append(f'the next clip on this card started {_mmss(v)} later'
+                                     + ('' if any(tt == 'clock' for tt, _ in tells) else f', but this one plays {_mmss(L)}'))
                 c['slowmo'] = dict(kind='clock' if tells[0][0] == 'clock' else 'likely', speed=round(speed, 3),
                                    shot=shot, tells=[t for t, _ in tells],
                                    why=(f"Shot at about {shot} fps" if not shot.endswith('+') else f"Shot at {shot[:-1]} fps or faster")
-                                       + f", plays at {TC.rate_label(c.get('fps') or self.fps)}: "
-                                       + '; '.join(parts) + '.')
+                                       + f", plays at {TC.rate_label(c.get('fps') or self.fps)}. "
+                                       + '; '.join(parts)[:1].upper() + '; '.join(parts)[1:] + '.')
         # how sure: the file's own rate / capture rate / your word are certain; the clock and timecode tells are
         # strong but inferred, so the window asks you to confirm them once
         for c in self.clips:

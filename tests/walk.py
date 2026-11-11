@@ -33,7 +33,7 @@ def walk(size):
 
     with sync_playwright() as pw:
         b = pw.chromium.launch()
-        pg = b.new_page(viewport={'width': W, 'height': H})
+        pg = b.new_page(viewport={'width': W, 'height': H}, device_scale_factor=2)
         errs = []
         pg.on('pageerror', lambda e: errs.append(str(e)))
         pg.on('console', lambda m: errs.append('console: ' + m.text) if m.type == 'error' else None)
@@ -102,7 +102,9 @@ def walk(size):
             if api.job and getattr(api.job, 'user_decide', None) is not None and 'review' not in seen and \
                     pg.evaluate("!!document.querySelector('#review:not([hidden]), .review:not([hidden])')"):
                 seen.add('review'); shot('confirm_fixes')
-                pg.click('#revWrite')
+                pg.click('#revWrite'); pump(1200); shot('running_after_confirm')
+            if 'step' not in seen and pg.evaluate("!!document.querySelector('#steps li.active .now:not([hidden])')"):
+                seen.add('step'); shot('running_step')
             if 'aap' not in seen and pg.evaluate("!document.getElementById('aapCard').hidden"):
                 seen.add('aap'); pump(500); shot('autoalign_card')
             if not (api.job_thread and api.job_thread.is_alive()):
