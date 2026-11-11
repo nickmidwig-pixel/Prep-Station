@@ -52,6 +52,9 @@ def _data_uri(data):
     return f'data:{mime};base64,' + base64.b64encode(data).decode()
 
 
+from .brand import LOGS  # noqa: E402
+
+
 class Api:
     def __init__(self):
         self.window = None
@@ -559,7 +562,7 @@ class Api:
             key = (src, round(off, 1))
             cache = self.__dict__.setdefault('_frames', {})
             if key not in cache:
-                data = self._raw_frame(c, off, 608)    # the real frame: macOS, then the maker's own tool
+                data = self._any_frame(c, off, 608)    # the real frame: video library, macOS, then the maker's own tool
                 if data:
                     if len(cache) > 200:
                         cache.clear()
@@ -581,8 +584,8 @@ class Api:
                                 '-vf', 'scale=480:-2', '-q:v', '5', '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1'],
                                capture_output=True)
             data = r.stdout if r.returncode == 0 and r.stdout else None
-            if not data:               # ProRes RAW (iPhone, Blackmagic app) and the like: let macOS decode it
-                data = __import__('midwigsync.macframe', fromlist=['x']).frame_jpeg(src, off, 480)
+            if not data:               # ProRes RAW (iPhone, Blackmagic app) and the like
+                data = self._any_frame(c, off, 480)
             if not data:
                 return dict(ok=False, why=f"{c['name']}: this Mac can't show this file's picture here "
                                           f"({c.get('codec') or 'unknown format'}). Its sound still plays.")
@@ -590,6 +593,32 @@ class Api:
                 cache.clear()
             cache[key] = _data_uri(data)
         return dict(ok=True, img=cache[key], label=who)
+
+    def _any_frame(self, c, off, width):
+        """Picture bytes of a clip's frame, by whatever can decode it, in order: the app's video library (PyAV: has
+        ProRes RAW), macOS, the maker's tool. Every miss is written to Logs/Prep Station/picture.log."""
+        src, tried = c['path'], []
+        if src.lower().endswith('.crm'):
+            return None                 # Canon RAW: only Canon's app decodes it; the stored preview is used instead
+        for name, fn in (('video library', lambda: __import__('midwigsync.avframe', fromlist=['x']).frame_jpeg(src, off, width)),
+                         ('macOS / maker tool', lambda: self._raw_frame(c, off, width))):
+            try:
+                data = fn()
+            except Exception as e:  # noqa: BLE001
+                data = None
+                tried.append(f'{name}: {type(e).__name__}: {e}')
+            if data:
+                return data
+            tried.append(f'{name}: nothing') if not tried or not tried[-1].startswith(name) else None
+        try:
+            import time
+            os.makedirs(LOGS, exist_ok=True)
+            with open(os.path.join(LOGS, 'picture.log'), 'a') as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {os.path.basename(src)} codec={c.get('codec')} "
+                        f"at={off:.2f}s -> no picture ({'; '.join(tried)})\n")
+        except OSError:
+            pass
+        return None
 
     def _raw_frame(self, c, off, width):
         """JPEG/PNG bytes of a RAW clip's frame `off` seconds in, or None: macOS first (ProRes RAW natively; Blackmagic
@@ -645,12 +674,11 @@ class Api:
             if src:
                 data = self._jpeg_scaled(src, width)
             elif c.get('raw_picture'):
-                data = self._raw_frame(c, min(1.0, c['length'] / TC.SR / 2), width)
+                data = self._any_frame(c, min(1.0, c['length'] / TC.SR / 2), width)
             elif not c.get('raw_picture'):
                 data = self._jpeg_scaled(c['path'], width, seek=min(1.0, c['length'] / TC.SR / 2))
                 if not data:
-                    data = __import__('midwigsync.macframe', fromlist=['x']).frame_jpeg(
-                        c['path'], min(1.0, c['length'] / TC.SR / 2), width)
+                    data = self._any_frame(c, min(1.0, c['length'] / TC.SR / 2), width)
             if data:
                 os.makedirs(d, exist_ok=True)
                 with open(fp, 'wb') as f:
