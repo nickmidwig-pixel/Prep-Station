@@ -350,11 +350,15 @@
         ctx.font = '400 12px Barlow, sans-serif'; ctx.fillStyle = COL.muted;
         const subMax = (row.slow ? LABEL_W - 10 : MS_X - 8) - x0l;
         if (unplaced) {                               // files with no timecode: said here, beside the name, not over the clips
-          const note = rowClips(row).some((c) => c.start == null && c.approx_start != null) ? `${unplaced} no timecode · by its clock` : `${unplaced} no timecode`;
+          // the note never runs under the M / S buttons: the longest wording that fits is used, whole
+          const byClock = rowClips(row).some((c) => c.start == null && c.approx_start != null);
+          const tries = (byClock ? [`${unplaced} no timecode · by clock`, `${unplaced} by clock`] : [])
+            .concat([`${unplaced} no timecode`, `${unplaced} no TC`]);
+          const note = tries.find((t) => ctx.measureText(t).width <= subMax) || '';
           const nw = ctx.measureText(note).width;
-          const st = fitText(sub, subMax - nw - 10);
+          const st = note ? fitText(sub, subMax - nw - 10) : fitText(sub, subMax);
           if (st) ctx.fillText(st, x0l, y + rh / 2 + 7);
-          ctx.fillStyle = COL.fix; ctx.fillText(note, x0l + (st ? ctx.measureText(st).width + 8 : 0), y + rh / 2 + 7);
+          if (note) { ctx.fillStyle = COL.fix; ctx.fillText(note, x0l + (st ? ctx.measureText(st).width + 8 : 0), y + rh / 2 + 7); }
         } else ctx.fillText(fitText(sub, subMax), x0l, y + rh / 2 + 7);
       } else {
         ctx.fillText(name, x0l, y + rh / 2 - 1);

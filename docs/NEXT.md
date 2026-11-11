@@ -471,3 +471,6 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 - The blank clip list after a timeline click: rows are in the DOM at the right place but WebKit's scrolling thread is left at the old offset (next wheel tick jumps to the top). 2.5.11 takes the box out of scrolling (overflow hidden) for the programmatic move. NOT yet confirmed on the Mac.
 - Picture misses go to ~/Library/Logs/Prep Station/picture.log.
 - A second copy unzipped beside the first becomes "Prep Station 2.app" (same bundle id).
+
+## 2.5.12
+- Lane note ("28 no timecode · by its clock") ran under the M / S buttons. It now uses the longest wording that fits whole ("N no timecode · by clock" → "N by clock" → "N no timecode" → "N no TC"), and the model name gives way to it. RULE: every canvas string gets a measured max width; nothing is drawn unmeasured.
