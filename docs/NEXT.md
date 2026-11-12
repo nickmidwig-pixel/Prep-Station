@@ -514,3 +514,7 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 - No read is ever given up on (Nick: "I don't want clips to be left behind"): the 60 s limit from 2.5.19 is gone. A slow clip is waited for and the window shows "Still reading <clip> · m:ss" (`media.patiently`). "Partly read" flag removed.
 - 20261110 timings on 2.5.18 (from its log): alignment-track pick 41 min (B CAM iPhone 40 of it), timecode check 34 min (about 22 in silent fine sync), Auto-Align 7, ISOs 3. Both slow spots were top-of-file reads, fixed in 2.5.19/2.5.20; not yet re-measured on the real day.
 - Timecode-check envelopes are already cached per file and read in parallel; Nick chose to keep listening to every clip (no spot-check mode).
+
+## 2.5.22
+- Timing log: `~/Library/Logs/Prep Station/timing.log` gets a line for every step, every progress message, and every sound read (`refpick.env/read`, `wavesync.envelope/read_abs`) with the clip name and seconds. Seconds-since-launch in the first column, so a run can be measured afterwards. For the timed rerun of 20261110.
+- Rules from Nick (2026-11-12): iPhone clips with no sound match go by the phone's clock, labelled as normal; no frame-rate conversion under 60 min; no drift. Analysis of 20261110 clip by clip pending the F002 folder being connected.

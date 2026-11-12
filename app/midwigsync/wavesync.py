@@ -73,6 +73,7 @@ def feature(energy):
     return (hp / s).astype(np.float32) if s > 1e-6 else np.zeros(len(hp), np.float32)
 
 
+@media.timed('wavesync.envelope')
 def item_envelope(item, channel=0, max_seconds=None, cache_dir=None, sink=None):
     """Envelope (feature array at ENV_RATE) of an item's audio from the file start, plus the audio's
     start offset (48k samples) relative to the clip start. `sink(block, sr)` receives raw audio."""
@@ -186,6 +187,7 @@ def _bandpass(x, lo=150, hi=5000, sr=TC.SR):
     return np.fft.irfft(X, n)
 
 
+@media.timed('wavesync.read_abs')
 def read_abs(item, start_abs, count, channel=0, max_decode_s=240):
     """Audio of item at absolute day time [start_abs, start_abs+count), 48k mono float."""
     rel = start_abs - item['start']

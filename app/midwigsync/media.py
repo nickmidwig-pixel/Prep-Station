@@ -1,5 +1,7 @@
 """Probe camera and audio files for timecode / format, and stream their audio."""
 import os
+import threading
+import time
 import re
 import struct
 import glob
@@ -942,6 +944,38 @@ def audio_lead(item, channel=0):
     except Exception:  # noqa: BLE001
         pass
     return 0
+
+
+_T0 = time.time()
+_TLOCK = threading.Lock()
+
+
+def timing(what, **kw):
+    """One line in Logs/Prep Station/timing.log: seconds since launch, then what happened and any numbers.
+    This is how a run is measured afterwards (which step, which clip, which read took the time)."""
+    try:
+        from .brand import LOGS
+        os.makedirs(LOGS, exist_ok=True)
+        extra = ' '.join(f'{k}={v:.3f}' if isinstance(v, float) else f'{k}={v}' for k, v in kw.items())
+        with _TLOCK, open(os.path.join(LOGS, 'timing.log'), 'a') as f:
+            f.write(f'{time.time() - _T0:10.3f}  {what} {extra}\n')
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def timed(what):
+    """Decorator: log how long each call took, with the clip name when the first argument is a clip."""
+    def wrap(fn):
+        def inner(*a, **kw):
+            t = time.time()
+            try:
+                return fn(*a, **kw)
+            finally:
+                name = a[0].get('name') if a and isinstance(a[0], dict) else ''
+                timing(what, clip=name, secs=time.time() - t)
+        inner.__name__ = fn.__name__
+        return inner
+    return wrap
 
 
 def patiently(fn, args=(), on_wait=None, every=5.0):

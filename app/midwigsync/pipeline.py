@@ -196,6 +196,7 @@ class Job:
         self.emit('log', line)
 
     def progress(self, i, n, msg=''):
+        media.timing('progress', step=self.state['step'], i=i, n=n, msg=msg)
         self.emit('progress', dict(step=self.state['step'], frac=(i / n) if n else 0, msg=msg))
 
     def cancel(self):
@@ -212,6 +213,7 @@ class Job:
     def step(self, name):
         self.check()
         self.state['step'] = name
+        media.timing('step', name=name)
         self.emit('step', name)
         self.log(f'— {name}')
 

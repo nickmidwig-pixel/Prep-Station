@@ -37,6 +37,7 @@ def _read(item, ch, a, n):
     return media.patiently(_read0, (item, ch, a, n), _waiter(item))
 
 
+@media.timed('refpick.env')
 def _env0(item, ch, a, b, max_s):
     """Envelope + mean level (dBFS) of one channel of a clip, from absolute sample a to b (capped at max_s)."""
     sr = media.audio_sr(item, ch)
@@ -87,6 +88,7 @@ def _ncc(a, b, max_lag):
     return best, lag
 
 
+@media.timed('refpick.read')
 def _read0(item, ch, a, n):
     """n samples (48k) of one channel from absolute sample a (zeros where the clip has none)."""
     out = np.zeros(n, np.float32)
