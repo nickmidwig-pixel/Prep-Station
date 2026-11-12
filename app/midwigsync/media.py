@@ -701,17 +701,20 @@ def _frame_to_float(frame, channel, nch):
     return np.asarray(x, np.float32)
 
 
-def iter_audio(item, channel=0, max_samples=None, block=48000 * 10):
+def iter_audio(item, channel=0, max_samples=None, block=48000 * 10, start=0):
     """Yield float32 mono blocks of an item's audio at its native rate, from the very start of the file.
     For video: 'channel' indexes the audio channels across streams (FX6 CH1 = 0); 'mix' mixes stream 0.
     Yields (offset_samples_at_native_rate_of_first_block, block) — offset accounts for audio starting
-    later than video (positive) — only on the first block; later blocks have offset None."""
+    later than video (positive) — only on the first block; later blocks have offset None.
+    start: begin at this sample instead of the top of the file (max_samples then counts from there). The part
+    before it is never read: listening two hours into a long take costs the same as listening at its head."""
+    start = max(0, int(start or 0))
     if item['kind'] == 'audio':
         w = WavInfo(item['path'])
-        n = w.nframes if max_samples is None else min(w.nframes, max_samples)
+        n = w.nframes if max_samples is None else min(w.nframes, start + max_samples)
         with open(item['path'], 'rb') as fh:
             first = True
-            for s0 in range(0, n, block):
+            for s0 in range(start, n, block):
                 cnt = min(block, n - s0)
                 if channel == 'mix':
                     x = w.read(s0, cnt, None, fh).mean(1)
@@ -747,7 +750,7 @@ def iter_audio(item, channel=0, max_samples=None, block=48000 * 10):
     src = sinfo.get('path') or item.get('audio_path') or item['path']
     if (os.path.splitext(src)[1].lower() in QT_EXT and ch != 'mix' and not item.get('no_fast_audio')
             and os.environ.get('PREP_SLOW_AUDIO') != '1'):
-        fast = _iter_qt_pcm(src, sinfo, int(ch), max_samples, block)
+        fast = _iter_qt_pcm(src, sinfo, int(ch), max_samples, block, start)
         if fast is not None:
             first_off = 0
             try:                               # audio that starts after the picture (edit lists): same offset as below
@@ -773,11 +776,31 @@ def iter_audio(item, channel=0, max_samples=None, block=48000 * 10):
         first = True
         buf = []
         bufn = 0
+        sr0 = sinfo.get('sr') or 48000
+        astart = float(st.start_time * st.time_base) if st.start_time is not None else 0.0
+        seeked = False
+        if start > sr0:                       # jump to just before the spot instead of decoding everything up to it
+            try:
+                c.seek(max(0, int((astart + start / sr0 - 1.0) / st.time_base)), stream=st, backward=True)
+                seeked = True
+            except Exception:  # noqa: BLE001
+                seeked = False
+        at = 0                                # sample index of the next frame when decoding from the top
         for frame in c.decode(st):
             x = _frame_to_float(frame, ch, nch)
+            if start:
+                if seeked and frame.pts is not None:
+                    at = int(round((float(frame.pts * frame.time_base) - astart) * (frame.sample_rate or sr0)))
+                nx = len(x)
+                if at + nx <= start:
+                    at += nx
+                    continue
+                if at < start:
+                    x = x[start - at:]
+                at += nx
             if first:
                 off = 0
-                if frame.pts is not None and frame.time_base is not None:
+                if not start and frame.pts is not None and frame.time_base is not None:
                     off = int(round((float(frame.pts * frame.time_base) - vstart) * (frame.sample_rate or 48000)))
                 first_off = off
                 first = False
@@ -839,7 +862,7 @@ def _qt_pcm_layout(path, stream_index):
     return out
 
 
-def _iter_qt_pcm(path, sinfo, ch, max_samples, block):
+def _iter_qt_pcm(path, sinfo, ch, max_samples, block, start=0):
     """Camera audio straight from the file's sample table: only the audio bytes are read, never the picture
     (a 17 GB Canon RAW clip holds ~23 MB of audio per channel). Yields like iter_audio; None if not possible."""
     fmt = _PCM.get(sinfo.get('codec') or '')
@@ -856,10 +879,16 @@ def _iter_qt_pcm(path, sinfo, ch, max_samples, block):
 
     def gen():
         got, buf, bufn, first = 0, [], 0, True
+        at = 0                                 # frames before this chunk
         with open(path, 'rb') as f:
             for off, frames in lay['chunks']:
                 if max_samples is not None and got >= max_samples:
                     break
+                c0, at = at, at + frames
+                if at <= start:
+                    continue                   # wholly before the spot we want: not read at all
+                cut = max(0, start - c0)
+                off, frames = off + cut * frame_bytes, frames - cut
                 f.seek(off)
                 raw = f.read(frames * frame_bytes)
                 k = len(raw) // frame_bytes
@@ -885,6 +914,28 @@ def _iter_qt_pcm(path, sinfo, ch, max_samples, block):
             if buf:
                 yield (0 if first else None), np.concatenate(buf)
     return gen()
+
+
+def within(seconds, fn, *args, **kw):
+    """Run fn with a time limit -> (finished, result). A file that stops answering (a bad spot, a drive that
+    has gone quiet) must not hold up the whole day: after `seconds` the caller moves on with what it has and
+    the read is left to finish or fail by itself in the background."""
+    import threading
+    box = {}
+
+    def run():
+        try:
+            box['v'] = fn(*args, **kw)
+        except Exception as e:  # noqa: BLE001
+            box['e'] = e
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(seconds)
+    if t.is_alive():
+        return False, None
+    if 'e' in box:
+        raise box['e']
+    return True, box.get('v')
 
 
 def audio_sr(item, channel=0):

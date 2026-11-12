@@ -8,6 +8,7 @@ across the day (envelope correlation, searching ±1 s so small timecode errors d
   - of the rest, the channel that matches the mics best wins (ties go to the lower channel: ch 1 before 3/4).
 The camera is the one that covers the most of the recorded sound, weighted by how well its best channel matches.
 """
+import os
 import numpy as np
 
 from . import media
@@ -19,7 +20,45 @@ FEED_CORR = 0.70       # this much of a camera channel rebuilt from the recorder
 SILENT_DB = -60.0
 
 
+READ_LIMIT = float(os.environ.get('PREP_READ_LIMIT', 60))      # seconds one clip may take to hand over its sound
+
+
+def _trouble(item, why):
+    """Note that a clip could not be read in full; it stays in the day and is synced from what did read."""
+    item['read_trouble'] = why
+    if 'read_trouble' not in item.setdefault('flags', []):
+        item['flags'].append('read_trouble')
+
+
 def _env(item, ch, a, b, max_s):
+    if item.get('read_trouble') == 'slow':
+        return np.zeros(0), -120.0
+    try:
+        ok, v = media.within(READ_LIMIT, _env0, item, ch, a, b, max_s)
+    except Exception:  # noqa: BLE001
+        _trouble(item, 'error')
+        return np.zeros(0), -120.0
+    if not ok:
+        _trouble(item, 'slow')
+        return np.zeros(0), -120.0
+    return v
+
+
+def _read(item, ch, a, n):
+    if item.get('read_trouble') == 'slow':
+        return np.zeros(n, np.float32)
+    try:
+        ok, v = media.within(READ_LIMIT, _read0, item, ch, a, n)
+    except Exception:  # noqa: BLE001
+        _trouble(item, 'error')
+        return np.zeros(n, np.float32)
+    if not ok:
+        _trouble(item, 'slow')
+        return np.zeros(n, np.float32)
+    return v
+
+
+def _env0(item, ch, a, b, max_s):
     """Envelope + mean level (dBFS) of one channel of a clip, from absolute sample a to b (capped at max_s)."""
     sr = media.audio_sr(item, ch)
     start_rel = max(0, a - item['start'])
@@ -29,7 +68,8 @@ def _env(item, ch, a, b, max_s):
     got = 0
     pos = 0
     lvl = []
-    for o, blk in media.iter_audio(item, ch, max_samples=skip + n):
+    pos = skip
+    for o, blk in media.iter_audio(item, ch, max_samples=n, start=skip):
         if pos + len(blk) <= skip:
             pos += len(blk)
             continue
@@ -68,7 +108,7 @@ def _ncc(a, b, max_lag):
     return best, lag
 
 
-def _read(item, ch, a, n):
+def _read0(item, ch, a, n):
     """n samples (48k) of one channel from absolute sample a (zeros where the clip has none)."""
     out = np.zeros(n, np.float32)
     rel = a - item['start']
@@ -85,8 +125,8 @@ def _read(item, ch, a, n):
         return out
     if media.audio_sr(item, ch) != SR:
         return out
-    pos = 0
-    for o, blk in media.iter_audio(item, ch, max_samples=max(0, rel) + n):
+    pos = max(0, rel)
+    for o, blk in media.iter_audio(item, ch, max_samples=n, start=pos):
         b0, b1 = pos, pos + len(blk)
         lo, hi = max(b0, rel), min(b1, rel + n)
         if hi > lo:

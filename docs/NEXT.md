@@ -499,3 +499,9 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 - "Choosing the alignment track" lights the timecode step and shows "Listening to <clip>".
 - The clip list always fits its box (File, then Tracks, then Status give way): group counts and status chips are no longer pushed off the right edge.
 - Not done: a general time limit on reading a file that stalls for another reason.
+
+## 2.5.19
+- Listening jumps straight to the spot it needs (`iter_audio(start=)`): direct-PCM skips whole chunks, compressed sound seeks. Before, every listen read the clip from its top, so a spot far into a long iPhone take took minutes (this, not damage, is the likely cause of the 20261110 "stall"; the four B CAM clips got through in 2.5.18, slowly).
+- Each clip's read has a 60 s limit (PREP_READ_LIMIT); past it the run moves on, the clip stays in, chip "Partly read".
+- Cut-short files now stay in (chip "End missing", warn not block), per Nick: sync from what reads, don't leave out.
+- Not verified on the real B CAM files (drive not connected). wavesync.read_abs/envelope still read from the top (capped at 240 s / max_seconds).

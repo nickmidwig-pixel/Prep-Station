@@ -157,7 +157,8 @@
       const how = { typed: 'Timecode typed in by you', nudged: 'Nudged by you', waveform: 'Placed by waveform (you picked it)' }[c.manual.how] || 'Set by you';
       return { t: `${how}${c.manual.note ? ' · ' + c.manual.note : ''}`, k: 'fix', old: c.orig_tc };
     }
-    if (f.has('incomplete')) return { t: `This file is incomplete: about ${gb(c.missing_bytes || 0)} is missing from the end, as if the copy was cut short. Left out so it can’t stall the sync. Recopy it from the card or phone, then Add more.`, k: 'bad' };
+    if (f.has('incomplete')) return { t: `About ${gb(c.missing_bytes || 0)} is missing from the end of this file. It stays in and is synced from the part that reads. Recopy it before the edit.`, k: 'warn' };
+    if (f.has('read_trouble')) return { t: 'Part of this file couldn’t be read in time. It stays in and is synced from the part that did read. Check that it plays to the end.', k: 'warn' };
     if (f.has('false_record')) return { t: c.include ? 'False record (short, no timecode), used by you' : `False record: ${c.kind === 'audio' ? 'the recorder' : 'the camera'} rolled for ${Math.max(1, Math.round(c.length / SR))} s before its timecode was set. Left out, not deleted.`, k: '' };
     if (f.has('short_silent')) return { t: 'Short accidental clip, left out', k: '' };
     if (f.has('false_take')) return { t: c.include ? 'False take (recorder marked it), added back by you' : 'False take (recorder marked it), left out', k: '' };
@@ -846,7 +847,8 @@
     if (f.has('tc_overlap') && !moved(c)) out.push(['fix', 'TC jump']);
     if (f.has('duplicate')) out.push(['', 'Duplicate']);
     if (c.start == null && c.approx_start != null) out.push(['fix', 'Placed by sound at sync']);
-    if (f.has('incomplete')) out.push(['bad', 'Incomplete file']);
+    if (f.has('incomplete')) out.push(['warn', 'End missing']);
+    if (f.has('read_trouble')) out.push(['warn', 'Partly read']);
     if (f.has('false_record')) out.push(['', 'False record']);
     else if (f.has('short_silent')) out.push(['', 'Accidental, left out']);
     if (f.has('false_take')) out.push(['', 'False take']);
@@ -1225,7 +1227,8 @@
         if (c.include && ['likely', 'clock'].includes(c.slowmo.kind) && !c.slowmo.sure) out.push(['warn', c, `looks like slow motion: ${c.slowmo.why}`]);
         continue;
       }
-      if (f.has('incomplete')) out.push(['bad', c, `is incomplete: about ${gb(c.missing_bytes || 0)} is missing from the end, as if the copy was cut short. It’s left out. Recopy it from the card or phone, then Add more.`]);
+      if (f.has('incomplete')) out.push(['warn', c, `is missing about ${gb(c.missing_bytes || 0)} from its end. It stays in, synced from the part that reads. Recopy it before the edit.`]);
+      else if (f.has('read_trouble')) out.push(['warn', c, 'couldn’t be read all the way in time. It stays in, synced from the part that did read. Check that it plays to the end.']);
       else if (f.has('sync_failed')) out.push(['bad', c, 'couldn’t be placed by waveform. Type its timecode or use Find.']);
       else if (c.start == null && c.include) {
         if (S.settings.waveform_check) out.push(['warn', c, 'has no timecode. The waveform check places it when you sync, or select it and use Find now.']);
