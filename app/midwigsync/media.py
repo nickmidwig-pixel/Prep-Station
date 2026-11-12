@@ -491,12 +491,9 @@ def probe_video(path, _audio_from=None):
     # length above uses what was measured; everything about timecode uses the rate the camera was SET to: the
     # timecode track's own rate, else the nearest standard rate within 2%. (Converting 09:04:37 at 23.837 put a
     # clip almost four minutes late.)
-    tm = out.pop('_tmcd_fps', None)
-    known = set(TC.KNOWN_RATES.values())
-    if out['fps'] and out['fps'] not in known:
-        best = tm if tm in known else min(known, key=lambda r: abs(float(r) - float(out['fps'])))
-        if abs(float(best) / float(out['fps']) - 1) < 0.02:
-            out['fps_measured'], out['fps'] = out['fps'], best
+    best = timecode_rate(out['fps'], out.pop('_tmcd_fps', None))
+    if best and best != out['fps']:
+        out['fps_measured'], out['fps'] = out['fps'], best
     if tcs and out['fps'] and out.get('tc_source') != 'qt-tmcd':
         try:
             out['df'] = out['df'] or (';' in tcs)
@@ -507,6 +504,22 @@ def probe_video(path, _audio_from=None):
             pass
     out['camera'] = short_camera(out['model'])
     return out
+
+
+def timecode_rate(measured, tmcd=None):
+    """The rate a clip's timecode counts at: the timecode track's own rate when it is a standard rate within 2% of
+    what was measured (a phone set to 24 can measure 23.84, or by chance exactly 23.976, with a few dropped frames);
+    else the nearest standard rate within 2%; else what was measured."""
+    if not measured:
+        return measured
+    known = set(TC.KNOWN_RATES.values())
+    near = lambda r: abs(float(r) / float(measured) - 1) < 0.02      # noqa: E731
+    if tmcd in known and near(tmcd):
+        return tmcd
+    if measured in known:
+        return measured
+    best = min(known, key=lambda r: abs(float(r) - float(measured)))
+    return best if near(best) else measured
 
 
 def find_proxy(path):

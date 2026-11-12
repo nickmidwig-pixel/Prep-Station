@@ -489,3 +489,7 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 - Now: it is placed at the time of day its own clock wrote (sync_clock; creation date with a local offset only), as a timecode label at the day's rate. Tagged 'By clock · approx.' in the list, the confirm step and the report. Never a sync reference.
 - Timecode copies: offered after the run with the other camera fixes (CAMERA_TC_CORRECTED), never automatic, never the originals.
 - Sound files with no timecode and no match are unchanged: left out, listed for placing by hand (a recorder has no trustworthy clock: Zaxcom bext date is 0000-00-00).
+
+## 2.5.17
+- False 'TC jump' on the B CAM iPhone clips (Nick's screenshot): C024 measured exactly 23.976 by chance (dropped frames), so 2.5.13's rule left it at 23.976 while its neighbours counted at 24; it landed ~33 s late, overlapped C025, and both got TC jump. timecode_rate(): the timecode track's own rate wins whenever it is a standard rate within 2% of the measured one.
+- The '24 fps · real time' chip is gone (the orange number in the fps column says it; hover explains). TC jump stays for real cases: a clip whose timecode runs into the next one on the same camera.

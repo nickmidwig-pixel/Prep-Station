@@ -833,7 +833,6 @@
     if (f.has('tc_far') && !moved(c)) out.push(['fix', 'TC far off']);
     if (f.has('tc_overlap') && !moved(c)) out.push(['fix', 'TC jump']);
     if (f.has('duplicate')) out.push(['', 'Duplicate']);
-    if (f.has('rate_near')) out.push(['info', `${c.fps} fps · real time`]);
     if (c.start == null && c.approx_start != null) out.push(['fix', 'Placed by sound at sync']);
     if (f.has('false_record')) out.push(['', 'False record']);
     else if (f.has('short_silent')) out.push(['', 'Accidental, left out']);
@@ -910,7 +909,7 @@
           <td class="c-inc"><input type="checkbox" ${c.include ? 'checked' : ''} data-inc="${c.id}" aria-label="Use ${esc(c.name)}"></td>
           <td class="file" title="${esc(c.path)}"><div class="fc">${c.kind === 'video' ? `<img class="th" data-thumb="${c.id}" alt="" ${S.thumbs[c.id] ? `src="${S.thumbs[c.id]}"` : ''}>` : '<span class="th aud"></span>'}<span class="fn">${esc(c.name)}${sub2}</span></div></td>
           <td class="num">${tc}</td><td class="num">${c.dur}</td>
-          <td class="num fps ${c.kind === 'video' && S.project && String(c.fps) !== String(S.project.fps) ? 'odd' : ''}">${c.kind === 'video' ? esc(c.fps || '—') : '<span class="dimtxt">—</span>'}</td>
+          <td class="num fps ${c.kind === 'video' && S.project && String(c.fps) !== String(S.project.fps) ? 'odd' : ''}"${(c.flags || []).includes('rate_near') ? ` title="${esc(c.fps)} fps on a ${esc(S.project.fps)} day: the same speed, real time, on the sync timeline"` : ''}>${c.kind === 'video' ? esc(c.fps || '—') : '<span class="dimtxt">—</span>'}</td>
           <td class="tracks">${tracksCell(c)}</td>
           <td class="status">${chipHtml || `<span class="txt">${esc(st.t)}</span>`}</td></tr>`);
         if (c.kind === 'audio' && S.openTracks.has(c.id)) html.push(trackRows(c));

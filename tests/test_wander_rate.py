@@ -24,6 +24,12 @@ try:
     a, c = by['A001_11100904_C024.mov'], by['A001_11100904_C025.mov']
     assert abs((c['start'] - a['start']) / 48000 - 27.0) < 0.05, (c['start'] - a['start']) / 48000
     assert not c.get('slowmo') and 'tc_overlap' not in c['flags'] and 'tc_overlap' not in a['flags'], (c.get('slowmo'), c['flags'])
+    F = TC.parse_rate
+    tr = media.timecode_rate
+    assert tr(F('23.976'), F('24')) == F('24'), 'a 24 fps phone clip that happens to measure 23.976 must count at 24'
+    assert tr(F('23.976'), F('23.976')) == F('23.976') and tr(F('23.976'), None) == F('23.976')
+    assert tr(F('59.94'), F('23.976')) == F('59.94'), 'slow motion keeps its own rate'
+    assert float(tr(TC.Fraction(23837, 1000), None)) in (23.976023976023978, 24.0)
     print('WANDER RATE GOOD')
 finally:
     shutil.rmtree(D, ignore_errors=True)
