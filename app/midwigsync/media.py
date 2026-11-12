@@ -916,6 +916,34 @@ def _iter_qt_pcm(path, sinfo, ch, max_samples, block, start=0):
     return gen()
 
 
+def audio_lead(item, channel=0):
+    """Samples by which a camera clip's sound starts after its picture (0 for sound files and when unknown)."""
+    if item['kind'] == 'audio':
+        return 0
+    try:
+        streams = item.get('audio_streams') or []
+        if not streams:
+            return 0
+        s = streams[0]
+        if channel != 'mix':
+            acc = 0
+            for t in streams:
+                if channel < acc + t['channels']:
+                    s = t
+                    break
+                acc += t['channels']
+        src = s.get('path') or item.get('audio_path') or item['path']
+        with _av().open(src) as c:
+            a0 = c.streams[s['index']]
+            v0 = c.streams.video[0] if c.streams.video else None
+            if a0.start_time is not None and v0 is not None and v0.start_time is not None:
+                return int(round((float(a0.start_time * a0.time_base) - float(v0.start_time * v0.time_base))
+                                 * (s.get('sr') or 48000)))
+    except Exception:  # noqa: BLE001
+        pass
+    return 0
+
+
 def within(seconds, fn, *args, **kw):
     """Run fn with a time limit -> (finished, result). A file that stops answering (a bad spot, a drive that
     has gone quiet) must not hold up the whole day: after `seconds` the caller moves on with what it has and

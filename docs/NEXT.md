@@ -505,3 +505,7 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 - Each clip's read has a 60 s limit (PREP_READ_LIMIT); past it the run moves on, the clip stays in, chip "Partly read".
 - Cut-short files now stay in (chip "End missing", warn not block), per Nick: sync from what reads, don't leave out.
 - Not verified on the real B CAM files (drive not connected). wavesync.read_abs/envelope still read from the top (capped at 240 s / max_seconds).
+
+## 2.5.20
+- Fine sync (after "Finding by waveform") now shows "Fine sync: <clip>" per clip and reads only the stretch it needs (`read_abs` uses `iter_audio(start=)`; `media.audio_lead` supplies the sound-after-picture offset for jumped reads). On 20261110 with 2.5.18 this phase sat silent under the last "Finding by waveform" line for 17+ min.
+- Not done: time limit in the waveform check / fine sync reads; whole-file envelope pass still reads from the top.

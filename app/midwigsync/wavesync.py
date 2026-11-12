@@ -198,14 +198,19 @@ def read_abs(item, start_abs, count, channel=0, max_decode_s=240):
     if rel + count > max_decode_s * TC.SR or rel < -count:
         return None
     buf, got, off = [], 0, 0
-    for o, blk in media.iter_audio(item, channel, max_samples=max(0, rel + count + TC.SR)):
+    # only the stretch that is wanted is read (2 s of slack each side for sound that starts after the picture),
+    # not everything from the top of the clip
+    skip = max(0, rel - 2 * TC.SR)
+    for o, blk in media.iter_audio(item, channel, max_samples=max(0, rel + count + 2 * TC.SR - skip), start=skip):
         if o is not None:
             off = o
         buf.append(blk)
         got += len(blk)
     x = np.concatenate(buf) if buf else np.zeros(0, np.float32)
+    if skip and off == 0:
+        off = media.audio_lead(item, channel)        # a jumped read doesn't report it, so ask the file
     out = np.zeros(count)
-    a = rel - off
+    a = rel - off - skip
     lo, hi = max(a, 0), min(a + count, len(x))
     if hi > lo:
         out[lo - a:hi - a] = x[lo:hi]
@@ -628,8 +633,11 @@ class SyncAnalyzer:
             moves[c['id']] = dict(start=to_own(c, best['start'], best['roll']), raw=best['start'], roll=best['roll'],
                                   score=best['score'], margin=best['margin'], agree=agree_n, method='waveform')
         # ---- sample-accurate refinement against the roll that matched best
-        for cid, mv in moves.items():
+        for k_, (cid, mv) in enumerate(moves.items()):
+            if self.cancel():
+                raise KeyboardInterrupt
             c = p.by_id(cid)
+            self.progress(k_, len(moves), f"Fine sync: {c['name']}")
             env, off = self.env[cid]
             info = dict(method=mv['method'], score=round(mv['score'], 2) if mv['score'] else None,
                         against=mv['roll'] or 'roll median')
