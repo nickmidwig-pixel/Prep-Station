@@ -20,42 +20,21 @@ FEED_CORR = 0.70       # this much of a camera channel rebuilt from the recorder
 SILENT_DB = -60.0
 
 
-READ_LIMIT = float(os.environ.get('PREP_READ_LIMIT', 60))      # seconds one clip may take to hand over its sound
+_WAIT = [None]        # set by pick_camera_reference: called as (clip name, seconds) while a read is taking long
 
 
-def _trouble(item, why):
-    """Note that a clip could not be read in full; it stays in the day and is synced from what did read."""
-    item['read_trouble'] = why
-    if 'read_trouble' not in item.setdefault('flags', []):
-        item['flags'].append('read_trouble')
+def _waiter(item):
+    f = _WAIT[0]
+    return (lambda secs: f(item['name'], secs)) if f else None
 
 
 def _env(item, ch, a, b, max_s):
-    if item.get('read_trouble') == 'slow':
-        return np.zeros(0), -120.0
-    try:
-        ok, v = media.within(READ_LIMIT, _env0, item, ch, a, b, max_s)
-    except Exception:  # noqa: BLE001
-        _trouble(item, 'error')
-        return np.zeros(0), -120.0
-    if not ok:
-        _trouble(item, 'slow')
-        return np.zeros(0), -120.0
-    return v
+    """Never gives up on a clip: a slow read is waited for, and the window says which clip and for how long."""
+    return media.patiently(_env0, (item, ch, a, b, max_s), _waiter(item))
 
 
 def _read(item, ch, a, n):
-    if item.get('read_trouble') == 'slow':
-        return np.zeros(n, np.float32)
-    try:
-        ok, v = media.within(READ_LIMIT, _read0, item, ch, a, n)
-    except Exception:  # noqa: BLE001
-        _trouble(item, 'error')
-        return np.zeros(n, np.float32)
-    if not ok:
-        _trouble(item, 'slow')
-        return np.zeros(n, np.float32)
-    return v
+    return media.patiently(_read0, (item, ch, a, n), _waiter(item))
 
 
 def _env0(item, ch, a, b, max_s):
@@ -193,6 +172,12 @@ def pick_camera_reference(project, log=print, cancel=None, max_clips=6, seconds=
         r = max(rolls, key=lambda r: sum(c['length'] for c in rolls[r]))
         return dict(roll=rep(r), channel=0, why='no sound files to compare with, so channel 1')
     results = []
+    state = [0, 1]
+
+    def waiting(name, secs):
+        if progress:
+            progress(state[0], state[1], f"Still reading {name} · {int(secs) // 60}:{int(secs) % 60:02d}")
+    _WAIT[0] = waiting
     for roll in order[:3]:
         rc = sorted([c for c in rolls[roll] if any(_overlap(c['start'], c['start'] + c['length'], s['start'],
                                                              s['start'] + s['length']) > 8 * SR for s in snd)],
@@ -206,7 +191,8 @@ def pick_camera_reference(project, log=print, cancel=None, max_clips=6, seconds=
             if cancel and cancel():
                 raise KeyboardInterrupt
             if progress:
-                progress(order[:3].index(roll) * max_clips + k_, min(3, len(order)) * max_clips, f"Listening to {c['name']}")
+                state[0], state[1] = order[:3].index(roll) * max_clips + k_, min(3, len(order)) * max_clips
+                progress(state[0], state[1], f"Listening to {c['name']}")
             # the recorder file that overlaps this clip the most
             s = max(snd, key=lambda s: _overlap(c['start'], c['start'] + c['length'], s['start'], s['start'] + s['length']))
             a = max(c['start'], s['start'])

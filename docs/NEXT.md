@@ -509,3 +509,8 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 ## 2.5.20
 - Fine sync (after "Finding by waveform") now shows "Fine sync: <clip>" per clip and reads only the stretch it needs (`read_abs` uses `iter_audio(start=)`; `media.audio_lead` supplies the sound-after-picture offset for jumped reads). On 20261110 with 2.5.18 this phase sat silent under the last "Finding by waveform" line for 17+ min.
 - Not done: time limit in the waveform check / fine sync reads; whole-file envelope pass still reads from the top.
+
+## 2.5.21
+- No read is ever given up on (Nick: "I don't want clips to be left behind"): the 60 s limit from 2.5.19 is gone. A slow clip is waited for and the window shows "Still reading <clip> · m:ss" (`media.patiently`). "Partly read" flag removed.
+- 20261110 timings on 2.5.18 (from its log): alignment-track pick 41 min (B CAM iPhone 40 of it), timecode check 34 min (about 22 in silent fine sync), Auto-Align 7, ISOs 3. Both slow spots were top-of-file reads, fixed in 2.5.19/2.5.20; not yet re-measured on the real day.
+- Timecode-check envelopes are already cached per file and read in parallel; Nick chose to keep listening to every clip (no spot-check mode).

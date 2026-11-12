@@ -944,26 +944,33 @@ def audio_lead(item, channel=0):
     return 0
 
 
-def within(seconds, fn, *args, **kw):
-    """Run fn with a time limit -> (finished, result). A file that stops answering (a bad spot, a drive that
-    has gone quiet) must not hold up the whole day: after `seconds` the caller moves on with what it has and
-    the read is left to finish or fail by itself in the background."""
+def patiently(fn, args=(), on_wait=None, every=5.0):
+    """Run fn(*args) and wait for it however long it takes: nothing is ever given up on or skipped. While it
+    runs, on_wait(seconds_so_far) is called every few seconds so the window can say what is still being read."""
     import threading
+    import time as _t
     box = {}
 
     def run():
         try:
-            box['v'] = fn(*args, **kw)
+            box['v'] = fn(*args)
         except Exception as e:  # noqa: BLE001
             box['e'] = e
     t = threading.Thread(target=run, daemon=True)
+    t0 = _t.time()
     t.start()
-    t.join(seconds)
-    if t.is_alive():
-        return False, None
+    while True:
+        t.join(every)
+        if not t.is_alive():
+            break
+        if on_wait:
+            try:
+                on_wait(_t.time() - t0)
+            except Exception:  # noqa: BLE001
+                pass
     if 'e' in box:
         raise box['e']
-    return True, box.get('v')
+    return box.get('v')
 
 
 def audio_sr(item, channel=0):

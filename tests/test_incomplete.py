@@ -1,6 +1,6 @@
 """A copy that was cut short (the file is smaller than its own header says) is flagged at load, kept in the day
 (what reads is still synced) and called out; whole files are not flagged. Listening jumps straight to the spot it
-needs (same samples as reading from the top), and a read that stops answering is abandoned after the time limit."""
+needs (same samples as reading from the top), and a slow read is waited for (never skipped) while the window says which clip."""
 import os, shutil, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'app'))
 from midwigsync.scan import Project
@@ -64,18 +64,20 @@ try:
             err = float(np.abs(part - whole_a[st:st + n]).max())
             assert err < (1e-6 if 'aac' not in str(it.get('audio_streams')) else 2e-2), (it['name'], st, err)
 
-    # a read that stops answering is given up on, the clip is marked, and later reads of it don't wait again
+    # a slow read is waited for, never given up on, and the window is told which clip it is still reading
     real = refpick._read0
-    refpick.READ_LIMIT = 1.0
-    refpick._read0 = lambda *a: time.sleep(30)
+    said = []
+    refpick._WAIT[0] = lambda name, secs: said.append((name, secs))
+    refpick._read0 = lambda item, ch, a, n: (time.sleep(2.5), real(item, ch, a, n))[1]
     c1 = by['A001_C001.mov']
-    t = time.time()
+    orig_patient = media.patiently
+    media.patiently = lambda fn, args=(), on_wait=None, every=5.0: orig_patient(fn, args, on_wait, 1.0)
     x = refpick._read(c1, 0, c1['start'], 4800)
-    assert time.time() - t < 5 and not x.any() and 'read_trouble' in c1['flags'] and c1['include']
-    t = time.time(); refpick._read(c1, 0, c1['start'], 4800); assert time.time() - t < 0.5
+    media.patiently = orig_patient
     refpick._read0 = real
-    c1['flags'].remove('read_trouble'); c1.pop('read_trouble')
-    refpick.READ_LIMIT = 60
+    refpick._WAIT[0] = None
+    assert x.any() and len(said) >= 2 and said[0][0] == 'A001_C001.mov', said
+    assert 'read_trouble' not in c1['flags'] and c1['include']
 
     heard = []
     t = time.time()
