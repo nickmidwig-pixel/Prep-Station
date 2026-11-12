@@ -288,7 +288,12 @@ class Project:
                 info = media.probe(p, convert_dir=CONVERT_DIR)
             except Exception as e:  # noqa: BLE001
                 ext = os.path.splitext(p)[1].lower()
-                if ext in media.RAW_TRY_EXT:
+                short = media.missing_bytes(p)
+                if short:                  # say it plainly instead of the decoder's own words
+                    self.errors.append((p, 'the file is incomplete: about %s is missing from the end, as if the copy '
+                                           'was cut short. Recopy it from the card or phone, then Add more.'
+                                        % ('%.1f GB' % (short / 1e9) if short >= 1e9 else '%d MB' % max(1, round(short / 1e6)))))
+                elif ext in media.RAW_TRY_EXT:
                     self.unsupported.append(dict(path=p, why=str(e)))
                 else:
                     self.errors.append((p, str(e)))
@@ -325,6 +330,11 @@ class Project:
             c['include'] = True
             if any(x.upper() == 'FALSETAKES' for x in os.path.normpath(c.get('source_path') or c['path']).split(os.sep)):
                 c['false_take'] = True     # the recorder's False Take folder: shown, left out unless you add it
+                c['include'] = False
+            short = media.missing_bytes(c.get('source_path') or c['path'])
+            if short:                       # a copy that was cut short: can't be read to its end, so it is left out
+                c['flags'].append('incomplete')
+                c['missing_bytes'] = short
                 c['include'] = False
             c['orig_start'] = c['start']
             c['sync'] = None   # waveform-sync result
@@ -723,7 +733,7 @@ class Project:
         self._ltc_follow_rate()
         for c in self.clips:
             keep_sync = [f for f in c['flags'] if f.startswith('sync')]
-            c['flags'] = keep_sync + (['false_take'] if c.get('false_take') else [])
+            c['flags'] = keep_sync + (['false_take'] if c.get('false_take') else []) + (['incomplete'] if c.get('missing_bytes') else [])
             if c.get('manual'):
                 c['start'] = c['manual']['start']
             if c['kind'] == 'audio' and not c.get('fps'):
@@ -1010,7 +1020,7 @@ class Project:
                 source_path=c.get('source_path'), opatom=c.get('opatom', False),
                 day=c.get('day') or 'unknown', after_midnight=c.get('after_midnight', False), date_note=c.get('date_note'),
                 day_forced=c.get('day_forced'), approx_start=self._clock_place(c),
-                duplicate_of=os.path.basename(c['duplicate_of']) if c.get('duplicate_of') else None, user_include=c.get('user_include'),
+                duplicate_of=os.path.basename(c['duplicate_of']) if c.get('duplicate_of') else None, user_include=c.get('user_include'), missing_bytes=c.get('missing_bytes'),
                 roles=self.clip_roles(c), track_names=c.get('track_names') or {}, scene=c.get('scene', ''), take=c.get('take', ''),
                 size=c.get('size', 0), width=c.get('width', 0), height=c.get('height', 0), sr=c.get('sr') or c.get('source_sr'),
                 bits=c.get('bits'), serial=c.get('serial'), model=c.get('model', ''),

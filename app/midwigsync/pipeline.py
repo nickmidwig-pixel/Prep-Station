@@ -470,7 +470,7 @@ class Job:
         only = None
         if r and not r.get('auto') and r.get('roll'):       # you chose the camera; the app picks its channel
             only = r.get('lane') or next((c.get('lane') for c in self.p.clips if c['roll'] == r['roll']), None) or r['roll']
-        pick = refpick.pick_camera_reference(self.p, log=self.log, cancel=self.cancelled, only_lane=only)
+        pick = refpick.pick_camera_reference(self.p, log=self.log, cancel=self.cancelled, only_lane=only, progress=self.progress)
         if pick:
             self.s['reference'] = dict(roll=pick['roll'], channel=pick['channel'], auto=only is None, why=pick['why'],
                                        **({'lane': only, 'listen': True} if only else {}))

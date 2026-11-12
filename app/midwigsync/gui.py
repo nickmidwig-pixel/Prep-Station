@@ -766,7 +766,7 @@ class Api:
 
     def _set_include_raw(self, cid, include):
         c = self.p.by_id(int(cid))
-        if c:
+        if c and not (include and 'incomplete' in c.get('flags', ())):   # a cut-short file can't be used: it would stall the run
             c['include'] = bool(include)
             c['user_include'] = bool(include)      # your choice outlasts the false-record check on the next scan
         return self._state()
@@ -789,7 +789,7 @@ class Api:
                 return self._state()
             for i in ids:
                 c = self.p.by_id(i)
-                if c:
+                if c and not (include and 'incomplete' in c.get('flags', ())):
                     c['include'] = bool(include)
                     c['user_include'] = bool(include)
             return self._state()

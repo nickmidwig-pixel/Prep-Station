@@ -506,6 +506,41 @@ def probe_video(path, _audio_from=None):
     return out
 
 
+def missing_bytes(path):
+    """How many bytes a QuickTime-style file (.mov/.mp4/.crm/.braw) or a WAV is short of what its own header says
+    it holds: a copy that was cut short. 0 when whole or when it can't be told."""
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        size = os.path.getsize(path)
+        with open(path, 'rb') as f:
+            if ext in QT_EXT:
+                pos = 0
+                while pos + 8 <= size:
+                    f.seek(pos)
+                    n, typ = struct.unpack('>I4s', f.read(8))
+                    if n == 1:
+                        if pos + 16 > size:
+                            break
+                        n = struct.unpack('>Q', f.read(8))[0]
+                    elif n == 0:
+                        return 0                       # "to the end of the file": can't be short
+                    if n < 8 or not all(32 <= b < 127 for b in typ):
+                        return 0                       # not a box: don't guess
+                    if pos + n > size:
+                        return pos + n - size
+                    pos += n
+                return 0
+            if ext in ('.wav', '.bwf'):
+                head = f.read(12)
+                if head[:4] == b'RIFF' and head[8:12] == b'WAVE':
+                    n = struct.unpack('<I', head[4:8])[0]
+                    if n not in (0, 0xFFFFFFFF) and n + 8 > size:
+                        return n + 8 - size
+    except (OSError, struct.error):
+        return 0
+    return 0
+
+
 def timecode_rate(measured, tmcd=None):
     """The rate a clip's timecode counts at: the timecode track's own rate when it is a standard rate within 2% of
     what was measured (a phone set to 24 can measure 23.84, or by chance exactly 23.976, with a few dropped frames);

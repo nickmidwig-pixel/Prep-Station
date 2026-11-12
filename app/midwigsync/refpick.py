@@ -122,7 +122,7 @@ def _overlap(a0, a1, b0, b1):
     return max(0, min(a1, b1) - max(a0, b0))
 
 
-def pick_camera_reference(project, log=print, cancel=None, max_clips=6, seconds=75, only_lane=None):
+def pick_camera_reference(project, log=print, cancel=None, max_clips=6, seconds=75, only_lane=None, progress=None):
     clips = [c for c in project.clips if c['include'] and c['start'] is not None and not c.get('slowmo')]
     cams = [c for c in clips if c['kind'] == 'video' and media.total_audio_channels(c) > 0]
     snd = [c for c in clips if c['kind'] == 'audio']
@@ -162,9 +162,11 @@ def pick_camera_reference(project, log=print, cancel=None, max_clips=6, seconds=
         pick = [rc[int(i)] for i in np.linspace(0, len(rc) - 1, min(max_clips, len(rc)))]
         nch = max(media.total_audio_channels(c) for c in pick)
         stats = {ch: dict(corr=[], feed=[], db=[]) for ch in range(min(nch, 8))}
-        for c in pick:
+        for k_, c in enumerate(pick):
             if cancel and cancel():
                 raise KeyboardInterrupt
+            if progress:
+                progress(order[:3].index(roll) * max_clips + k_, min(3, len(order)) * max_clips, f"Listening to {c['name']}")
             # the recorder file that overlaps this clip the most
             s = max(snd, key=lambda s: _overlap(c['start'], c['start'] + c['length'], s['start'], s['start'] + s['length']))
             a = max(c['start'], s['start'])

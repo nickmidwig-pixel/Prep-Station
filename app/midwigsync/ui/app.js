@@ -14,7 +14,7 @@
   const CAM_HUES = ['#D9534F', '#4F86D9', '#E3C24A', '#5BB874', '#E8923F', '#9B7BD1', '#4FB8B8', '#D77AB0'];
   const ROLE_COL = { boom: '#D9B95B', lav: '#93B58A', plant: '#8FC1A9', safety: '#B8A77A', varies: '#A88F7A', multi: '#C99A6B', mix: '#9A938A', tc: '#6F7780', empty: '#5E666E' };
   const ROLE_LABEL = { boom: 'boom', lav: 'lav', plant: 'plant', safety: 'safety copy', varies: 'varies by take', multi: 'multitrack', mix: 'mix', tc: 'timecode', cam: 'camera' };
-  const STEP_MAP = { 'Building aligned ISOs': 'Auto-Align Post', 'Checking alignment': 'Auto-Align Post' };
+  const STEP_MAP = { 'Building aligned ISOs': 'Auto-Align Post', 'Checking alignment': 'Auto-Align Post', 'Choosing the alignment track': 'Checking timecode' };
 
   const S = { project: null, settings: {}, running: false, scanning: false, sel: null, view: null, done: null, day: null, checks: [],
     expanded: new Set(), collapsed: new Set(), openTracks: new Set(), ph: null, playing: null, picked: new Set(), undo: null, redo: null,
@@ -157,6 +157,7 @@
       const how = { typed: 'Timecode typed in by you', nudged: 'Nudged by you', waveform: 'Placed by waveform (you picked it)' }[c.manual.how] || 'Set by you';
       return { t: `${how}${c.manual.note ? ' · ' + c.manual.note : ''}`, k: 'fix', old: c.orig_tc };
     }
+    if (f.has('incomplete')) return { t: `This file is incomplete: about ${gb(c.missing_bytes || 0)} is missing from the end, as if the copy was cut short. Left out so it can’t stall the sync. Recopy it from the card or phone, then Add more.`, k: 'bad' };
     if (f.has('false_record')) return { t: c.include ? 'False record (short, no timecode), used by you' : `False record: ${c.kind === 'audio' ? 'the recorder' : 'the camera'} rolled for ${Math.max(1, Math.round(c.length / SR))} s before its timecode was set. Left out, not deleted.`, k: '' };
     if (f.has('short_silent')) return { t: 'Short accidental clip, left out', k: '' };
     if (f.has('false_take')) return { t: c.include ? 'False take (recorder marked it), added back by you' : 'False take (recorder marked it), left out', k: '' };
@@ -728,6 +729,15 @@
   function colWidths() { return Object.assign({}, COL_DEF, store.get('cols', {})); }
   function applyCols() {
     const w = colWidths();
+    // the list must fit its box: the right-hand Status column and the group counts are never pushed out of sight.
+    // File gives way first, then Tracks, then Status (shown widths only; your saved widths are kept)
+    const avail = $('clipTable').parentElement.clientWidth;
+    let over = Object.values(w).reduce((a, b) => a + b, 0) - avail;
+    for (const k of ['name', 'tracks', 'status']) {
+      if (over <= 0 || !avail) break;
+      const cut = Math.min(over, w[k] - COL_MIN[k]);
+      if (cut > 0) { w[k] -= cut; over -= cut; }
+    }
     document.querySelectorAll('#clipCols col').forEach((col) => { col.style.width = w[col.dataset.col] + 'px'; });
     const total = Object.values(w).reduce((a, b) => a + b, 0);
     $('clipTable').style.width = total + 'px';
@@ -753,6 +763,8 @@
       g.addEventListener('dblclick', (e) => { e.stopPropagation(); const w = colWidths(); delete w[cols[i]]; store.set('cols', w); applyCols(); });
     });
     applyCols();
+    window.addEventListener('resize', applyCols);
+    if (window.ResizeObserver) new ResizeObserver(applyCols).observe($('clipTable').parentElement);
   })();
   function applyPanes() {
     const tlh = store.get('tlh', null), runw = store.get('runw', null);
@@ -834,6 +846,7 @@
     if (f.has('tc_overlap') && !moved(c)) out.push(['fix', 'TC jump']);
     if (f.has('duplicate')) out.push(['', 'Duplicate']);
     if (c.start == null && c.approx_start != null) out.push(['fix', 'Placed by sound at sync']);
+    if (f.has('incomplete')) out.push(['bad', 'Incomplete file']);
     if (f.has('false_record')) out.push(['', 'False record']);
     else if (f.has('short_silent')) out.push(['', 'Accidental, left out']);
     if (f.has('false_take')) out.push(['', 'False take']);
@@ -1212,7 +1225,8 @@
         if (c.include && ['likely', 'clock'].includes(c.slowmo.kind) && !c.slowmo.sure) out.push(['warn', c, `looks like slow motion: ${c.slowmo.why}`]);
         continue;
       }
-      if (f.has('sync_failed')) out.push(['bad', c, 'couldn’t be placed by waveform. Type its timecode or use Find.']);
+      if (f.has('incomplete')) out.push(['bad', c, `is incomplete: about ${gb(c.missing_bytes || 0)} is missing from the end, as if the copy was cut short. It’s left out. Recopy it from the card or phone, then Add more.`]);
+      else if (f.has('sync_failed')) out.push(['bad', c, 'couldn’t be placed by waveform. Type its timecode or use Find.']);
       else if (c.start == null && c.include) {
         if (S.settings.waveform_check) out.push(['warn', c, 'has no timecode. The waveform check places it when you sync, or select it and use Find now.']);
         else out.push(['bad', c, 'has no timecode. Turn on “Check timecode by waveform”, or select it and use Find.']);
@@ -1228,7 +1242,7 @@
       else if (guessed.length) out.push(['warn', { name: `${guessed.length} files` }, 'had no recording date, so they were put on this day by their timecode. Check they belong here.']);
     }
     for (const u of (P.unsupported || [])) out.push(['bad', { name: (u.path || u).split('/').pop() }, u.why || 'can’t be read.']);
-    for (const e of (P.errors || [])) out.push(['bad', { name: String(e[0] || '').split('/').pop() }, `couldn’t be read: ${e[1] || ''}`]);
+    for (const e of (P.errors || [])) out.push(['bad', { name: String(e[0] || '').split('/').pop() }, /^the file is incomplete/.test(e[1] || '') ? String(e[1]).replace(/^the file /, '') : `couldn’t be read: ${e[1] || ''}`]);
     return out;
   }
   function renderAttention() {

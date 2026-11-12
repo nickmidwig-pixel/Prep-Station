@@ -493,3 +493,9 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 ## 2.5.17
 - False 'TC jump' on the B CAM iPhone clips (Nick's screenshot): C024 measured exactly 23.976 by chance (dropped frames), so 2.5.13's rule left it at 23.976 while its neighbours counted at 24; it landed ~33 s late, overlapped C025, and both got TC jump. timecode_rate(): the timecode track's own rate wins whenever it is a standard rate within 2% of the measured one.
 - The '24 fps · real time' chip is gone (the orange number in the fps column says it; hover explains). TC jump stays for real cases: a clip whose timecode runs into the next one on the same camera.
+
+## 2.5.18
+- A file whose copy was cut short (smaller than its own header says) is found at load: flagged "Incomplete file", left out, listed under "need you" with how much is missing, can't be ticked back in. This is what stalled the 20261110 run at "Choosing the alignment track" (unconfirmed on the real files until Nick reruns).
+- "Choosing the alignment track" lights the timecode step and shows "Listening to <clip>".
+- The clip list always fits its box (File, then Tracks, then Status give way): group counts and status chips are no longer pushed off the right edge.
+- Not done: a general time limit on reading a file that stalls for another reason.
