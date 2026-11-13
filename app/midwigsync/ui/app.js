@@ -1229,8 +1229,10 @@
         continue;
       }
       if (f.has('incomplete')) out.push(['warn', c, `is missing about ${gb(c.missing_bytes || 0)} from its end. It stays in, synced from the part that reads. Recopy it before the edit.`]);
+      // stays 'bad' so it keeps its place in the strip: renderAttention shows only 'bad', so a 'warn' here
+      // would silence the notice altogether. The wording was the problem, never the severity.
       else if (f.has('sync_failed')) out.push(c.orig_start != null
-        ? ['warn', c, 'kept the timecode the camera recorded: the waveform couldn’t confirm it against the other sources. Select it and use Find to check where it lands.']
+        ? ['bad', c, 'kept the timecode the camera recorded: the waveform couldn’t confirm it against the other sources. Select it and use Find to check where it lands.']
         : ['bad', c, 'couldn’t be placed by waveform. Type its timecode or use Find.']);
       else if (c.start == null && c.include) {
         if (S.settings.waveform_check) out.push(['warn', c, 'has no timecode. The waveform check places it when you sync, or select it and use Find now.']);
