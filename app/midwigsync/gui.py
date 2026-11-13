@@ -908,6 +908,13 @@ class Api:
                         data = dict(data, all=list(outs))
                     if kind == 'project':
                         data = self.p.to_json()
+                    if kind == 'ref_pick' and not multi:
+                        # The job listened and picked the alignment track, but it works on its own copy of the
+                        # settings. Without this the window keeps showing default_reference() -- the SYNC REF
+                        # badge sits on the wrong lane and "Everything syncs to X" names the wrong camera
+                        # whenever the pick differs from the default. Several days would each overwrite the
+                        # last, so only a single-day run writes back.
+                        self.settings['reference'] = dict(data)
                     if kind == 'review_tc':
                         PF.notify(APP_NAME, f"Timecode check done: {len(data.get('fixes', []))} fix(es) to confirm.")
                     self.emit(kind, data)

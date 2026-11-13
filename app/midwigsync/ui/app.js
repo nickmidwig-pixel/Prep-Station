@@ -1691,7 +1691,11 @@
       if (cf.length) {
         $('camLead').textContent = `The timelines already place ${cf.length === 1 ? 'this clip' : 'these clips'} at the fixed timecode. Want copies that carry it too? `
           + 'Each copy is the original file byte for byte with only the timecode number changed: same codec, same log, no re-encode. The originals stay as they are.';
-        $('camList').innerHTML = cf.map((x) => `<li><b>${esc(x.roll)} · ${esc(x.name)}</b><span class="tc">${x.new}</span></li>`).join('');
+        // file name first, card second, same order as the confirm-the-fixes card: the card name is often the
+        // same string for every row (an iPhone writes one card name for the whole shoot), so leading with it
+        // made every row read alike and pushed the file name out of the box. Shown in the order they were shot.
+        $('camList').innerHTML = cf.slice().sort((a, b) => (a.start || 0) - (b.start || 0))
+          .map((x) => `<li><b>${esc(x.name)}</b><span class="tc">${x.new}</span><span class="w">${esc(x.roll)}</span></li>`).join('');
       }
       $('msg').className = 'msg ok';
       $('msg').textContent = all.length > 1 ? `${all.length} days synced, each in its own folder next to ${d.out.split('/').slice(-1)[0]}.` : `Everything is in ${d.out}`;
@@ -1712,7 +1716,10 @@
       $('progText').textContent = 'Waiting for you: confirm the timecode fixes';
       $('review').scrollIntoView({ block: 'nearest' });
     },
-    ref_pick: (d) => { S.refPick = d; renderPanel(); },
+    // the run picked the alignment track by listening: move the window onto it now, so the SYNC REF badge and
+    // the "Sync to" sentence follow the pick instead of the pre-run default (Python stores it too, for the
+    // next state refresh)
+    ref_pick: (d) => { S.refPick = d; if (S.settings) S.settings.reference = Object.assign({}, S.settings.reference, d); renderPanel(); draw(); },
     cameras_done: (d) => {
       S.running = false; renderPanel();
       $('camFix').hidden = true;

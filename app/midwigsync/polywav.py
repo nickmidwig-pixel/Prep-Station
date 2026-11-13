@@ -31,7 +31,7 @@ def plan_chunks(t0, t1, nch, bits, fps, header_len=4096, mode='max'):
 
 
 def build_polywavs(sources, channel_names, out_dir, prefix, fps, df=False, ubits='', project='', note='',
-                   mode='max', log=print, progress=None, cancel=None):
+                   mode='max', log=print, progress=None, cancel=None, day_date=''):
     """sources: [dict(path, start, channels=[poly channel index per file channel])]."""
     progress = progress or (lambda *a: None)
     cancel = cancel or (lambda: False)
@@ -51,7 +51,9 @@ def build_polywavs(sources, channel_names, out_dir, prefix, fps, df=False, ubits
     date = ''
     if ubits and len(ubits) >= 8 and ubits[:8].isdigit():
         date = f'{ubits[:4]}-{ubits[4:6]}-{ubits[6:8]}'
-    date = date or dt.date.today().isoformat()
+    # then the shoot day itself. Today's date is the last resort: a delivery whose origination date is the day
+    # the sync ran (not the day it was shot) reads as wrong in Avid and Premiere.
+    date = date or day_date or dt.date.today().isoformat()
 
     def header(a, n):
         tcs = TC.samples_to_tc(a, fr, df)

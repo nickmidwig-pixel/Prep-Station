@@ -131,14 +131,6 @@ def _clock_start(c):
     return d
 
 
-def _clock_samples(c):
-    """The camera's clock at the start of the clip, as samples since midnight (local), or None."""
-    d = _clock_start(c)
-    if d is None:
-        return None
-    return int((d.hour * 3600 + d.minute * 60 + d.second) * TC.SR)
-
-
 def _recording_span(c):
     """Seconds the take really took: from the start the camera wrote (file name, else creation stamp) to the end
     (creation stamp when the camera stamps the end, as Canon XF-AVC does, else the file's last write). None when
@@ -937,17 +929,36 @@ class Project:
                 c['include'] = False
 
     def _clock_place(self, c):
-        """Where a camera clip with no timecode roughly sits, from the time of day its own clock wrote
-        (an iPhone's creation date with its time-zone offset). Only for showing it on the timeline before
-        a sync; never used as timecode. Samples since midnight, or None."""
+        """Where a camera clip with no timecode roughly sits, from the time of day its own clock wrote: the
+        record start in a Canon file name, else a local creation stamp (an iPhone's, with its offset, or a
+        plain local one). A plain UTC stamp is not used — see below. Only for showing it on the timeline
+        before a sync; never used as timecode. Samples since the day's midnight, or None."""
         if c['kind'] != 'video' or c.get('orig_start') is not None or c.get('start') is not None:
             return None
-        cr = str(c.get('created') or '')
-        m = re.match(r'^\d{4}-\d\d-\d\dT(\d\d):(\d\d):(\d\d)(?:\.\d+)?[+-]\d\d:?\d\d$', cr)
-        if not m:                       # no local offset (plain UTC): the time of day can't be trusted
+        d = _name_start(c)              # the clock Canon writes into the file name: always the record start
+        if d is None:
+            if not c.get('created_meta'):
+                return None             # only the file's own date survived the copy; it says nothing about the take
+            cr = str(c.get('created') or '').strip()
+            if cr.endswith('Z'):
+                # plain UTC: the time of day depends on a time zone the file doesn't carry, and this Mac's
+                # zone is not it when the day was shot somewhere else. Left unplaced on purpose.
+                return None
+            d = _local(cr)              # a local stamp, with an offset (iPhone) or without (most others)
+        if d is None or d.year < 2000:
             return None
+        fps = c.get('fps') or self.fps
         # as a timecode label at the day's rate, so it sits beside cameras whose timecode reads the same time of day
-        return TC.tc_to_samples('%s:%s:%s:00' % m.groups(), self.fps, False)
+        s = TC.tc_to_samples('%02d:%02d:%02d:00' % (d.hour, d.minute, d.second), fps, False)
+        # a day that runs past midnight has had a whole day added to everything early (see analyze); a clip placed
+        # by its clock never went through that pass, and without this it lands ~24 h before the rest of the day
+        if s < 12 * TC.SR * 3600 and self._day_wraps_midnight(c.get('day')):
+            s += TC.day_samples(fps)
+        return s
+
+    def _day_wraps_midnight(self, day):
+        """True when this shoot day runs past midnight, so its early-hours clips carry a whole day on top."""
+        return any(c.get('after_midnight') for c in self.clips if c.get('day') == day)
 
     # ------------------------------------------------------------ helpers
     def day_span(self, include_only=True):

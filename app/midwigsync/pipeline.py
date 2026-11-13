@@ -591,7 +591,9 @@ class Job:
 
     def camera_fixes(self):
         """Camera clips whose timecode was fixed: offered after the run as full-quality copies."""
-        return [dict(id=c['id'], name=c['name'], roll=c['roll'],
+        # start comes along so the window can list them in the order they were shot: the timecode string alone
+        # sorts a past-midnight clip to the top of the day
+        return [dict(id=c['id'], name=c['name'], roll=c['roll'], start=c['start'],
                      new=TC.samples_to_tc(c['start'], c.get('fps') or self.p.fps, bool(c.get('df'))))
                 for c in self.fixes() if c['kind'] == 'video']
 
@@ -974,12 +976,19 @@ class Job:
                     self.log(f'  layout {sub} ({len(names)} tracks): {", ".join(names)}')
                 out = build_polywavs(group, names, os.path.join(self.out, folder),
                                      f"{self.s['job_name']}_POLY_{tag}{suffix}", p.fps, p.df, ubits, self.s['job_name'],
-                                     note, self.s['chunk_mode'], log=self.log, progress=self.progress, cancel=self.cancelled)
+                                     note, self.s['chunk_mode'], log=self.log, progress=self.progress, cancel=self.cancelled,
+                                     day_date=self.day_date(p))
                 for o in out:
                     o['folder'] = folder
                     o['channels'] = names
                     o['layout'] = sub
                 self.polys += out
+
+    def day_date(self, p):
+        """The shoot day as 'YYYY-MM-DD', for the origination date the delivery carries. Empty when the drop
+        carries no date or holds more than one day."""
+        keys = [d['key'] for d in p.days() if d['key'] and d['key'] != 'unknown']
+        return keys[0] if len(keys) == 1 else ''
 
     def poly_groups(self, srcs):
         """How a day's sources split into polywav sets. A recorder whose takes use different track layouts (the 633
