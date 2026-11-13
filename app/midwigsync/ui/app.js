@@ -835,7 +835,10 @@
       if (f.has('raw')) out.push(['info', 'RAW']);
       return out;
     }
-    if (f.has('sync_failed')) out.push(['bad', 'Not placed']);
+    // a clip that carries its own timecode is already sitting at it; a failed waveform check means the
+    // timecode could not be confirmed, not that the clip is unplaced (saying "Not placed" next to a Start
+    // of 19:11:02:02 on the same row is how this was read wrong)
+    if (f.has('sync_failed')) out.push(c.orig_start != null ? ['fix', 'Not confirmed'] : ['bad', 'Not placed']);
     if (f.has('sync_manual')) out.push(['man', c.manual && c.manual.how === 'waveform' ? 'Picked by you' : 'Set by you']);
     else if (f.has('sync_corrected')) out.push(['fix', `Moved ${signedSec((c.start - c.orig_start) / SR)}`]);
     else if (f.has('sync_clock')) out.push(['fix', 'By clock · approx.']);
@@ -1226,7 +1229,9 @@
         continue;
       }
       if (f.has('incomplete')) out.push(['warn', c, `is missing about ${gb(c.missing_bytes || 0)} from its end. It stays in, synced from the part that reads. Recopy it before the edit.`]);
-      else if (f.has('sync_failed')) out.push(['bad', c, 'couldn’t be placed by waveform. Type its timecode or use Find.']);
+      else if (f.has('sync_failed')) out.push(c.orig_start != null
+        ? ['warn', c, 'kept the timecode the camera recorded: the waveform couldn’t confirm it against the other sources. Select it and use Find to check where it lands.']
+        : ['bad', c, 'couldn’t be placed by waveform. Type its timecode or use Find.']);
       else if (c.start == null && c.include) {
         if (S.settings.waveform_check) out.push(['warn', c, 'has no timecode. The waveform check places it when you sync, or select it and use Find now.']);
         else out.push(['bad', c, 'has no timecode. Turn on “Check timecode by waveform”, or select it and use Find.']);

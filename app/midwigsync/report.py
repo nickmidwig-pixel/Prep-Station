@@ -20,6 +20,14 @@ FLAG_TEXT = {
 }
 
 
+def flag_text(c, f):
+    """A flag's wording for this clip. A clip carrying its own timecode sits at it whatever the waveform
+    check found, so sync_failed there means unconfirmed, not unplaced and not left out."""
+    if f == 'sync_failed' and c.get('orig_start') is not None:
+        return "waveform could not confirm its timecode against the other sources; kept as the camera recorded it"
+    return FLAG_TEXT.get(f, f)
+
+
 def verify_against_ref(aligned, refs, n_checks=4, win_s=8, max_lag_ms=200):
     """For each aligned ISO: NCC lag vs the reference WAVs at a few loud spots. Lag ~0 = aligned."""
     out = {}
@@ -118,7 +126,7 @@ def write_report(path, job, project, sync_report, stamped, aap_info, aligned, ve
     if not flagged:
         w('  Nothing looked off.')
     for c in sorted(flagged, key=lambda c: (c['roll'], c['name'])):
-        txt = '; '.join(FLAG_TEXT.get(f, f) for f in c['flags'])
+        txt = '; '.join(flag_text(c, f) for f in c['flags'])
         extra = ''
         if c.get('sync') and c['start'] is not None:
             s = c['sync']

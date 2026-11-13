@@ -441,8 +441,19 @@ class Job:
         n_man = sum(1 for c in p.clips if c.get('manual'))
         if n_man:
             self.log(f'{n_man} file(s) placed by hand, kept where you put them.')
-        n_fail = sum(1 for c in p.clips if 'sync_failed' in c['flags'])
-        self.log(f'Timecode check: {n_fix} file(s) corrected/placed, {n_fail} could not be placed.')
+        # a clip that carries its own timecode stays where the camera put it, so a failed check means its
+        # timecode is unconfirmed, not that the clip has nowhere to sit; counting the two together read as
+        # "1 could not be placed" for a clip that was placed correctly all along
+        fails = [c for c in p.clips if 'sync_failed' in c['flags']]
+        n_unplaced = sum(1 for c in fails if c.get('orig_start') is None)
+        n_unconfirmed = len(fails) - n_unplaced
+        parts = [f'{n_fix} file(s) corrected/placed']
+        if n_unplaced:
+            parts.append(f'{n_unplaced} could not be placed')
+        if n_unconfirmed:
+            parts.append(f'{n_unconfirmed} kept its own timecode, unconfirmed' if n_unconfirmed == 1
+                         else f'{n_unconfirmed} kept their own timecode, unconfirmed')
+        self.log('Timecode check: ' + ', '.join(parts) + '.')
         # reference WAVs with final timecode
         self.refs = []
         if ref:
