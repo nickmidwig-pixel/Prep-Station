@@ -518,3 +518,8 @@ Nick confirmed C017 and C029 (C80, 120 fps S&F conformed to 23.976 in camera, MO
 ## 2.5.22
 - Timing log: `~/Library/Logs/Prep Station/timing.log` gets a line for every step, every progress message, and every sound read (`refpick.env/read`, `wavesync.envelope/read_abs`) with the clip name and seconds. Seconds-since-launch in the first column, so a run can be measured afterwards. For the timed rerun of 20261110.
 - Rules from Nick (2026-11-12): iPhone clips with no sound match go by the phone's clock, labelled as normal; no frame-rate conversion under 60 min; no drift. Analysis of 20261110 clip by clip pending the F002 folder being connected.
+
+## 2.5.23 — the iPhone read problem, found
+- Root cause (measured): PyAV's decode of an audio stream reads the WHOLE file, picture included (179 MB test file: 179 MB read for a 1 MB audio track). B CAM (Blackmagic Camera app, ProRes RAW) audio doesn't take the direct-PCM path, so every listen pulled the entire multi-GB clip off the drive: overnight timing.log shows refpick.env 281 s for C046, 42 s for C042, in proportion to file size. Seeking (2.5.19) only trimmed the part before the seek point.
+- Fix: `media.audio_only(container, stream)` sets `discard=all` on every other stream before decoding; the mov demuxer then skips picture chunks (test: 179 → 47 MB; 30 s listen 23.7 MB). Applied in iter_audio's PyAV path. `timing.log` now also records per read: codec, fast path yes/no, start, n.
+- Still to confirm on the real files: B CAM audio codec (AAC vs PCM) and why the fast path isn't taken if PCM. Needs the day folder connected.

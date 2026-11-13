@@ -683,6 +683,19 @@ def check_ltc(info, fps_hint=None, force=False):
 
 
 # ------------------------------------------------------------------ audio streaming
+def audio_only(container, keep):
+    """Tell the demuxer to skip every stream but `keep`. Without this, reading the sound of a camera file
+    reads the whole file, picture included (a 75 s listen to a 4K ProRes RAW iPhone clip pulled gigabytes
+    off the drive: 7 minutes a clip on 20261110). With it, only the audio chunks are read."""
+    try:
+        from av.stream import Discard
+        for s in container.streams:
+            if s is not keep and s.index != keep.index:
+                s.discard = Discard.all
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _frame_to_float(frame, channel, nch):
     arr = frame.to_ndarray()
     name = frame.format.name
@@ -753,6 +766,7 @@ def iter_audio(item, channel=0, max_samples=None, block=48000 * 10, start=0):
     if (os.path.splitext(src)[1].lower() in QT_EXT and ch != 'mix' and not item.get('no_fast_audio')
             and os.environ.get('PREP_SLOW_AUDIO') != '1'):
         fast = _iter_qt_pcm(src, sinfo, int(ch), max_samples, block, start)
+        timing('iter_audio', clip=os.path.basename(src), codec=sinfo.get('codec'), fast=fast is not None, start=start, n=max_samples)
         if fast is not None:
             first_off = 0
             try:                               # audio that starts after the picture (edit lists): same offset as below
@@ -788,6 +802,7 @@ def iter_audio(item, channel=0, max_samples=None, block=48000 * 10, start=0):
             except Exception:  # noqa: BLE001
                 seeked = False
         at = 0                                # sample index of the next frame when decoding from the top
+        audio_only(c, st)
         for frame in c.decode(st):
             x = _frame_to_float(frame, ch, nch)
             if start:
