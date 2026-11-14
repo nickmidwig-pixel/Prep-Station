@@ -1342,8 +1342,9 @@
     });
   }
 
-  // Sync to (2.0): one sentence saying what the day syncs to, and a Change link with only the real choices:
-  // each camera body, or sound only. The app always picks the channel itself.
+  // Sync to: one sentence saying what the day syncs to, a Change link with only the real choices (each
+  // camera body, or sound only), and the camera's channels underneath. The app picks a channel only while
+  // you haven't.
   function renderMode() {
     const m = S.settings.mode || 'auto', eff = effMode(), P = S.project;
     const chosen = m !== 'auto' && !(S.settings.reference || {}).auto;
@@ -1352,8 +1353,11 @@
     if (!P || !P.clips.length) text = 'Drop a shoot day to see what it syncs to.';
     else if (eff === 'camera') {
       const ln = refLane();
-      const who = ln ? ln.label : ((S.settings.reference || {}).roll || 'the camera');
-      text = `Everything syncs to ${who}’s onboard mic` + (m === 'camera' && chosen ? ' (your choice).' : '.');
+      const refSet = S.settings.reference || {};
+      const who = ln ? ln.label : (refSet.roll || 'the camera');
+      text = refSet.listen === false
+        ? `Everything syncs to ${who} ch ${(refSet.channel | 0) + 1} (your choice).`
+        : `Everything syncs to ${who}’s onboard mic` + (m === 'camera' && chosen ? ' (your choice).' : '.');
     } else {
       const roles = new Set(dayClips().filter((c) => c.kind === 'audio' && c.include).flatMap((c) => c.roles || []));
       const ref = roles.has('boom') ? 'the boom' : roles.has('plant') ? 'the plant mic' : 'the main lav';
@@ -1373,27 +1377,29 @@
     const rl = eff === 'camera' ? refLane() : null;
     const laneClips = rl ? dayClips().filter((c) => rl.rolls.includes(c.roll) && c.has_audio) : [];
     const nch = laneClips.length ? Math.max(...laneClips.map((c) => c.channels || 0)) : 0;
-    let chHtml = '';
-    if (nch > 1) {
+    // It sits in the panel, not behind Change…: picking the alignment track is setup, and leaving it to be
+    // discovered means the app decides it silently and you read about it in the log afterwards. Shown with
+    // the app's own choice already ticked, so accepting it costs nothing and changing it costs one click.
+    $('chanPick').hidden = !(canChange && nch > 1);
+    if (canChange && nch > 1) {
       const ref = S.settings.reference || {};
       const picked = ref.listen === false ? (ref.channel | 0) : null;
       const nameOf = (i) => {
         const c = laneClips.find((x) => x.track_names && x.track_names[i]);
         return c ? c.track_names[i] : '';
       };
-      chHtml = '<span class="chlabel">Channel on that camera</span><div class="chrow">'
+      $('chanPick').innerHTML = '<span class="chlabel">Align to which channel on that camera</span><div class="chrow">'
         + Array.from({ length: nch }, (_, i) => `<button role="radio" data-ch="${i}" aria-checked="${String(picked === i)}"><b>Ch ${i + 1}</b>${nameOf(i) ? `<span>${esc(nameOf(i))}</span>` : ''}</button>`).join('')
-        + `<button role="radio" data-ch="auto" class="auto" aria-checked="${String(picked === null)}">Listen for it</button></div>`;
+        + `<button role="radio" data-ch="auto" class="auto" aria-checked="${String(picked === null)}">Let it listen</button></div>`;
     }
     $('syncChooser').innerHTML = opts.map((o) => `<button role="radio" data-sync="${esc(o.key)}" aria-checked="${String(o.key === cur)}"><b>${esc(o.label)}</b>${o.sub ? `<span>${esc(o.sub)}</span>` : ''}</button>`).join('')
-      + (m !== 'auto' ? '<button data-sync="auto" class="auto">Let Prep Station pick</button>' : '')
-      + chHtml;
+      + (m !== 'auto' ? '<button data-sync="auto" class="auto">Let Prep Station pick</button>' : '');
     $('syncChooser').querySelectorAll('[data-sync]').forEach((b) => b.addEventListener('click', async () => {
       $('syncChooser').hidden = true;
       applyState(await call('set_sync_to', b.dataset.sync));
     }));
     // the chooser stays open on a channel click, so you can see which one took
-    $('syncChooser').querySelectorAll('[data-ch]').forEach((b) => b.addEventListener('click', async () => {
+    $('chanPick').querySelectorAll('[data-ch]').forEach((b) => b.addEventListener('click', async () => {
       applyState(await call('set_sync_channel', b.dataset.ch));
     }));
     // what the listening found (after a sync)
