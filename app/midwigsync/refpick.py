@@ -5,7 +5,11 @@ across the day (envelope correlation, searching ±1 s so small timecode errors d
   - silent channels and LTC (timecode) channels are skipped;
   - a channel that is really the mixer's feed (matches the recorder's mix almost exactly, at no delay) is not an
     onboard mic, so it's skipped too: aligning to a mix is never right;
-  - of the rest, the channel that matches the mics best wins (ties go to the lower channel: ch 1 before 3/4).
+  - of the rest, the LOWEST channel wins: the XLR inputs come first on every pro camera, and that is where a
+    real mic is plugged in. The match score rules channels out; it does not rank the ones left, because it
+    measures how much a channel resembles the recorder's room sound, which a shotgun aimed at one subject
+    does LESS of than the camera's own omni mics. A higher channel only takes it when the lower one is far
+    worse (CH_FAR_WORSE), meaning an input that is dead without being quite silent enough to drop.
 The camera is the one that covers the most of the recorded sound, weighted by how well its best channel matches.
 """
 import os
@@ -18,6 +22,7 @@ from .wavesync import ENV_RATE, EnvelopeBuilder, feature, HOP
 SR = TC.SR
 FEED_CORR = 0.70       # this much of a camera channel rebuilt from the recorder's tracks = it's a feed, not a mic
 SILENT_DB = -60.0
+CH_FAR_WORSE = 0.25    # a lower channel gives up the reference only when it is this much worse than the best
 
 
 _WAIT = [None]        # set by pick_camera_reference: called as (clip name, seconds) while a read is taking long
@@ -266,7 +271,12 @@ def pick_camera_reference(project, log=print, cancel=None, max_clips=6, seconds=
         if not mics:
             continue
         top = max(r['corr'] for r in mics)
-        best = min((r for r in mics if r['corr'] >= top - 0.03), key=lambda r: r['ch'])   # near-tie: lower channel
+        # Silent channels and a mixer feed are already out of `mics`, so the score has done its job. What is
+        # left is ranked by channel number, not by score: an omni internal mic takes in diffuse room noise
+        # that resembles several scattered lavs, while a shotgun aimed at one subject is cleaner and scores
+        # LOWER for it. (FX6, 2026-11-13: shotgun on ch1 0.52, the camera's own mics on ch3/4 0.56 — the
+        # internal mic won the reference by 0.01.) Ranking by score quietly prefers the worse microphone.
+        best = min((r for r in mics if r['corr'] >= top - CH_FAR_WORSE), key=lambda r: r['ch'])
         results.append(dict(roll=rep(roll), ch=best['ch'], corr=best['corr'], cover=cover(rolls[roll]), rows=rows))
         log(f"  {rep(roll)}{' (+%d cards)' % (len({c['roll'] for c in rolls[roll]}) - 1) if len({c['roll'] for c in rolls[roll]}) > 1 else ''}: " + ', '.join(f"ch{r['ch'] + 1} {r['what']} {r['corr']:.2f}" + (f" (feed {r['feed']:.2f})" if r['what'] == 'mixer feed' else '')
                                        for r in rows))

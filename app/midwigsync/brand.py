@@ -3,7 +3,7 @@ output folders don't carry the name, so renaming never changes what you deliver.
 import os
 
 APP_NAME = 'Prep Station'
-APP_VERSION = '2.5.28'
+APP_VERSION = '2.5.29'
 BUNDLE_ID = 'com.midwigproductions.prepstation'
 
 OUT_SUFFIX = '_SYNCED'          # <job>_SYNCED next to the sound folders
