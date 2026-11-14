@@ -161,13 +161,15 @@
     if (f.has('false_record')) return { t: c.include ? 'False record (short, no timecode), used by you' : `False record: ${c.kind === 'audio' ? 'the recorder' : 'the camera'} rolled for ${Math.max(1, Math.round(c.length / SR))} s before its timecode was set. Left out, not deleted.`, k: '' };
     if (f.has('short_silent')) return { t: 'Short accidental clip, left out', k: '' };
     if (f.has('false_take')) return { t: c.include ? 'False take (recorder marked it), added back by you' : 'False take (recorder marked it), left out', k: '' };
-    if (f.has('sync_failed')) return { t: 'Couldn’t be placed by waveform, so it’s left out. Check it by hand.', k: 'bad' };
+    if (f.has('sync_failed')) return c.orig_start != null
+      ? { t: 'Kept the timecode the camera recorded. The waveform couldn’t confirm it — often because nothing else was rolling then. It stays where its timecode puts it.', k: 'fix' }
+      : { t: 'Couldn’t be placed by waveform, so it’s left out. Check it by hand.', k: 'bad' };
     if (f.has('sample_rate')) return { t: 'Not 48 kHz, left out of alignment and polywav', k: 'bad' };
-    if (f.has('sync_clock')) return { t: 'No timecode and its sound didn’t match anything: placed at the time of day the camera’s own clock recorded. Approximate; nudge it or type a timecode if it matters.', k: 'fix' };
-    if (f.has('sync_found')) return { t: `No timecode, placed by waveform (match ${s.score ?? '?'} against ${s.against || '?'})`, k: 'fix' };
+    if (f.has('sync_clock')) return { t: 'No timecode and its sound didn’t match anything: placed at the time of day the camera’s own clock recorded. Approximate; nudge it or type a timecode if it matters.', k: '' };
+    if (f.has('sync_found')) return { t: `No timecode, placed by waveform (match ${s.score ?? '?'} against ${s.against || '?'})`, k: '' };
     if (f.has('sync_corrected')) {
       const sec = (c.start - (c.orig_start ?? c.start)) / SR;
-      return { t: `Timecode was off by ${sec > 0 ? '+' : '−'}${Math.abs(sec).toFixed(3)} s, fixed by waveform`, k: 'fix', old: c.orig_tc };
+      return { t: `Timecode was off by ${sec > 0 ? '+' : '−'}${Math.abs(sec).toFixed(3)} s, fixed by waveform`, k: '', old: c.orig_tc };
     }
     if (f.has('no_tc')) return { t: 'No timecode. Sync places it by waveform.', k: 'fix' };
     if (f.has('zero_tc')) return { t: 'Timecode starts at 00:00:00:00, probably a missed jam. Sync checks it.', k: 'fix' };
@@ -360,7 +362,9 @@
           const nw = ctx.measureText(note).width;
           const st = note ? fitText(sub, subMax - nw - 10) : fitText(sub, subMax);
           if (st) ctx.fillText(st, x0l, y + rh / 2 + 7);
-          if (note) { ctx.fillStyle = COL.fix; ctx.fillText(note, x0l + (st ? ctx.measureText(st).width + 8 : 0), y + rh / 2 + 7); }
+          // amber only while those clips still have nowhere to sit; once they are placed by their own clock
+          // the note is just saying how, so it reads as quietly as the camera's name beside it
+          if (note) { ctx.fillStyle = byClock ? COL.muted : COL.fix; ctx.fillText(note, x0l + (st ? ctx.measureText(st).width + 8 : 0), y + rh / 2 + 7); }
         } else ctx.fillText(fitText(sub, subMax), x0l, y + rh / 2 + 7);
       } else {
         ctx.fillText(name, x0l, y + rh / 2 - 1);
@@ -839,16 +843,19 @@
     // timecode could not be confirmed, not that the clip is unplaced (saying "Not placed" next to a Start
     // of 19:11:02:02 on the same row is how this was read wrong)
     if (f.has('sync_failed')) out.push(c.orig_start != null ? ['fix', 'Not confirmed'] : ['bad', 'Not placed']);
+    // Amber means something is still unresolved. A clip that was corrected, matched or clock-placed ended
+    // up exactly where it belongs, so it reads in plain grey: a day of B-roll shot while the recorder was
+    // off is not a day of warnings.
     if (f.has('sync_manual')) out.push(['man', c.manual && c.manual.how === 'waveform' ? 'Picked by you' : 'Set by you']);
-    else if (f.has('sync_corrected')) out.push(['fix', `Moved ${signedSec((c.start - c.orig_start) / SR)}`]);
-    else if (f.has('sync_clock')) out.push(['fix', 'By clock · approx.']);
-    else if (f.has('sync_found')) out.push(['fix', 'Placed by waveform']);
+    else if (f.has('sync_corrected')) out.push(['', `Moved ${signedSec((c.start - c.orig_start) / SR)}`]);
+    else if (f.has('sync_clock')) out.push(['', 'By clock · approx.']);
+    else if (f.has('sync_found')) out.push(['', 'Placed by waveform']);
     else if (f.has('no_tc') && !f.has('false_record') && !(c.start == null && c.approx_start != null)) out.push(['fix', 'No timecode']);
     if (f.has('zero_tc') && !moved(c)) out.push(['fix', 'TC 00:00']);
     if (f.has('tc_far') && !moved(c)) out.push(['fix', 'TC far off']);
     if (f.has('tc_overlap') && !moved(c)) out.push(['fix', 'TC jump']);
     if (f.has('duplicate')) out.push(['', 'Duplicate']);
-    if (c.start == null && c.approx_start != null) out.push(['fix', 'Placed by sound at sync']);
+    if (c.start == null && c.approx_start != null) out.push(['', 'Placed by sound at sync']);
     if (f.has('incomplete')) out.push(['warn', 'End missing']);
     if (f.has('false_record')) out.push(['', 'False record']);
     else if (f.has('short_silent')) out.push(['', 'Accidental, left out']);
