@@ -38,7 +38,7 @@ def walk():
 before = walk()
 print(f'{len(before)} original files fingerprinted')
 runs = [['run_pipeline.py'], ['run_pipeline.py', {'AAP2': '1'}], ['run_extras.py'], ['run_mixer_day.py'], ['run_two_days.py'], ['test_guard.py'],
-        ['test_framerate.py'], ['test_slowmo.py'], ['test_days.py'], ['test_ignore_renders.py'], ['test_false_records.py'], ['test_iphone_day.py'], ['test_rawtools.py'], ['test_wander_rate.py'], ['test_notc_view.py'], ['test_notc_click.py'], ['test_clock_place.py'], ['test_clock_sources.py'], ['test_incomplete.py'], ['test_click_clip.py'], ['test_play_race.py'], ['test_step_switches.py'], ['test_refpick.py'], ['test_camera_copy.py'], ['test_transcript.py'],
+        ['test_framerate.py'], ['test_slowmo.py'], ['test_days.py'], ['test_ignore_renders.py'], ['test_false_records.py'], ['test_iphone_day.py'], ['test_rawtools.py'], ['test_wander_rate.py'], ['test_notc_view.py'], ['test_notc_click.py'], ['test_clock_place.py'], ['test_clock_sources.py'], ['test_tc_far.py'], ['test_incomplete.py'], ['test_click_clip.py'], ['test_play_race.py'], ['test_step_switches.py'], ['test_refpick.py'], ['test_camera_copy.py'], ['test_transcript.py'],
         ['test_review.py'], ['test_canon_raw.py'], ['test_window_keys.py'], ['test_aap_panel.py'],
         ['test_aap2_names.py'], ['test_layouts.py'], ['test_consensus.py'], ['shot_ui.py']]
 for r in runs:

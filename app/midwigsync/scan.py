@@ -1,4 +1,5 @@
 """Turn dropped files into clips grouped by roll (camera card / recorder track), with flags."""
+import bisect
 import datetime as dt
 import os
 import re
@@ -15,6 +16,28 @@ from .bwf import WavInfo
 ZAX_TOKEN = re.compile(r'_(\d{1,2}[A-Za-z][A-Za-z0-9]*)_\d{2,4}$')
 GOPRO = re.compile(r'^(?:(G[HXL])(\d{2})(\d{4})|GOPR(\d{4})|GP(\d{2})(\d{4}))\.(mp4|MP4)$')
 from .brand import CONVERT_DIR  # noqa: E402
+
+
+# How far a clip's timecode has to sit from EVERY other timecode of the day before it counts as off on its
+# own. This is a nearest-neighbour test, not distance from the day's middle: a long day whose clips bunch at
+# one end leaves its own tail hours from the middle while each clip sits minutes from the one before it.
+# (20261110 ran 07:48-19:13 and its last clip, 14 minutes after the one before, was called hours out.)
+TC_ALONE_S = 8 * 3600
+
+
+def _tc_gap(starts, s):
+    """Samples from `s` to the nearest OTHER timecode in `starts` (sorted, and holding s itself). 0 when
+    another clip shares the timecode, and 0 when s is the day's only one: a timecode with nothing to be
+    compared against is not evidence that it is wrong, so it is never the one flagged."""
+    i = bisect.bisect_left(starts, s)
+    if i + 1 < len(starts) and starts[i + 1] == s:
+        return 0                         # another clip at the very same timecode
+    near = []
+    if i > 0:
+        near.append(s - starts[i - 1])
+    if i + 1 < len(starts):
+        near.append(starts[i + 1] - s)
+    return min(near) if near else 0
 
 
 def gopro_chapter(name):
@@ -729,13 +752,13 @@ class Project:
                 c['start'] = c['manual']['start']
             if c['kind'] == 'audio' and not c.get('fps'):
                 c['fps_assumed'] = True
-        med_by_day = {}
+        # Every timecode of the day, in order, to measure how alone a clip's timecode is (see _tc_gap).
+        starts_by_day = {}
         for d in {c.get('day') for c in self.clips}:
-            st = [c['orig_start'] for c in self.clips if c.get('day') == d and c['orig_start'] is not None
-                  and c['orig_start'] > TC.SR]
-            med_by_day[d] = float(np.median(st)) if st else None
+            starts_by_day[d] = sorted(c['orig_start'] for c in self.clips if c.get('day') == d
+                                      and c['orig_start'] is not None and c['orig_start'] > TC.SR)
         main_ub = {}
-        for d in med_by_day:
+        for d in starts_by_day:
             ub = Counter(c.get('ubits') for c in self.clips if c.get('day') == d and c['kind'] == 'audio' and c.get('ubits'))
             main_ub[d] = ub.most_common(1)[0][0] if ub else None
         for c in self.clips:
@@ -744,7 +767,7 @@ class Project:
                 f.append('no_tc')
             elif c['orig_start'] < TC.SR:
                 f.append('zero_tc')
-            elif med_by_day.get(c.get('day')) is not None and abs(c['orig_start'] - med_by_day[c.get('day')]) > 8 * 3600 * TC.SR:
+            elif _tc_gap(starts_by_day.get(c.get('day')) or [], c['orig_start']) > TC_ALONE_S * TC.SR:
                 f.append('tc_far')
             if c['kind'] == 'audio' and c['sr'] != TC.SR:
                 f.append('sample_rate')
