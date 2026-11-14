@@ -191,6 +191,10 @@ select {
 .chooser button[aria-checked="true"]::before { content: '✓'; font-size: 12px; }
 .chooser button.auto { background: none; color: var(--muted); border-style: dashed; }
 .chooser button:hover { border-color: var(--muted); }
+/* the camera-channel picker inside the Sync-to chooser: labels are short, so they sit in a row */
+.chooser .chlabel { color: var(--muted); font-size: 12px; margin: 4px 0 -2px; }
+.chooser .chrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.chooser .chrow button { padding: 6px 10px; }
 .path {
   width: 100%; text-align: left; background: var(--well); border: 1px solid var(--line); border-radius: var(--r);
   padding: 8px 10px; cursor: pointer; font-size: 13px; color: var(--paper); direction: rtl; overflow: hidden;

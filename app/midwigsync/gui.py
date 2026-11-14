@@ -761,6 +761,22 @@ class Api:
             self.settings['reference'] = dict(roll=roll, channel=int(channel), auto=False)
         return self._state()
 
+    def set_sync_channel(self, channel):
+        """Which channel of the chosen camera to align to. A number means the run uses that channel as given;
+        'auto' puts it back to listening across the channels for the onboard mic."""
+        return self._edit('the camera channel to align to', lambda: self._set_sync_channel_raw(channel))
+
+    def _set_sync_channel_raw(self, channel):
+        r = dict(self.settings.get('reference') or self.p.default_reference() or {})
+        if not r.get('roll'):
+            return self._state()
+        if channel in (None, '', 'auto'):
+            self.settings['reference'] = dict(r, auto=False, listen=True)
+        else:
+            self.settings['mode'] = 'camera'
+            self.settings['reference'] = dict(r, channel=int(channel), auto=False, listen=False)
+        return self._state()
+
     def set_include(self, cid, include):
         return self._edit(f"{'using' if include else 'leaving out'} {self._cname(cid)}", lambda: self._set_include_raw(cid, include))
 
